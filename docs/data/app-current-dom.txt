@@ -1,0 +1,154 @@
+- banner:
+  - generic: 
+  - generic: 工资系统a
+  - generic: 
+  - link "一体化":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d1363b4b3cd60c8a8cc89b?from=insite
+    - generic "一体化"
+  - link "预算":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f630e/68d1363b4b3cd60c8a8cc89e?from=insite
+    - generic "预算"
+  - link "工资年报":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f630c/68d1363b4b3cd60c8a8cc8a3?from=insite
+    - generic "工资年报"
+  - link "乡镇补贴":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f630d/68d1363b4b3cd60c8a8cc8a0?from=insite
+    - generic "乡镇补贴"
+  - link "新房补核定":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f630f/68d1363b4b3cd60c8a8cc89a?from=insite
+    - generic "新房补核定"
+  - generic: 
+  - link "":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/workflow
+    - generic: 
+  - link "":
+    - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/role
+    - generic: 
+  - link " 工作台":
+    - /url: /dashboard
+    - generic: 
+    - generic: 工作台
+  - generic: 
+  - textbox "搜索应用名称"
+  - generic: 
+  - generic: 动态
+  - generic: 
+  - generic: 任务
+  - generic: 
+  - generic: 日程
+  - generic: 
+  - generic: 文件
+  - generic: 全部展开
+  - generic: 无搜索结果
+- link "一体化在职":
+  - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d1363b4b3cd60c8a8cc89b?flag=1777542127749
+  - generic "一体化在职"
+- text: 
+- link "一体化退休":
+  - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d1363b4b3cd60c8a8cc89d
+  - generic "一体化退休"
+- text: 
+- link "一体化其他":
+  - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d38e10a70778463f3eb9a8
+  - generic "一体化其他"
+- text: 
+- generic: 
+- generic: 新建
+- generic: 
+- generic: 
+- generic "一体化在职"
+- generic: 
+- generic: 
+- text: 
+- generic: 
+- generic: 
+- generic: 
+- generic: 
+- generic: 
+- generic: 草稿箱
+- generic: 
+- text: 记录
+- generic: 
+- generic: 
+- link "全部":
+  - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d1363b4b3cd60c8a8cc89b/68d1363b4b3cd60c8a8cc8ba
+  - generic: 全部
+- generic: 
+- generic: 
+- generic: 
+- generic: 
+- generic: 共321行，1/7页
+- generic: 
+- generic: 
+- generic: 
+- generic "单位编码"
+- generic "单位名称"
+- generic: "1"
+- generic: "2"
+- generic: "3"
+- generic: "4"
+- generic: "5"
+- generic: "6"
+- generic: "7"
+- generic: "8"
+- generic: "9"
+- generic: "10"
+- generic: "11"
+- generic: "12"
+- generic: "13"
+- generic: "14"
+- generic: "15"
+- generic: "16"
+- generic: "17"
+- generic: "18"
+- generic: "19"
+- generic: "20"
+- generic: "21"
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: 019117  
+- generic: 沭阳如东实验学校  
+- generic: =
+- generic: 
+- generic: 消息
+- generic: 
+- generic: 搜索
+- generic:    

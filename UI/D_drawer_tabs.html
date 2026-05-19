@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>教职工档案 · 默认全宽 · 点击后右侧详情 + 标签页 (方向D)</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+/* ============ 列表(沿用 B 的样式) ============ */
+.tbl tbody tr { cursor: pointer; }
+.tbl tbody tr.active td { background: var(--primary-soft); }
+mark { background: #fef0c7; color: inherit; padding: 0 1px; border-radius: 2px; }
+
+/* ============ 右侧固定详情区：默认全宽，点击后左右分栏 ============ */
+.split-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin: 14px 24px 24px;
+  align-items: start;
+}
+.split-layout.detail-open {
+  grid-template-columns: minmax(0, 1fr) minmax(520px, 1fr); /* 左 50% / 右 50%，右侧给足最小宽度 */
+}
+.split-layout .table-card {
+  margin: 0;
+  min-width: 0;
+  overflow: auto;
+}
+.split-layout.detail-open .table-card {
+  max-height: calc(100vh - 170px);
+}
+.drawer-mask { display: none !important; }
+.drawer {
+  display: none;
+  position: sticky;
+  top: 12px;
+  width: auto;
+  max-width: none;
+  height: calc(100vh - 170px);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.drawer.open { display: flex; }
+.drawer.empty { display: none; }
+.drawer.empty .drawer-toolbar { display: none; }
+.empty-detail {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  color: var(--text-3);
+  font-size: 13px;
+  text-align: center;
+}
+.empty-detail strong {
+  display: block;
+  color: var(--text-2);
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+@media (max-width: 1180px) {
+  .split-layout { grid-template-columns: 1fr; }
+  .split-layout .table-card { max-height: none; }
+  .drawer { position: static; height: auto; min-height: 360px; }
+}
+
+/* 顶部工具条 */
+.drawer-toolbar {
+  display: flex; align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  gap: 8px;
+  flex-shrink: 0;
+}
+.drawer-toolbar .pos { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); }
+.drawer-toolbar .spacer { flex: 1; }
+.btn-sm {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 9px; font-size: 11.5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--gray-text);
+  cursor: pointer; font: inherit;
+}
+.btn-sm:hover { background: var(--gray-soft); }
+.btn-sm:disabled { color: var(--text-muted); cursor: not-allowed; opacity: 0.6; }
+.btn-sm.icon-only { padding: 0; width: 26px; justify-content: center; }
+
+/* 滚动区 */
+.drawer-scroll {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg);
+}
+.detail-shell {
+  background: var(--surface);
+  margin: 16px 18px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Hero 卡 */
+.hero-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 20px 22px 16px;
+  align-items: flex-start;
+}
+.hero-card .hero-main { flex: 1 1 280px; min-width: 0; display: flex; gap: 14px; align-items: flex-start; }
+.hero-card .hero-text { min-width: 0; flex: 1; }
+.hero-card .avatar-xl {
+  width: 56px; height: 56px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  display: grid; place-items: center;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+.hero-card .person-name {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+  display: flex; align-items: baseline; gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.hero-card .person-name .nm { white-space: nowrap; }
+.hero-card .person-name .pos-job { font-size: 13px; color: var(--text-2); font-weight: 500; }
+.hero-card .id-line {
+  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  margin-top: 5px;
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap;
+}
+.hero-card .id-line .copyable {
+  cursor: pointer;
+  border-bottom: 1px dashed var(--border-strong);
+  padding-bottom: 1px;
+  transition: color 0.12s, border-color 0.12s;
+}
+.hero-card .id-line .copyable:hover { color: var(--primary); border-bottom-color: var(--primary); }
+.hero-card .id-line .sep { color: var(--text-muted); }
+.hero-card .tag-row { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.hero-card .quick-stats {
+  display: flex; gap: 22px;
+  text-align: right;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+@media (max-width: 720px) {
+  .hero-card .quick-stats { border-left: 0; padding-left: 0; padding-top: 10px; border-top: 1px solid var(--border); width: 100%; text-align: left; }
+  .hero-card .qs { text-align: left; }
+}
+.hero-card .qs { display: flex; flex-direction: column; gap: 2px; min-width: 64px; }
+.hero-card .qs .qk { font-size: 10.5px; color: var(--text-3); letter-spacing: 0.04em; }
+.hero-card .qs .qv { font-size: 14px; font-weight: 600; color: var(--text); }
+.hero-card .qs .qv.mono { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+
+/* Tabs */
+.tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0 14px;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.tab {
+  position: relative;
+  padding: 10px 14px 11px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: color 0.12s;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+.tab .num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--gray-soft);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.tab.active .num { background: var(--primary-soft); color: var(--primary); }
+
+.tab-pane { display: none; padding: 0; }
+.tab-pane.active { display: block; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px; left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--text);
+  color: #fff;
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.18s;
+  z-index: 200;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Print */
+@media print {
+  .app-bar, .toolbar, .table-card, .notice, .drawer-mask, .drawer-toolbar, .tab-bar { display: none !important; }
+  .drawer { position: static !important; width: 100% !important; max-width: none !important; box-shadow: none !important; border: 0 !important; }
+  .drawer-scroll { overflow: visible !important; }
+  .detail-shell { margin: 0; border: 0; }
+  .tab-pane { display: block !important; padding: 16px 0 !important; border-top: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+<header class="app-bar">
+  <div class="brand">
+    <div class="logo">教</div>
+    <div class="title-block">
+      <h1>教职工档案管理</h1>
+      <div class="crumb">人事 / 在编教职工 / 列表</div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="meta">v 2.4 · 仅限校内使用</div>
+</header>
+
+<div class="toolbar">
+  <div class="field-group">
+    <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></span>
+    <input id="q" class="search-input" placeholder="搜索姓名 / 身份证号 / 职称 / 专业 / 履历">
+  </div>
+  <div class="field-group">
+    <span class="lbl">性别</span>
+    <select id="sex"><option value="">全部</option><option>男</option><option>女</option></select>
+  </div>
+  <div class="field-group">
+    <span class="lbl">状态</span>
+    <select id="status"><option value="">全部</option><option value="是">在岗</option><option value="否">不在岗</option></select>
+  </div>
+  <div class="field-group">
+    <span class="lbl">职称</span>
+    <select id="title"><option value="">全部</option></select>
+  </div>
+  <div class="spacer"></div>
+  <span class="count">共 <b id="cnt">0</b> 人</span>
+  <button class="btn" id="exportBtn">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+    导出 CSV
+  </button>
+</div>
+
+<div class="notice">
+  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+  <span>本页面包含身份证号、联系电话等个人信息,仅限校内或本机查阅,请勿发布至公网。</span>
+</div>
+
+<div class="split-layout" id="splitLayout">
+<div class="table-card">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th style="width:44px">#</th>
+        <th>姓名</th>
+        <th>身份证号码</th>
+        <th style="width:50px">性别</th>
+        <th>全日制学历</th>
+        <th>最高学历</th>
+        <th>职称</th>
+        <th>岗位职务</th>
+        <th>状态</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" class="empty" style="display:none">没有匹配的记录</div>
+</div>
+
+<!-- 右侧详情区 -->
+<div class="drawer empty" id="drawer">
+  <div class="drawer-toolbar">
+    <button class="btn-sm" id="prevBtn" title="上一位 (←)">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"></path></svg>
+      上一位
+    </button>
+    <button class="btn-sm" id="nextBtn" title="下一位 (→)">
+      下一位
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"></path></svg>
+    </button>
+    <span class="pos" id="pos"></span>
+    <div class="spacer"></div>
+    <button class="btn-sm" id="copyAllBtn" title="复制摘要">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      复制摘要
+    </button>
+    <button class="btn-sm" onclick="window.print()" title="打印">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="14" width="12" height="8"></rect><path d="M6 9V2h12v7"></path></svg>
+      打印
+    </button>
+    <button class="btn-sm icon-only" id="closeBtn" title="关闭 (Esc)">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+    </button>
+  </div>
+  <div class="drawer-scroll" id="drawerScroll"><div class="empty-detail"><div><strong>请选择左侧人员</strong>点击任意一行，详情会在右侧显示；继续点击其他行会直接切换，不需要先关闭。</div></div></div>
+</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="data.js"></script>
+<script src="helpers.js"></script>
+<script>
+const DATA = window.STAFF_DATA;
+let currentIdx = -1;
+let currentTab = 'basic';
+
+(function(){
+  const titles = [...new Set(DATA.map(r=>r.职称).filter(Boolean))].sort();
+  const sel = document.getElementById('title');
+  titles.forEach(t=>{ const o=document.createElement('option'); o.value=o.textContent=t; sel.appendChild(o); });
+})();
+
+function getFiltered(){
+  const q = document.getElementById('q').value;
+  const sex = document.getElementById('sex').value;
+  const status = document.getElementById('status').value;
+  const title = document.getElementById('title').value;
+  let rows = SH.filterRows(DATA, q, sex, status);
+  if(title) rows = rows.filter(r=>r.职称===title);
+  return rows;
+}
+
+/* ===== 列表(同 B) ===== */
+function rowHtml(r, q, isActive){
+  return `<tr class="${isActive?'active':''}" data-idx="${DATA.indexOf(r)}">
+    <td class="col-num mono">${SH.esc(r.序号)}</td>
+    <td><span class="name-cell"><span class="avatar">${SH.esc(SH.initial(r.姓名||''))}</span><b>${SH.highlight(r.姓名,q)}</b></span></td>
+    <td class="col-id">${SH.highlight(r.身份证号码,q)}</td>
+    <td>${SH.esc(r.性别)}</td>
+    <td>${r.全日制学历?.学历?SH.eduTag(r.全日制学历):'<span class="muted">—</span>'}</td>
+    <td>${r.最高学历?.学历?SH.eduTag(r.最高学历):'<span class="muted">—</span>'}</td>
+    <td>${SH.titleTag(r.职称)}</td>
+    <td>${SH.esc(r.岗位职务||'—')}</td>
+    <td>${SH.statusTag(r)}</td>
+  </tr>`;
+}
+
+function renderList(){
+  const rows = getFiltered();
+  document.getElementById('cnt').textContent = rows.length;
+  const q = document.getElementById('q').value.trim();
+  document.getElementById('tbody').innerHTML = rows.map(r=>rowHtml(r,q,DATA.indexOf(r)===currentIdx)).join('');
+  document.getElementById('empty').style.display = rows.length?'none':'block';
+}
+
+/* ===== 详情:Hero + Tabs(同 C v2) ===== */
+function kv(label, val, mono, copyable){
+  if(val===null||val===undefined||val===''){
+    return `<div class="kv"><span class="k">${SH.esc(label)}</span><span class="v muted">—</span></div>`;
+  }
+  const cls = mono?' mono':'';
+  const cp = copyable?` data-copy="${SH.esc(val)}" style="cursor:pointer;border-bottom:1px dashed var(--border-strong);align-self:flex-start" title="点击复制"`:'';
+  return `<div class="kv"><span class="k">${SH.esc(label)}</span><span class="v${cls}"${cp}>${SH.esc(val)}</span></div>`;
+}
+
+function tabBasicHtml(r){
+  return `<div class="detail">
+    <div class="section">
+      <h3 class="section-title">基本信息</h3>
+      <div class="kv-grid">
+        ${kv('单位',r['单位全称'])}
+        ${kv('民族',r['民族'])}
+        ${kv('籍贯',(r['籍贯_条目']||SH.splitLines(r['籍贯'])).join(' / ')||'—')}
+        ${kv('政治面貌',r['政治面貌'])}
+        ${kv('入党时间',r['入党时间_显示'],true)}
+        ${kv('人员性质',r['人员性质'])}
+        ${kv('现住址',r['现住址'])}
+        ${kv('联系电话',r['联系电话'],true,true)}
+      </div>
+    </div>
+    <div class="section">
+      <h3 class="section-title">入编与岗位</h3>
+      <div class="kv-grid">
+        ${kv('本县入编时间',r['本县入编时间_显示'],true)}
+        ${kv('岗位职务',r['岗位职务'])}
+        ${kv('任命单位',r['任命单位'])}
+        ${kv('批复文号',r['批复文号'])}
+        ${kv('在现单位任现职时间',r['在现单位任现职时间_显示'],true)}
+        ${kv('是否在岗',r['是否在岗'])}
+        ${kv('岗位',r['岗位'])}
+        ${kv('总周课时数',r['总周课时数'])}
+        ${kv('是否任班主任',r['是否任班主任'])}
+      </div>
+    </div>
+    ${(r['不在岗原因']||r['不在岗起始时间']||r['现在何处'])?`<div class="section">
+      <h3 class="section-title">不在岗信息</h3>
+      <div class="kv-grid">
+        ${kv('不在岗原因',r['不在岗原因'])}
+        ${kv('不在岗起始时间',r['不在岗起始时间'])}
+        ${kv('现在何处',r['现在何处'])}
+      </div>
+    </div>`:''}
+    ${r['备注']?`<div class="section">
+      <h3 class="section-title">备注</h3>
+      <div style="font-size:12.5px;color:var(--text);white-space:pre-wrap">${SH.esc(r['备注'])}</div>
+    </div>`:''}
+  </div>`;
+}
+
+function eduCardLg(title, e){
+  return `<div class="edu-card"><h4>${SH.esc(title)}</h4>
+    <div class="row" style="grid-template-columns:80px 1fr;font-size:12.5px;gap:8px 12px">
+      <span class="k">学历</span><span class="v">${SH.esc(e?.学历||'—')}</span>
+      <span class="k">专业</span><span class="v">${SH.esc(e?.专业||'—')}</span>
+      <span class="k">毕业院校</span><span class="v">${SH.esc(e?.毕业院校||'—')}</span>
+      <span class="k">毕业时间</span><span class="v mono">${SH.esc(e?.毕业时间||'—')}</span>
+    </div></div>`;
+}
+function tabEduHtml(r){
+  return `<div class="detail">
+    <div class="section">
+      <h3 class="section-title">学历对比</h3>
+      <div class="edu-grid">
+        ${eduCardLg('全日制学历及专业',r.全日制学历)}
+        ${eduCardLg('最高学历及专业',r.最高学历)}
+      </div>
+    </div>
+    <div class="section">
+      <h3 class="section-title">职称信息</h3>
+      <div class="kv-grid">
+        ${kv('职称',r['职称'])}
+        ${kv('职称学科',r['职称学科'])}
+        ${kv('职称获得时间',r['职称获得时间_显示'],true)}
+      </div>
+    </div>
+  </div>`;
+}
+
+function tabQualHtml(r){
+  const a=SH.splitLines(r['教师资格学段']||''), b=SH.splitLines(r['教师资格学科']||''),
+        c=SH.splitLines(r['教师资格证书号码']||''), d=SH.splitLines(r['教师资格定期注册有效期起止时间']||'');
+  const n=Math.max(a.length,b.length,c.length,d.length);
+  return `<div class="detail"><div class="section">
+    <h3 class="section-title">教师资格</h3>
+    ${n? `<table class="qual-table"><thead><tr><th>学段</th><th>学科</th><th>证书号码</th><th>注册有效期</th></tr></thead><tbody>
+      ${Array.from({length:n}).map((_,i)=>`<tr><td>${SH.esc(a[i]||'—')}</td><td>${SH.esc(b[i]||'—')}</td><td class="mono">${SH.esc(c[i]||'—')}</td><td class="mono">${SH.esc(d[i]||'—')}</td></tr>`).join('')}
+    </tbody></table>` : '<div class="muted" style="font-size:12px">无教师资格记录</div>'}
+  </div></div>`;
+}
+
+function tabTeachHtml(r){
+  const items = r['任教条目'] || SH.splitLines(r['任教班级、学科、节数']);
+  return `<div class="detail"><div class="section">
+    <h3 class="section-title">本学期任教</h3>
+    ${items&&items.length
+      ? `<div class="line-list">${items.map(x=>`<div class="line-item mono">${SH.esc(x)}</div>`).join('')}</div>
+         <div style="margin-top:10px;display:flex;gap:18px;font-size:12px;color:var(--text-2)">
+           <span>总周课时:<b style="margin-left:4px;color:var(--text)">${SH.esc(r['总周课时数']||'—')}</b></span>
+           <span>班主任:<b style="margin-left:4px;color:var(--text)">${SH.esc(r['是否任班主任']||'—')}</b></span>
+         </div>`
+      : '<div class="muted" style="font-size:12px">无任教记录</div>'}
+  </div></div>`;
+}
+
+function tabCareerHtml(r){
+  const items = r['工作履历条目'] || SH.splitLines(r['工作履历']);
+  return `<div class="detail"><div class="section">
+    <h3 class="section-title">工作履历</h3>
+    ${items&&items.length
+      ? `<ul class="timeline">${items.map(x=>{
+          const m = String(x).match(/^(\d{4})(\d{2})?\s+(.*)$/);
+          if(m){ const t = m[2]?`${m[1]}-${m[2]}`:m[1]; return `<li><span class="when mono">${t}</span>${SH.esc(m[3])}</li>`; }
+          return `<li>${SH.esc(x)}</li>`;
+        }).join('')}</ul>`
+      : '<div class="muted" style="font-size:12px">—</div>'}
+  </div></div>`;
+}
+
+function tabAllHtml(r){
+  const fields = Object.keys(r).filter(k=>typeof r[k]!=='object' && !k.endsWith('_显示') && !k.endsWith('_条目'));
+  return `<div class="detail"><div class="section">
+    <h3 class="section-title">完整字段(原始)</h3>
+    <div class="kv-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+      ${fields.map(f=>kv(f, r[f] ? String(r[f]).replace(/\n/g,' / ') : '')).join('')}
+    </div>
+  </div></div>`;
+}
+
+const TABS = [
+  { id:'basic', label:'基本信息', render:tabBasicHtml },
+  { id:'edu', label:'学历职称', render:tabEduHtml },
+  { id:'qual', label:'教师资格', render:tabQualHtml },
+  { id:'teach', label:'任教', render:tabTeachHtml },
+  { id:'career', label:'工作履历', render:tabCareerHtml },
+  { id:'all', label:'全部字段', render:tabAllHtml },
+];
+
+function buildDetail(r){
+  const tags = [];
+  if(r.最高学历?.学历) tags.push(`<span class="tag gray">${SH.esc(r.最高学历.学历)}</span>`);
+  if(r.职称) tags.push(SH.titleTag(r.职称));
+  if(r['是否在岗']) tags.push(SH.statusTag(r));
+  if(r['政治面貌']) tags.push(SH.partyTag(r['政治面貌']));
+
+  return `<div class="detail-shell">
+    <div class="hero-card">
+     <div class="hero-main">
+      <div class="avatar-xl">${SH.esc(SH.initial(r.姓名||''))}</div>
+      <div class="hero-text">
+        <h2 class="person-name"><span class="nm">${SH.esc(r.姓名||'')}</span> <span class="pos-job">${SH.esc(r['岗位职务']||'')}</span></h2>
+        <div class="id-line">
+          <span class="copyable" data-copy="${SH.esc(r['身份证号码']||'')}" title="点击复制">${SH.esc(r['身份证号码']||'—')}</span>
+          <span class="sep">·</span>
+          ${r['联系电话']?`<span class="copyable" data-copy="${SH.esc(r['联系电话'])}" title="点击复制">${SH.esc(r['联系电话'])}</span><span class="sep">·</span>`:''}
+          <span>${SH.esc(r['单位全称']||'')}</span>
+        </div>
+        <div class="tag-row">${tags.join('')}</div>
+      </div>
+     </div>
+      <div class="quick-stats">
+        <div class="qs"><span class="qk">最高学历</span><span class="qv">${SH.esc(r.最高学历?.学历||'—')}</span></div>
+        <div class="qs"><span class="qk">入编时间</span><span class="qv mono">${SH.esc(r['本县入编时间_显示']||'—')}</span></div>
+        <div class="qs"><span class="qk">周课时</span><span class="qv mono">${SH.esc(r['总周课时数']||'—')}</span></div>
+      </div>
+    </div>
+
+    <div class="tab-bar" id="tabBar">
+      ${TABS.map((t,i)=>`<div class="tab ${t.id===currentTab?'active':''}" data-tab="${t.id}"><span>${SH.esc(t.label)}</span><span class="num">${i+1}</span></div>`).join('')}
+    </div>
+
+    ${TABS.map(t=>`<div class="tab-pane ${t.id===currentTab?'active':''}" data-pane="${t.id}">${t.render(r)}</div>`).join('')}
+  </div>`;
+}
+
+function openDrawer(idx, keepTab){
+  currentIdx = idx;
+  if(!keepTab) currentTab = 'basic';
+  const r = DATA[idx];
+  if(!r) return;
+  const scroll = document.getElementById('drawerScroll');
+  scroll.innerHTML = buildDetail(r);
+  scroll.scrollTop = 0;
+
+  document.getElementById('splitLayout').classList.add('detail-open');
+  document.getElementById('drawer').classList.remove('empty');
+  document.getElementById('drawer').classList.add('open');
+
+  const filtered = getFiltered();
+  const pos = filtered.indexOf(r);
+  document.getElementById('pos').textContent = pos>=0 ? `${pos+1} / ${filtered.length}` : '';
+  document.getElementById('prevBtn').disabled = pos<=0;
+  document.getElementById('nextBtn').disabled = pos<0 || pos>=filtered.length-1;
+
+  // Tab 切换
+  scroll.querySelector('#tabBar').addEventListener('click', e=>{
+    const t = e.target.closest('[data-tab]');
+    if(!t) return;
+    switchTab(t.dataset.tab);
+  });
+  // 复制
+  scroll.querySelectorAll('[data-copy]').forEach(el=>{
+    el.addEventListener('click', e=>{
+      e.stopPropagation();
+      copy(el.dataset.copy, '已复制:'+el.dataset.copy.slice(0,20));
+    });
+  });
+
+  renderList();
+}
+
+function switchTab(id){
+  currentTab = id;
+  document.querySelectorAll('[data-tab]').forEach(t=>t.classList.toggle('active', t.dataset.tab===id));
+  document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('active', p.dataset.pane===id));
+}
+
+function closeDrawer(){
+  currentIdx = -1;
+  currentTab = 'basic';
+  const drawer = document.getElementById('drawer');
+  document.getElementById('splitLayout').classList.remove('detail-open');
+  drawer.classList.remove('open');
+  drawer.classList.add('empty');
+  document.getElementById('drawerScroll').innerHTML = '<div class="empty-detail"><div><strong>请选择左侧人员</strong>点击任意一行，详情会在右侧显示；继续点击其他行会直接切换，不需要先关闭。</div></div>';
+  document.getElementById('pos').textContent = '';
+  renderList();
+}
+function navigate(delta){
+  const filtered = getFiltered();
+  const cur = DATA[currentIdx];
+  const pos = filtered.indexOf(cur);
+  const np = pos + delta;
+  if(np<0||np>=filtered.length) return;
+  openDrawer(DATA.indexOf(filtered[np]), true);
+}
+
+/* ===== Toast / Copy ===== */
+let toastTm;
+function toast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTm);
+  toastTm = setTimeout(()=>el.classList.remove('show'), 1600);
+}
+function copy(text, msg){
+  if(navigator.clipboard?.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast(msg)).catch(()=>fallback());
+  } else fallback();
+  function fallback(){
+    const ta = document.createElement('textarea'); ta.value = text;
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast(msg); } catch(e) {}
+    ta.remove();
+  }
+}
+
+/* ===== 事件 ===== */
+document.getElementById('tbody').addEventListener('click', e=>{
+  const tr = e.target.closest('tr[data-idx]');
+  if(!tr) return;
+  openDrawer(+tr.dataset.idx);
+});
+document.getElementById('closeBtn').addEventListener('click', closeDrawer);
+document.getElementById('prevBtn').addEventListener('click', ()=>navigate(-1));
+document.getElementById('nextBtn').addEventListener('click', ()=>navigate(1));
+document.getElementById('copyAllBtn').addEventListener('click', ()=>{
+  const r = DATA[currentIdx]; if(!r) return;
+  const summary = `${r.姓名} (${r['性别']}) · ${r['岗位职务']||''}\n身份证号:${r['身份证号码']||''}\n电话:${r['联系电话']||''}\n单位:${r['单位全称']||''}\n职称:${r['职称']||''} (${r['职称获得时间_显示']||''})\n最高学历:${r.最高学历?.学历||''} ${r.最高学历?.专业||''} (${r.最高学历?.毕业院校||''})\n入编:${r['本县入编时间_显示']||''}`;
+  copy(summary, '已复制摘要到剪贴板');
+});
+
+document.addEventListener('keydown', e=>{
+  if(currentIdx<0) return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
+  if(e.key==='Escape') closeDrawer();
+  else if(e.key==='ArrowLeft') navigate(-1);
+  else if(e.key==='ArrowRight') navigate(1);
+  else if(/^[1-6]$/.test(e.key)){ switchTab(TABS[+e.key-1].id); e.preventDefault(); }
+});
+
+['q','sex','status','title'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', renderList);
+  document.getElementById(id).addEventListener('change', renderList);
+});
+
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  SH.exportCSV(getFiltered(), '教职工档案_'+new Date().toISOString().slice(0,10)+'.csv');
+  toast('已导出 '+getFiltered().length+' 条记录');
+});
+
+renderList();
+</script>
+</body>
+</html>

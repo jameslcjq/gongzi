@@ -1,0 +1,7 @@
+- banner:
+  - text: 工资系统aAPI说明
+  - generic: 应用授权
+  - text: API V3
+  - generic: AI友好
+  - generic: API V2
+- iframe

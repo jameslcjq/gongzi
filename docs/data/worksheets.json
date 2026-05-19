@@ -1,0 +1,6915 @@
+[
+  {
+    "name": "一体化在职",
+    "worksheetId": "68d1363b4b3cd60c8a8cc89b",
+    "fieldCount": 50,
+    "fields": [
+      {
+        "fieldId": "6652db461e574cbbbc9ace00",
+        "name": "内设部门名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace01",
+        "name": "月份",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace02",
+        "name": "部门内序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace03",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace05",
+        "name": "岗位工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace06",
+        "name": "薪级工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace07",
+        "name": "岗位津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace08",
+        "name": "生活补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace09",
+        "name": "绩效工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace0a",
+        "name": "工作性津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace0b",
+        "name": "教（工）龄补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace0c",
+        "name": "特岗性津补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace0d",
+        "name": "交通费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace0e",
+        "name": "公车补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace0f",
+        "name": "住房补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace10",
+        "name": "基础绩效奖",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace11",
+        "name": "补发工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace12",
+        "name": "补扣工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace13",
+        "name": "其他一",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace14",
+        "name": "其他二",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace15",
+        "name": "其他三",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace16",
+        "name": "当月个人所得税",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace17",
+        "name": "公积金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace18",
+        "name": "养老保险缴费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace19",
+        "name": "职业年金缴费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace1a",
+        "name": "医疗保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace1b",
+        "name": "失业保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace1c",
+        "name": "支出一",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace1d",
+        "name": "支出二",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace1e",
+        "name": "支出三",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace1f",
+        "name": "代扣工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace20",
+        "name": "代扣合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace21",
+        "name": "实发合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace22",
+        "name": "备注一",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652db461e574cbbbc9ace23",
+        "name": "应发工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652de35677544ef3658518a",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "670e3b3c391f693e985a0cbf",
+        "name": "单位编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "670e3b3c391f693e985a0cc0",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81cfa8d1d42d0db2efed1",
+        "name": "工资类别编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81cfa8d1d42d0db2efed2",
+        "name": "工资类别名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81d9a8d1d42d0db2efedb",
+        "name": "业务年度",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "67a81e1c8d1d42d0db2efee5",
+        "name": "工资批次",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81e2d8d1d42d0db2efee9",
+        "name": "工资批次名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81e5d8d1d42d0db2efeed",
+        "name": "内设部门编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a8201e8d1d42d0db2eff6a",
+        "name": "备注二",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a8201e8d1d42d0db2eff6b",
+        "name": "备注三",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a820898d1d42d0db2eff71",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a820e88d1d42d0db2eff75",
+        "name": "支出一备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a820e88d1d42d0db2eff76",
+        "name": "支出二备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a820e88d1d42d0db2eff77",
+        "name": "支出三备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8ba",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "一体化退休",
+    "worksheetId": "68d1363b4b3cd60c8a8cc89d",
+    "fieldCount": 13,
+    "fields": [
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda0",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda1",
+        "name": "内设科室",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda2",
+        "name": "月份",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda3",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652ca5e677544ef36584ecf",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda5",
+        "name": "住房补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda6",
+        "name": "补发工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda7",
+        "name": "其他一",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda8",
+        "name": "应发工资小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda9",
+        "name": "代扣工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acdaa",
+        "name": "实发合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "670e3b02391f693e985a0cb8",
+        "name": "单位编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "670e3b02391f693e985a0cb9",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b8",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "一体化其他",
+    "worksheetId": "68d38e10a70778463f3eb9a8",
+    "fieldCount": 13,
+    "fields": [
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda0",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda1",
+        "name": "内设科室",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda2",
+        "name": "月份",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda3",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652ca5e677544ef36584ecf",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda5",
+        "name": "住房补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda6",
+        "name": "补发工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda7",
+        "name": "其他一",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda8",
+        "name": "应发工资小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acda9",
+        "name": "代扣工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652ca2a1e574cbbbc9acdaa",
+        "name": "实发合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "670e3b02391f693e985a0cb8",
+        "name": "单位编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "670e3b02391f693e985a0cb9",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d38e10a70778463f3eb9a9",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "局工资表",
+    "worksheetId": "68d1363b4b3cd60c8a8cc8a4",
+    "fieldCount": 26,
+    "fields": [
+      {
+        "fieldId": "638f3021ac2db6c2f25fcdd2",
+        "name": "序号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa1252ac2db6c2f2600fc4",
+        "name": "参加工作时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2dcfac2db6c2f25fcd6b",
+        "name": "身份证号",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f2dd8ac2db6c2f25fcd71",
+        "name": "银行卡号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f2df2ac2db6c2f25fcd75",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f2dfbac2db6c2f25fcd79",
+        "name": "岗位工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e05ac2db6c2f25fcd7d",
+        "name": "薪级工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e12ac2db6c2f25fcd82",
+        "name": "补发",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e29ac2db6c2f25fcd86",
+        "name": "小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e43ac2db6c2f25fcd8a",
+        "name": "教龄津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd90",
+        "name": "岗位津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd91",
+        "name": "生活补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd92",
+        "name": "保留补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd93",
+        "name": "绩效补发",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd94",
+        "name": "绩效小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd95",
+        "name": "农村教师补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd96",
+        "name": "住房补贴交通补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb1",
+        "name": "应发工资合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63be2dccac2db6c2f2600339",
+        "name": "养老保险",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb2",
+        "name": "职业年金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb3",
+        "name": "医保大病统筹",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb4",
+        "name": "失业保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb5",
+        "name": "住房公积金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb6",
+        "name": "个税",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2eeaac2db6c2f25fcdb7",
+        "name": "五险小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "638f2e50ac2db6c2f25fcd97",
+        "name": "实发工资合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8af",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "补发工资",
+    "worksheetId": "68d1363b4b3cd60c8a8cc896",
+    "fieldCount": 24,
+    "fields": [
+      {
+        "fieldId": "67a81bd68d1d42d0db2efebd",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23653",
+        "name": "月份",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23654",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23655",
+        "name": "工资类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23656",
+        "name": "业务年度",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23657",
+        "name": "岗位工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23658",
+        "name": "薪级工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23659",
+        "name": "岗位津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b2365a",
+        "name": "生活补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b2365b",
+        "name": "绩效工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b2365c",
+        "name": "工作性津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b2365d",
+        "name": "教（工）龄补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b2365e",
+        "name": "特岗性津补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b2365f",
+        "name": "交通费",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23660",
+        "name": "公车补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23661",
+        "name": "住房补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23662",
+        "name": "基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23663",
+        "name": "补发工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23664",
+        "name": "补扣工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23665",
+        "name": "其他一",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23666",
+        "name": "其他二",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23667",
+        "name": "其他三",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23668",
+        "name": "当月个人所得税",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67a81b99b60c15bf83b23669",
+        "name": "支出一",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8c0",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "预算在职",
+    "worksheetId": "68d1363b4b3cd60c8a8cc89e",
+    "fieldCount": 98,
+    "fields": [
+      {
+        "fieldId": "6652bae21e574cbbbc9acd1f",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bb99677544ef36584d66",
+        "name": "单位代码*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd21",
+        "name": "单位名称*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd22",
+        "name": "变动类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652c980677544ef36584e50",
+        "name": "人员序号*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd24",
+        "name": "姓名*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd25",
+        "name": "证件类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bb99677544ef36584d67",
+        "name": "证件号码*",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd27",
+        "name": "性别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd28",
+        "name": "民族*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd29",
+        "name": "人员状态*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bb99677544ef36584d68",
+        "name": "进入本单位时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd2c",
+        "name": "是否在编",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd2d",
+        "name": "人员身份*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd2e",
+        "name": "工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d38b59a70778463f3eb837",
+        "name": "工资薪级*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd30",
+        "name": "在职人员来源*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd31",
+        "name": "是否工资统发",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd32",
+        "name": "学历*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bb99677544ef36584d69",
+        "name": "出生日期*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bbc8677544ef36584d76",
+        "name": "参加工作时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd35",
+        "name": "工龄（年）*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd36",
+        "name": "在编类别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd37",
+        "name": "职务*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd38",
+        "name": "工资类别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd39",
+        "name": "事业人员岗位工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd3a",
+        "name": "岗位工资级别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd3b",
+        "name": "技术职称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd3c",
+        "name": "职称类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd3d",
+        "name": "国家特岗津贴1",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd3e",
+        "name": "国家特岗津贴2",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd3f",
+        "name": "技术等级代码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd40",
+        "name": "是否特殊岗位*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd41",
+        "name": "工资卡开户银行*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bbc8677544ef36584d77",
+        "name": "工资卡卡号*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd43",
+        "name": "是否教师*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd44",
+        "name": "是否党员",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd45",
+        "name": "财政实际供养形式",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd46",
+        "name": "人员经费保障方式*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd47",
+        "name": "岗位工资*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd48",
+        "name": "薪级工资*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd49",
+        "name": "试用期人员基本工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "66d9b68cbb35b4bd9f9f97a0",
+        "name": "国家特岗津贴1",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "66d9b68cbb35b4bd9f9f97a1",
+        "name": "国家特岗津贴2",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd4c",
+        "name": "政府特贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd4d",
+        "name": "基础性绩效工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd51",
+        "name": "基础绩效奖（教师奖励性补贴）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd4e",
+        "name": "奖励性绩效工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd4f",
+        "name": "临时性补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd50",
+        "name": "交通费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd52",
+        "name": "老职工提租补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd53",
+        "name": "新职工逐月补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd54",
+        "name": "教龄津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd55",
+        "name": "其他特岗津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd56",
+        "name": "其他津贴补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652dd7c677544ef36585090",
+        "name": "上年提租补贴月发放额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd58",
+        "name": "月合计（元）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd59",
+        "name": "养老保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd5a",
+        "name": "医疗保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd5b",
+        "name": "失业保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd5c",
+        "name": "工伤保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd5d",
+        "name": "其他保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd5e",
+        "name": "职业年金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd5f",
+        "name": "住房公积金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd60",
+        "name": "省部领导特费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd61",
+        "name": "缴纳儿童医疗费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd62",
+        "name": "独生子女奖励费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd63",
+        "name": "奖金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd64",
+        "name": "其他",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd65",
+        "name": "年合计（元）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd66",
+        "name": "国家规定工资津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd67",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd68",
+        "name": "财政生效年月",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d22e42936775031756ea48",
+        "name": "减少原因",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd69",
+        "name": "在职教职工类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd6a",
+        "name": "在职人员属性*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd6b",
+        "name": "隶属处（科）室",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd6c",
+        "name": "是否财政供养人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd6d",
+        "name": "岗位津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd6e",
+        "name": "地区津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd6f",
+        "name": "其余津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd70",
+        "name": "规范津贴补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd71",
+        "name": "改革性补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd72",
+        "name": "自行出台的其他补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd73",
+        "name": "A基本工资*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd74",
+        "name": "其他收入",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd75",
+        "name": "实际执行工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd76",
+        "name": "是否保民生及其他刚性支出人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d22d2a936775031756ea41",
+        "name": "是否参加养老保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd77",
+        "name": "是否参加医疗保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd78",
+        "name": "是否参加工伤保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd79",
+        "name": "基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd7a",
+        "name": "年度考核奖",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd7b",
+        "name": "年终一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652bae21e574cbbbc9acd7c",
+        "name": "立功受奖一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652e51e677544ef36585190",
+        "name": "AA参加工作时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "66ff69aaee63cdaab09221ef",
+        "name": "薪级",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d391eba70778463f3ebaa0",
+        "name": "核对情况",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b7",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "预算退休",
+    "worksheetId": "68d1363b4b3cd60c8a8cc89c",
+    "fieldCount": 80,
+    "fields": [
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdad",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652d889677544ef36585078",
+        "name": "单位代码*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdaf",
+        "name": "单位名称*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb0",
+        "name": "变动类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652d1d9677544ef36584faa",
+        "name": "人员序号*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb2",
+        "name": "姓名*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb3",
+        "name": "证件类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652d2f2677544ef36584fb0",
+        "name": "证件号码*",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb5",
+        "name": "性别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb6",
+        "name": "民族*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb7",
+        "name": "人员状态*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb8",
+        "name": "状态*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdb9",
+        "name": "进入本单位时间*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdba",
+        "name": "人员身份*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdbb",
+        "name": "工资级别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdbc",
+        "name": "工资薪级*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdbd",
+        "name": "是否工资统发*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdbe",
+        "name": "学历*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdbf",
+        "name": "出生日期",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc0",
+        "name": "参加工作时间*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc1",
+        "name": "退休时间*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc2",
+        "name": "工龄（年）*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc3",
+        "name": "职务*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc4",
+        "name": "提前退休人员",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc5",
+        "name": "养老金发放人员",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc6",
+        "name": "人员经费保障方式*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc8",
+        "name": "岗位工资级别*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc9",
+        "name": "是否特殊岗位*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdca",
+        "name": "工资卡开户银行*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652d357677544ef36584fb6",
+        "name": "工资卡卡号*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdc7",
+        "name": "减少原因",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdcc",
+        "name": "财政实际供养形式",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdcd",
+        "name": "离休费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdce",
+        "name": "退休费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdcf",
+        "name": "生活性补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd0",
+        "name": "护理费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd1",
+        "name": "交通费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd2",
+        "name": "福利费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd3",
+        "name": "高龄护工费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652d48d677544ef36584fbc",
+        "name": "提租补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd5",
+        "name": "其他补贴加基础绩效奖",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd6",
+        "name": "上年提租补贴月发放额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd7",
+        "name": "月合计（元）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd8",
+        "name": "生活补助",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdd9",
+        "name": "特需费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdda",
+        "name": "取暖费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acddb",
+        "name": "健康休养费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acddc",
+        "name": "退休一次性补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acddd",
+        "name": "小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdde",
+        "name": "年合计（元）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acddf",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde0",
+        "name": "财政生效年月*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde1",
+        "name": "国家规定工资津补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde2",
+        "name": "在职教职工类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde3",
+        "name": "在职人员属性",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde4",
+        "name": "退休金发放方式",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde5",
+        "name": "隶属处（科）室",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde6",
+        "name": "出生日期*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde7",
+        "name": "是否财政供养人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde8",
+        "name": "岗位津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acde9",
+        "name": "地区津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdea",
+        "name": "其余津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdeb",
+        "name": "规范津贴补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdec",
+        "name": "改革性补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acded",
+        "name": "自行出台的其他补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdee",
+        "name": "基本工资*",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdef",
+        "name": "基本退职费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf0",
+        "name": "基本退休金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf1",
+        "name": "其他收入",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf2",
+        "name": "实际执行工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf3",
+        "name": "是否保民生及其他刚性支出人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d3ab96a70778463f3ebe65",
+        "name": "是否参加养老保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf4",
+        "name": "是否参加医疗保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf5",
+        "name": "是否参加工伤保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf6",
+        "name": "基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf7",
+        "name": "年度考核奖",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf8",
+        "name": "年终一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdf9",
+        "name": "立功受奖一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "6652cdf51e574cbbbc9acdfa",
+        "name": "医疗保险退休人员一次性补缴经费",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d39200a70778463f3ebaa4",
+        "name": "核对情况",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b9",
+        "name": "全部",
+        "type": "表格"
+      },
+      {
+        "viewId": "68d3a3bca70778463f3ebd7d",
+        "name": "全部-复制",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "其他人员",
+    "worksheetId": "68d34fe93723d04420e7994a",
+    "fieldCount": 61,
+    "fields": [
+      {
+        "fieldId": "68d34fe93723d04420e7994b",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d38d42a70778463f3eb8d3",
+        "name": "单位代码*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7994d",
+        "name": "单位名称*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7994e",
+        "name": "变动类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d35047a70778463f3eb6e1",
+        "name": "人员序号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79950",
+        "name": "姓名*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79951",
+        "name": "证件类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d3505ea70778463f3eb6e5",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79953",
+        "name": "性别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79954",
+        "name": "民族",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79955",
+        "name": "人员状态",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79956",
+        "name": "进入本单位时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79957",
+        "name": "人员身份",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79958",
+        "name": "在职人员来源",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79959",
+        "name": "学历",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7995a",
+        "name": "出生日期",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7995b",
+        "name": "参加工作时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7995c",
+        "name": "工龄（年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7995d",
+        "name": "在编类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7995e",
+        "name": "工资卡开户银行",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d3508ea70778463f3eb6ec",
+        "name": "工资卡卡号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79960",
+        "name": "财政实际供养形式",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79961",
+        "name": "人员经费保障方式",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79962",
+        "name": "遗属生活补助",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79963",
+        "name": "临时工工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79964",
+        "name": "其他人员工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79965",
+        "name": "缴纳养老保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79966",
+        "name": "缴纳医疗保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79967",
+        "name": "缴纳失业保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79968",
+        "name": "缴纳工伤保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79969",
+        "name": "缴纳生育保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7996a",
+        "name": "缴纳其他保险",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7996b",
+        "name": "小计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7996c",
+        "name": "年合计（元）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7996d",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7996e",
+        "name": "财政生效年月",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7996f",
+        "name": "减少原因",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79970",
+        "name": "国家规定工资津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79971",
+        "name": "在职教职工类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79972",
+        "name": "在职人员属性",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79973",
+        "name": "隶属处（科）室",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79974",
+        "name": "是否财政供养人员",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79975",
+        "name": "岗位津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79976",
+        "name": "地区津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79977",
+        "name": "其余津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79978",
+        "name": "规范津贴补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79979",
+        "name": "改革性补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7997a",
+        "name": "自行出台的其他补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7997b",
+        "name": "基本工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7997c",
+        "name": "其他收入",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7997d",
+        "name": "实际执行工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7997e",
+        "name": "是否保民生及其他刚性支出人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e7997f",
+        "name": "是否参加养老保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79980",
+        "name": "是否参加医疗保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79981",
+        "name": "是否参加工伤保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79982",
+        "name": "基础绩效奖",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79983",
+        "name": "年度考核奖",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79984",
+        "name": "年终一次性奖金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79985",
+        "name": "立功受奖一次性奖金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d34fe93723d04420e79986",
+        "name": "医疗保险退休人员一次性补缴经费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d391b4a70778463f3eba96",
+        "name": "核对情况",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d35000655f12f27b56118f",
+        "name": "全部",
+        "type": "表格"
+      },
+      {
+        "viewId": "68d3a569a70778463f3ebd8b",
+        "name": "全部-复制",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "退休养老金",
+    "worksheetId": "68d3a0cb3723d04420e7998b",
+    "fieldCount": 6,
+    "fields": [
+      {
+        "fieldId": "68d3a0cb3723d04420e7998c",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d3a0cb3723d04420e7998d",
+        "name": "对应费款所属期",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "68d3a0cb3723d04420e7998e",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d3a10fa70778463f3ebc57",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d3a0cb3723d04420e79990",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "68d3a0cb3723d04420e79991",
+        "name": "金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d3a0cd655f12f27b56273d",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "工资年报",
+    "worksheetId": "68d1363b4b3cd60c8a8cc8a3",
+    "fieldCount": 76,
+    "fields": [
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ca",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0cb",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc10c",
+        "name": "身份证号",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0cc",
+        "name": "性别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0cd",
+        "name": "民族",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b29a718d1d42d0db2f0a5d",
+        "name": "出生年月",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0cf",
+        "name": "学历",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b3fc1e8d1d42d0db2f113e",
+        "name": "是否在编",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b3fc1e8d1d42d0db2f113f",
+        "name": "人员类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b3fc1e8d1d42d0db2f1140",
+        "name": "学科门类(选填)",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b3fc5f8d1d42d0db2f114a",
+        "name": "是否从事基础研究",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b3fc5f8d1d42d0db2f114b",
+        "name": "领取工资月数",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b3fc5f8d1d42d0db2f114c",
+        "name": "12月份是否在岗",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d0",
+        "name": "参加工作时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d1",
+        "name": "乡镇工作年限（年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d2",
+        "name": "工龄(年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d3",
+        "name": "不计算工龄的大专以上学龄（年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d4",
+        "name": "职务名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d5",
+        "name": "是否军转干部",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d6",
+        "name": "执行基本工资对应岗位",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d7",
+        "name": "执行基本工资对应岗位聘用起始时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d8",
+        "name": "薪级（含浮动薪级和浮动改固定薪级）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0d9",
+        "name": "是否属于义务教育教师",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0da",
+        "name": "是否属于护士或教师基本工资标准提高13%",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0db",
+        "name": "是否属于地质、测绘行业野外工作人员",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0dc",
+        "name": "岗位工资（试用期工资）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0dd",
+        "name": "薪级工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0de",
+        "name": "岗位津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0df",
+        "name": "生活补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e0",
+        "name": "农村学校教师补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e1",
+        "name": "基层卫技人员补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e2",
+        "name": "奖励性绩效工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e3",
+        "name": "基础性绩效增核（元/月）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b1ddae8d1d42d0db2f0062",
+        "name": "年度绩效增核 （元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e4",
+        "name": "教龄津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e5",
+        "name": "教龄津贴金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e6",
+        "name": "项目说明2",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e7",
+        "name": "津贴2",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e8",
+        "name": "项目说明3",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0e9",
+        "name": "津贴3",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ea",
+        "name": "项目说明4",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0eb",
+        "name": "津贴4",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ec",
+        "name": "项目说明5",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ed",
+        "name": "津贴5",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ee",
+        "name": "乡镇工作补贴（元/月）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ef",
+        "name": "教师课后延时补贴（元/年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f0",
+        "name": "单位缴存的住房公积金（元/月）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f1",
+        "name": "住房补贴 （元/月）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f2",
+        "name": "其他（元/月）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f3",
+        "name": "上下班交通费补贴（元/月）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f4",
+        "name": "公务用车改革补贴（元/月）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f6",
+        "name": "清真食品补贴（元/月）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f7",
+        "name": "其他项目1说明",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f8",
+        "name": "其他项目1金额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0f9",
+        "name": "其他项目2说明",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0fa",
+        "name": "其他项目2金额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0fb",
+        "name": "应休年休假天数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0fc",
+        "name": "实休年休假天数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0fd",
+        "name": "应休未休年休假报酬（元/年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0fe",
+        "name": "其他项目1（元/年）说明",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc0ff",
+        "name": "其他项目1（元/年）金额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc100",
+        "name": "其他项目2（元/年）说明",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc101",
+        "name": "其他项目2（元/年）金额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc102",
+        "name": "统筹义务教育教师",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc103",
+        "name": "统筹义务教育教师金额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc104",
+        "name": "补发往年（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc105",
+        "name": "补发往年（元/年）金额",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b1df998d1d42d0db2f008e",
+        "name": "横向项目单列收入（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc106",
+        "name": "高层次人才单列绩效工资（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc107",
+        "name": "科技成果转化现金奖励（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc108",
+        "name": "其他符合规定的单列绩效工资（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc109",
+        "name": "符合规定的兼职兼薪收入（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc10a",
+        "name": "离岗创业等符合规定的货币性收入（元/年）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0d70a36aef03382dc10b",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b1f69e8d1d42d0db2f0a25",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b440af8d1d42d0db2f255c",
+        "name": "导入异常原因",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b0",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "绩效工资",
+    "worksheetId": "68d1363b4b3cd60c8a8cc895",
+    "fieldCount": 10,
+    "fields": [
+      {
+        "fieldId": "67b410c5b60c15bf83b236d1",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d2",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b411f98d1d42d0db2f122f",
+        "name": "身份证号",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d3",
+        "name": "奖励性绩效工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d4",
+        "name": "班主任津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d5",
+        "name": "合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d6",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d7",
+        "name": "文本",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d8",
+        "name": "文本",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b410c5b60c15bf83b236d9",
+        "name": "文本",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8c1",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "乡镇补贴",
+    "worksheetId": "68d1363b4b3cd60c8a8cc8a0",
+    "fieldCount": 10,
+    "fields": [
+      {
+        "fieldId": "638f3f55ac2db6c2f25fcf71",
+        "name": "单位",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f4018ac2db6c2f25fcf7d",
+        "name": "序号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f4081ac2db6c2f25fcf83",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f4081ac2db6c2f25fcf84",
+        "name": "工作时间",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f4081ac2db6c2f25fcf8c",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f50a3ac2db6c2f25fd060",
+        "name": "状态",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "638f5266ac2db6c2f25fd08f",
+        "name": "身份证",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "670e3501391f693e985a09a4",
+        "name": "乡镇工作年限（年）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "670e35d4391f693e985a0a41",
+        "name": "新补贴标准（元/月）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "694a7433864021cc01dfc0c6",
+        "name": "工龄",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b3",
+        "name": "全部",
+        "type": "表格"
+      },
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b4",
+        "name": "当年应调整",
+        "type": "表格"
+      },
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b5",
+        "name": "全部-复制",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "岗位工资对照",
+    "worksheetId": "68d1363b4b3cd60c8a8cc8a1",
+    "fieldCount": 7,
+    "fields": [
+      {
+        "fieldId": "63fa03b9ac2db6c2f2600e8c",
+        "name": "级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa03b9ac2db6c2f2600e8d",
+        "name": "工资类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa03b9ac2db6c2f2600e8e",
+        "name": "事业人员岗位工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa183dac2db6c2f26010c8",
+        "name": "职称类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa1accac2db6c2f26011e1",
+        "name": "金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "66fe3854ee63cdaab0920116",
+        "name": "岗位工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "67b1f1b18d1d42d0db2f01a3",
+        "name": "执行基本工资对应岗位",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b2",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "薪级工资对照",
+    "worksheetId": "68d1363b4b3cd60c8a8cc8a2",
+    "fieldCount": 4,
+    "fields": [
+      {
+        "fieldId": "63fa05bcac2db6c2f2600e99",
+        "name": "薪级级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "63fa0662ac2db6c2f2600ea9",
+        "name": "薪级工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "66fe364bee63cdaab092010e",
+        "name": "工资薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "66ff69c0ee63cdaab09221f3",
+        "name": "薪级",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8b1",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "乡镇工作年限对照",
+    "worksheetId": "68d1363b4b3cd60c8a8cc894",
+    "fieldCount": 2,
+    "fields": [
+      {
+        "fieldId": "67b441168d1d42d0db2f256c",
+        "name": "金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "67b441168d1d42d0db2f256d",
+        "name": "乡镇工作年限",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8c2",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "人员明细导出",
+    "worksheetId": "68d1363b4b3cd60c8a8cc89a",
+    "fieldCount": 8,
+    "fields": [
+      {
+        "fieldId": "668ca310c6435af5ab266530",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca3443d5be2e8b2b6d04d",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca310c6435af5ab266532",
+        "name": "待遇类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca310c6435af5ab266533",
+        "name": "待遇标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca310c6435af5ab266534",
+        "name": "费款所属期",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca310c6435af5ab266535",
+        "name": "补(扣)发金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca310c6435af5ab266536",
+        "name": "实发金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca310c6435af5ab266537",
+        "name": "支付标志",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8bb",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "人员待遇申领明细",
+    "worksheetId": "68d1363b4b3cd60c8a8cc899",
+    "fieldCount": 82,
+    "fields": [
+      {
+        "fieldId": "668ca578c6435af5ab26653a",
+        "name": "统筹区",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26653b",
+        "name": "功能区",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26653c",
+        "name": "单位编码",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26653d",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26653e",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26653f",
+        "name": "性别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266540",
+        "name": "出生日期",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266541",
+        "name": "证件类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca5993d5be2e8b2b6d053",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266543",
+        "name": "参加工作日期",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266544",
+        "name": "法定退休时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266545",
+        "name": "缴费截止时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266546",
+        "name": "在职工资发放截止时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266547",
+        "name": "退休类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266548",
+        "name": "退休审批部门",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266549",
+        "name": "人员类别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26654a",
+        "name": "退休时公务员职务",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26654b",
+        "name": "退休时公务员是否领导职务",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26654c",
+        "name": "退休时公务员职级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26654d",
+        "name": "退休时公务员级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26654e",
+        "name": "退休时公务员级别对应档次",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26654f",
+        "name": "退休时基本工资对应的职务",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266550",
+        "name": "退休时津补贴对应的职务",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266551",
+        "name": "退休时机关工人技术等级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266552",
+        "name": "退休时机关工人岗位档次",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266553",
+        "name": "退休时事业单位专业技术人员岗位",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266554",
+        "name": "退休时事业单位专业技术人员薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266555",
+        "name": "退休时事业单位管理人员岗位",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266556",
+        "name": "退休时事业单位管理人员薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266557",
+        "name": "退休时事业单位工人岗位",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266558",
+        "name": "退休时事业单位工人薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266559",
+        "name": "实际缴费月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26655a",
+        "name": "其中企业实际缴费月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26655b",
+        "name": "视同缴费月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26655c",
+        "name": "特殊工种折算年限(月)",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26655d",
+        "name": "累计缴费月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26655e",
+        "name": "未计算工龄的大专以上学龄",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26655f",
+        "name": "缴费中断月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266560",
+        "name": "计发比例（折率）",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266561",
+        "name": "改革时机关工人技术等级工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266562",
+        "name": "改革时事业单位岗位工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266563",
+        "name": "改革时级别工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266564",
+        "name": "改革时基本工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266565",
+        "name": "改革时退休补贴标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266566",
+        "name": "改革时增加退休费标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266567",
+        "name": "改革时纳入养老金的其它津补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266568",
+        "name": "职务变动标志（公务员）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266569",
+        "name": "公务员晋升后级别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26656a",
+        "name": "公务员职务晋升时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26656b",
+        "name": "晋升后公务员职位工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26656c",
+        "name": "晋升后公务员级别工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26656d",
+        "name": "晋升后公务员基本工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26656e",
+        "name": "晋升后公务员退休补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26656f",
+        "name": "晋升后公务员增加退休费标准",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266570",
+        "name": "晋升后公务员其它津补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266571",
+        "name": "职务变动标志（机关工人）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266572",
+        "name": "机关工人晋升后岗位薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266573",
+        "name": "机关工人职务晋升时间",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266574",
+        "name": "晋升后机关工人技术等级工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266575",
+        "name": "晋升后机关工人岗位工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266576",
+        "name": "晋升后机关工人基本工资",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266577",
+        "name": "晋升后机关工人退休补贴标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266578",
+        "name": "晋升后机关工人增加退休费标准",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266579",
+        "name": "晋升后机关工人其它津补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26657a",
+        "name": "职务变动标志（事业单位）",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26657b",
+        "name": "事业单位专业技术晋升后岗位薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26657c",
+        "name": "事业单位管理人员晋升后岗位薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26657d",
+        "name": "事业单位工人晋升后岗位薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26657e",
+        "name": "事业单位职务晋升时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26657f",
+        "name": "晋升后事业单位岗位工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266580",
+        "name": "晋升后事业单位薪级工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266581",
+        "name": "晋升后事业单位基本工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266582",
+        "name": "晋升后事业单位退休补贴标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266583",
+        "name": "晋升后事业单位增加退休费标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266584",
+        "name": "晋升后事业单位其它津补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266585",
+        "name": "申领状态",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266586",
+        "name": "是否已待遇核定",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266587",
+        "name": "执行的视同指数标准",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266588",
+        "name": "改革前津补贴参考方式",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab266589",
+        "name": "清算资金到账确认",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26658a",
+        "name": "单位所在地市",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668ca578c6435af5ab26658b",
+        "name": "是否办理在职转退休",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8bc",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "新房补",
+    "worksheetId": "68d1363b4b3cd60c8a8cc898",
+    "fieldCount": 13,
+    "fields": [
+      {
+        "fieldId": "668bc6980e40e999feb9271f",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668bc6eed207c95aa60a06cb",
+        "name": "证件号码",
+        "type": "证件",
+        "controlType": 7,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "668bc6980e40e999feb92721",
+        "name": "退休金标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cb1a93d5be2e8b2b6d102",
+        "name": "上年房补旧标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cb1b23d5be2e8b2b6d106",
+        "name": "当年房补旧标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cafa93d5be2e8b2b6d0dd",
+        "name": "上年房补新标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cafa93d5be2e8b2b6d0de",
+        "name": "当年房补新标准",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cb0013d5be2e8b2b6d0ee",
+        "name": "上年月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cb0013d5be2e8b2b6d0ef",
+        "name": "当年月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "668cb55a3d5be2e8b2b6d12b",
+        "name": "上年补发",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      },
+      {
+        "fieldId": "668cb61c3d5be2e8b2b6d131",
+        "name": "当年补发",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      },
+      {
+        "fieldId": "668cb81a3d5be2e8b2b6d150",
+        "name": "总补发",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      },
+      {
+        "fieldId": "668cb0273d5be2e8b2b6d0f5",
+        "name": "总月数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8bd",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "职称信息表",
+    "worksheetId": "68d1363b4b3cd60c8a8cc897",
+    "fieldCount": 21,
+    "fields": [
+      {
+        "fieldId": "669f63d6cc2d670d5b3af854",
+        "name": "序号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af855",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af856",
+        "name": "人员 编号",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af857",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af858",
+        "name": "工作 时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af859",
+        "name": "性别",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af85a",
+        "name": "工作 年限",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af85b",
+        "name": "间断 工龄",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af85c",
+        "name": "最高 学历",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af85d",
+        "name": "应计 学龄",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af85e",
+        "name": "工资 职级",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af85f",
+        "name": "级别 档次",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af860",
+        "name": "任职 时间",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af861",
+        "name": "工资 类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af862",
+        "name": "职务 工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af863",
+        "name": "级别 工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af864",
+        "name": "工资 总额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af865",
+        "name": "义教 津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af866",
+        "name": "义教 补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "669f63d6cc2d670d5b3af867",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "669f6522df015c72124a9146",
+        "name": "任职年限",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8be",
+        "name": "全部",
+        "type": "表格"
+      },
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8bf",
+        "name": "应升小档",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "姓名",
+    "worksheetId": "68d1363b4b3cd60c8a8cc8a6",
+    "fieldCount": 2,
+    "fields": [
+      {
+        "fieldId": "66d9d600bb35b4bd9f9f9872",
+        "name": "工资表姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "66d9d61ebb35b4bd9f9f987c",
+        "name": "调资表姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "68d1363b4b3cd60c8a8cc8ad",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "绩效工资过渡表",
+    "worksheetId": "69436a2c6d37025dacd83593",
+    "fieldCount": 15,
+    "fields": [
+      {
+        "fieldId": "69436a2c6d37025dacd83594",
+        "name": "序号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd83595",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd83596",
+        "name": "上年岗位工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd83597",
+        "name": "上年薪级工资",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd83599",
+        "name": "本年义教津贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd8359a",
+        "name": "本年义教补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd8359b",
+        "name": "农村学校教师补贴",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd8359d",
+        "name": "计发月份",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double（666.66）"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd8359f",
+        "name": "近三年党纪（政务）处分/停职审查情况",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd835a0",
+        "name": "上年度考核结果",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd835a1",
+        "name": "病假2-6个月",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "69436a2c6d37025dacd835a2",
+        "name": "病假6个月以上",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本"
+      },
+      {
+        "fieldId": "69436b83864021cc01dfc06d",
+        "name": "小计",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      },
+      {
+        "fieldId": "69436bb5864021cc01dfc074",
+        "name": "月标准小计",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      },
+      {
+        "fieldId": "69436c01864021cc01dfc07b",
+        "name": "全年金额",
+        "type": "公式",
+        "controlType": 31,
+        "desc": "只读，不支持写入和更新"
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "69436a6c6c312ff3f03452a2",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  }
+]

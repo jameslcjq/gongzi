@@ -1,0 +1,574 @@
+export type WorksheetField = {
+  fieldId: string
+  name: string
+  type: string
+  controlType: number
+  desc?: string
+  options?: string[]
+  hidden?: boolean
+  displayOrder?: number
+}
+
+export type WorksheetMeta = {
+  name: string
+  worksheetId: string
+  fields: WorksheetField[]
+  views?: Array<{ viewId?: string; name?: string }>
+}
+
+export type RuleResult = {
+  ok: boolean
+  affectedRows: number
+  messages: string[]
+  warnings: string[]
+  monthlyPayrollWriteBack?: MonthlyPayrollWriteBackPreview
+}
+
+export type AnnualReportWorkflowInput = {
+  totalPerformance: number
+  totalHeadTeacher: number
+  totalOvertime: number
+}
+
+export type WorkflowRunPayload = {
+  annualReport?: AnnualReportWorkflowInput
+  monthlyPayroll?: MonthlyPayrollWorkflowInput
+}
+
+export type MonthlyPayrollWorkflowInput = {
+  salaryWorkbookPath?: string
+  socialSecurityWorkbookPath?: string
+  taxWorkbookPath?: string
+  year?: number
+  month?: number
+  confirmWriteBack?: boolean
+}
+
+export type MonthlyPayrollWriteBackPreview = {
+  requiresConfirmation: boolean
+  applied: boolean
+  syncableCount: number
+  manualCount: number
+  personCount: number
+  examples: string[]
+  manualExamples: string[]
+}
+
+export type WorkflowDefinition = {
+  key: string
+  name: string
+  module: string
+  status: 'ready' | 'needs-rule' | 'blocked-by-source'
+  blockedReason?: string
+}
+
+export type WorkflowRunResult = RuleResult & {
+  workflowKey: string
+  workflowName: string
+}
+
+export type PersonnelArchiveEntry = {
+  id: number
+  archiveType: string
+  sourceWorksheet: string
+  idCard: string
+  name: string
+  unitCode: string
+  unitName: string
+  reason: string
+  archivedAt: string
+  originalData: Record<string, unknown>
+}
+
+export type LookupFailureEntry = {
+  id: number
+  workflow: string
+  worksheet: string
+  idCard: string
+  name: string
+  lookupTable: string
+  lookupKey: string
+  lookupValue: string
+  reason: string
+  createdAt: string
+}
+
+export type AppSummary = {
+  tableCount: number
+  fieldCount: number
+  databasePath: string
+  worksheets: Array<{
+    name: string
+    worksheetId: string
+    fieldCount: number
+    viewCount: number
+    fields: WorksheetField[]
+    views?: Array<{ viewId?: string; name?: string }>
+  }>
+}
+
+export type WorksheetRecordValue = string | number | null
+
+export type WorksheetRecord = Record<string, WorksheetRecordValue>
+
+export type WorksheetRecordsQuery = {
+  limit?: number
+  offset?: number
+  search?: string
+  view?: string
+  sortColumn?: string
+  sortOrder?: 'asc' | 'desc'
+}
+
+export type WorksheetRecordsResult = {
+  worksheetId: string
+  worksheetName: string
+  total: number
+  limit: number
+  offset: number
+  rows: WorksheetRecord[]
+}
+
+export type ConsistencyAuditValue = {
+  worksheetName: string
+  fieldName: string
+  recordId?: number
+  value: string
+  updatedAt?: string
+}
+
+export type ConsistencyAuditIssue = {
+  key: string
+  idCard: string
+  name: string
+  fieldKey: string
+  fieldLabel: string
+  master?: ConsistencyAuditValue
+  source: ConsistencyAuditValue
+  severity: 'warning' | 'error'
+}
+
+export type ConsistencyAuditRuleSummary = {
+  fieldKey: string
+  fieldLabel: string
+  comparedCount: number
+  issueCount: number
+}
+
+export type ConsistencyAuditResult = {
+  masterWorksheetName: string
+  checkedPeople: number
+  comparedCells: number
+  issueCount: number
+  missingMasterRows: number
+  generatedAt: string
+  rules: ConsistencyAuditRuleSummary[]
+  issues: ConsistencyAuditIssue[]
+}
+
+export type ConsistencyAuditApplyDirection = 'source-to-master' | 'master-to-source'
+
+export type ConsistencyAuditApplyResult = {
+  updatedRows: number
+  skippedRows: number
+  messages: string[]
+}
+
+export type ExcelImportLog = {
+  fileName: string
+  worksheetName?: string
+  ok: boolean
+  importedRows: number
+  message: string
+  createdAt: string
+  batchId?: number
+}
+
+export type ImportWatcherStatus = {
+  folderPath: string
+  templateFolderPath: string
+  running: boolean
+  logs: ExcelImportLog[]
+  monthlyPayroll?: MonthlyPayrollDetectedFiles
+}
+
+export type MonthlyPayrollDetectedFiles = {
+  salaryWorkbookPath?: string
+  salaryWorkbookName?: string
+  socialSecurityWorkbookPath?: string
+  socialSecurityWorkbookName?: string
+  taxWorkbookPath?: string
+  taxWorkbookName?: string
+  mode: 'missing-salary' | 'salary-only' | 'salary-social' | 'salary-tax' | 'salary-social-tax'
+}
+
+export type UnitSettings = {
+  unitFullName: string
+  unitImportCode: string
+  schoolLevel: string
+  functionCode: string
+  retiredFunctionCode: string
+  retiredFunctionName: string
+  budgetActiveCode: string
+  budgetRetiredCode: string
+  socialPayeeName: string
+  socialPayeeBank: string
+  socialPayeeAccount: string
+  housingPayeeName: string
+  housingPayeeBank: string
+  housingPayeeAccount: string
+}
+
+export type MonthlyPayrollReportSheet = {
+  name: string
+  columns: string[]
+  rows: Array<Array<string | number>>
+  showColumnHeader?: boolean
+  merges?: string[]
+  columnWidths?: number[]
+  rowHeights?: Array<number | null>
+}
+
+export type MonthlyPayrollRun = {
+  id: number
+  year: number
+  month: number
+  unitFullName: string
+  activeCount: number
+  survivorCount: number
+  salaryTotal: number
+  withholdingTotal: number
+  taxTotal: number
+  actualPay: number
+  retiredHousing: number
+  sourceSalaryPath: string | null
+  sourceSocialPath: string | null
+  sourceTaxPath: string | null
+  insuranceImportPath: string | null
+  voucherImportPath: string | null
+  payrollBackpayPath: string | null
+  reportFingerprint: string | null
+  archivedAt: string | null
+  archiveDir: string | null
+  archiveManifest: string[]
+  reportSnapshot?: MonthlyPayrollReportResult | null
+  createdAt: string
+}
+
+export type MonthlyPayrollArchiveResult = {
+  run: MonthlyPayrollRun
+  archiveDir: string
+  files: string[]
+}
+
+export type MonthlyPayrollReportResult = {
+  ok: boolean
+  message: string
+  outputWorkbookPath?: string
+  insuranceImportPath?: string
+  payrollBackpayPath?: string
+  voucherImportPath?: string
+  sheets: MonthlyPayrollReportSheet[]
+}
+
+export type PrinterSummary = {
+  name: string
+  displayName: string
+  isDefault: boolean
+  status?: string
+}
+
+export type MonthlyPayrollPrintSettings = {
+  reportPrinterName: string
+  voucherPrinterName: string
+}
+
+export type PrintRequest = {
+  printerName?: string
+}
+
+export type ImportBatchSummary = {
+  id: number
+  sourceName: string
+  worksheetName?: string
+  worksheetId?: string
+  status: 'imported' | 'failed' | 'rolled-back'
+  rowCount: number
+  message?: string
+  createdAt: string
+}
+
+export type ImportPreviewRow = {
+  rowNumber: number
+  values: Record<string, WorksheetRecordValue>
+  warnings: string[]
+}
+
+export type ImportPreview = {
+  worksheetId: string
+  worksheetName: string
+  matchedHeaders: Array<{ source: string; columnName: string; fieldName: string }>
+  unknownHeaders: string[]
+  rows: ImportPreviewRow[]
+  totalRows: number
+}
+
+export type WorksheetMutationResult = {
+  worksheetId: string
+  worksheetName: string
+  affectedRows: number
+}
+
+export type HrMasterSyncChange = {
+  fieldName: '单位名称' | '职称' | '职级' | '薪级'
+  currentValue: string
+  nextValue: string
+}
+
+export type MasterSyncSelectionItem = {
+  sourceRecordId?: number
+  idCard: string
+  fieldName: string
+}
+
+export type HrMasterSyncDiff = {
+  idCard: string
+  name: string
+  sourceRecordId: number
+  masterRecordId?: number
+  action: 'insert' | 'update'
+  changes: HrMasterSyncChange[]
+}
+
+export type HrMasterSyncPreview = {
+  sourceRows: number
+  masterRows: number
+  updatableRows: number
+  insertRows: number
+  updateRows: number
+  missingIdCardRows: number
+  missingLookupRows: number
+  diffs: HrMasterSyncDiff[]
+}
+
+export type HrMasterSyncApplyResult = {
+  insertedRows: number
+  updatedRows: number
+  affectedRows: number
+}
+
+export type TownshipNameIssue = {
+  name: string
+  rowId: number
+  reason: 'not-found' | 'duplicate'
+  matchedCount: number
+}
+
+export type TownshipIdCardFillResult = {
+  updatedRows: number
+  notFoundRows: number
+  duplicateRows: number
+  issues: TownshipNameIssue[]
+}
+
+export type TownshipMasterSyncChange = {
+  fieldName: '参加工作时间' | '工龄' | '乡镇工作年限'
+  sourceFieldName: '工作时间' | '工龄' | '乡镇工作年限'
+  currentValue: string
+  nextValue: string
+}
+
+export type TownshipMasterSyncDiff = {
+  idCard: string
+  name: string
+  townshipRecordId: number
+  masterRecordId: number
+  changes: TownshipMasterSyncChange[]
+}
+
+export type TownshipMasterSyncPreview = {
+  sourceRows: number
+  matchedRows: number
+  missingMasterRows: number
+  updatableRows: number
+  diffs: TownshipMasterSyncDiff[]
+}
+
+export type TownshipMasterSyncApplyResult = {
+  updatedRows: number
+  affectedRows: number
+}
+
+export type BudgetActiveMasterSyncChange = {
+  fieldName: '性别' | '民族' | '参加工作时间'
+  sourceFieldName: '性别*' | '民族*' | '参加工作时间*'
+  currentValue: string
+  nextValue: string
+}
+
+export type BudgetActiveMasterSyncDiff = {
+  idCard: string
+  name: string
+  budgetRecordId: number
+  masterRecordId?: number
+  action: 'insert' | 'update'
+  changes: BudgetActiveMasterSyncChange[]
+}
+
+export type BudgetActiveMasterSyncPreview = {
+  sourceRows: number
+  masterRows: number
+  updatableRows: number
+  insertRows: number
+  updateRows: number
+  missingIdCardRows: number
+  diffs: BudgetActiveMasterSyncDiff[]
+}
+
+export type BudgetActiveMasterSyncApplyResult = {
+  insertedRows: number
+  updatedRows: number
+  affectedRows: number
+}
+
+export type TeacherDetailMasterSyncChange = {
+  fieldName: string
+  currentValue: string
+  nextValue: string
+}
+
+export type TeacherDetailMasterSyncDiff = {
+  idCard: string
+  name: string
+  sourceRecordId: number
+  masterRecordId?: number
+  action: 'insert' | 'update'
+  changes: TeacherDetailMasterSyncChange[]
+}
+
+export type TeacherDetailMasterSyncPreview = {
+  sourceRows: number
+  masterRows: number
+  comparedFields: string[]
+  updatableRows: number
+  insertRows: number
+  updateRows: number
+  missingIdCardRows: number
+  diffs: TeacherDetailMasterSyncDiff[]
+}
+
+export type TeacherDetailMasterSyncApplyResult = {
+  insertedRows: number
+  updatedRows: number
+  affectedRows: number
+}
+
+export type BackupSummary = {
+  fileName: string
+  filePath: string
+  sizeBytes: number
+  createdAt: string
+}
+
+export type PivotAggregation = 'sum' | 'count' | 'count_distinct' | 'avg' | 'max' | 'min'
+
+export type PivotFilterOp =
+  | 'eq'
+  | 'ne'
+  | 'contains'
+  | 'is_null'
+  | 'not_null'
+  | 'between'
+  | 'in'
+
+export type PivotFieldRef = {
+  worksheetId: string
+  fieldName: string
+}
+
+export type PivotValueRef = PivotFieldRef & {
+  agg: PivotAggregation
+  alias?: string
+}
+
+export type PivotFilterRef = PivotFieldRef & {
+  op: PivotFilterOp
+  values: string[]
+}
+
+export type PivotJoinRef = {
+  worksheetId: string
+  joinType: 'left' | 'inner'
+}
+
+export type PivotConfig = {
+  id?: number
+  name: string
+  primaryWorksheetId: string
+  joins: PivotJoinRef[]
+  rows: PivotFieldRef[]
+  columns: PivotFieldRef[]
+  values: PivotValueRef[]
+  filters: PivotFilterRef[]
+  showRowSubtotal: boolean
+  showRowGrandTotal: boolean
+  showColumnGrandTotal: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type PivotResult = {
+  rowDimensions: string[]
+  columnDimensions: string[]
+  valueAliases: string[]
+  rows: Array<Record<string, string | number | null>>
+  totalRows: number
+}
+
+export type StatReportColumn = {
+  key: string
+  label: string
+  width?: number
+}
+
+export type StatReportFilterClause = {
+  field: string
+  op: 'eq' | 'in' | 'not_in' | 'contains' | 'is_null' | 'not_null' | 'computed'
+  values?: string[]
+  computedKind?: 'age' | 'tenure' | 'townshipYears' | 'postCategory' | 'postLevel' | 'seniorTitle'
+  computedRange?: [number | null, number | null]
+}
+
+export type StatReportRow = {
+  label: string
+  indent: number
+  isTotal: boolean
+  isSectionHeader: boolean
+  values: Record<string, string | number | null>
+  filter?: StatReportFilterClause[]
+  filterDesc?: string
+}
+
+export type StatReportResult = {
+  id: string
+  name: string
+  columns: StatReportColumn[]
+  rows: StatReportRow[]
+  generatedAt: string
+  dataCount: number
+}
+
+export type StatReportDef = {
+  id: string
+  name: string
+  category: string
+  description: string
+  sourceTable: string
+}
+
+export type StatReportDrillResult = {
+  filterDesc: string
+  fields: string[]
+  rows: Array<Record<string, string | number | null>>
+  totalRows: number
+}

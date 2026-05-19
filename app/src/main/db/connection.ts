@@ -1,0 +1,1045 @@
+import { app } from 'electron'
+import { mkdir } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import sqlite3 from 'sqlite3'
+import { readWorksheetMetadata } from './metadata'
+import {
+  getSqlType,
+  getWorksheetLocalColumns,
+  quoteIdentifier,
+  readRetainedSchemaSql
+} from './schema'
+import {
+  activePersonnelStatus,
+  getIdentityColumnName,
+  getPersonnelStatusColumnName,
+  isPersonnelStatusSourceWorksheet,
+  isPersonnelStatusTargetWorksheet,
+  normalizeIdentityValue,
+  otherPersonnelStatus,
+  retiredPersonnelStatus,
+  resolveBudgetWorksheetStatus,
+  resolvePersonnelStatus
+} from '../services/personnelStatus'
+
+let db: sqlite3.Database | undefined
+let databasePath = ''
+
+export async function getDatabase(): Promise<sqlite3.Database> {
+  if (db) return db
+
+  databasePath = join(app.getPath('userData'), 'salary-system.sqlite')
+  await mkdir(dirname(databasePath), { recursive: true })
+
+  db = await openDatabase(databasePath)
+  await exec(db, `
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA cache_size = -8000;
+    PRAGMA foreign_keys = ON;
+    PRAGMA temp_store = MEMORY;
+  `)
+  await migrateTeacherDetailSchema(db)
+  await migrateBudgetOtherWorksheetName(db)
+  await migrateUnitFullNameColumns(db)
+  await exec(db, readRetainedSchemaSql())
+  await ensureSystemTables(db)
+  await migrateBudgetOtherWorksheetReferences(db)
+  await dropDeprecatedHrWorksheets(db)
+  await syncWorksheetColumns(db)
+  await backfillHrBankFieldsFromBudget(db)
+  await pruneHrInfoColumns(db)
+  await migrateNewHousingSubsidyColumns(db)
+  await pruneDeprecatedTownshipAllowanceColumns(db)
+  await ensureBudgetStatusColumns(db)
+  await refreshAllPersonnelStatuses(db)
+  await ensurePerformanceIndexes(db)
+  await ensureIdentityUniqueIndexes(db)
+
+  return db
+}
+
+async function migrateTeacherDetailSchema(database: sqlite3.Database): Promise<void> {
+  // 把"在编教职工基本信息"重构为主表，多行字段拆出 4 张子表。
+  // 检测到旧字段就直接重建为空白结构（用户已确认空白 schema）。
+  const tableName = '在编教职工基本信息'
+  const deprecated = ['全日制学历及专业', '最高学历及专业', '教师资格证学段', '教师资格证学科', '教师资格证证书号码', '教师资格证定期注册有效期', '任教班级学科节数', '工作履历']
+  const existing = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(tableName)})`
+  )
+  if (existing.length === 0) return
+  const existingNames = new Set(existing.map((column) => column.name))
+  const hasDeprecated = deprecated.some((name) => existingNames.has(name))
+  if (!hasDeprecated) return
+
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`)
+    // 子表如果之前不存在直接靠 readRetainedSchemaSql 重建即可；如果存在旧数据也清空
+    for (const sub of ['教职工学历', '教职工教师资格', '教职工任教信息', '教职工工作履历']) {
+      await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(sub)}`)
+    }
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    throw error
+  }
+}
+
+async function dropDeprecatedHrWorksheets(database: sqlite3.Database): Promise<void> {
+  const deprecated = [
+    { name: '人事在职', worksheetId: 'local-hr-active' },
+    { name: '人事退休', worksheetId: 'local-hr-retired' },
+    { name: '人事其他', worksheetId: 'local-hr-other' },
+    { name: '教职工信息管理系统', worksheetId: 'local-teacher-mis' }
+  ]
+  const names = deprecated.map((item) => item.name)
+  const worksheetIds = deprecated.map((item) => item.worksheetId)
+  const namePlaceholders = names.map(() => '?').join(', ')
+  const idPlaceholders = worksheetIds.map(() => '?').join(', ')
+
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    for (const table of names) {
+      await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(table)}`)
+    }
+    await run(
+      database,
+      `DELETE FROM import_batch_rows WHERE worksheet_name IN (${namePlaceholders})`,
+      names
+    )
+    await run(
+      database,
+      `DELETE FROM import_logs WHERE worksheet_name IN (${namePlaceholders})`,
+      names
+    )
+    await run(
+      database,
+      `DELETE FROM field_mappings WHERE worksheet_name IN (${namePlaceholders}) OR worksheet_id IN (${idPlaceholders})`,
+      [...names, ...worksheetIds]
+    )
+    await run(
+      database,
+      `DELETE FROM import_batches WHERE worksheet_name IN (${namePlaceholders}) OR worksheet_id IN (${idPlaceholders})`,
+      [...names, ...worksheetIds]
+    )
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    throw error
+  }
+}
+
+async function migrateBudgetOtherWorksheetName(database: sqlite3.Database): Promise<void> {
+  const oldName = '其他人员'
+  const newName = '预算其他'
+  const oldTableExists = await hasTable(database, oldName)
+  if (!oldTableExists) return
+
+  const newTableExists = await hasTable(database, newName)
+  if (newTableExists) {
+    const [{ count }] = await all<{ count: number }>(
+      database,
+      `SELECT COUNT(*) AS count FROM ${quoteIdentifier(newName)}`
+    )
+    if (count > 0) return
+    await exec(database, `DROP TABLE ${quoteIdentifier(newName)}`)
+  }
+
+  await exec(
+    database,
+    `ALTER TABLE ${quoteIdentifier(oldName)} RENAME TO ${quoteIdentifier(newName)}`
+  )
+}
+
+async function migrateBudgetOtherWorksheetReferences(database: sqlite3.Database): Promise<void> {
+  const oldName = '其他人员'
+  const newName = '预算其他'
+  for (const tableName of ['import_batch_rows', 'import_logs', 'field_mappings', 'import_batches']) {
+    if (!(await hasTable(database, tableName))) continue
+    await run(database, `UPDATE ${tableName} SET worksheet_name = ? WHERE worksheet_name = ?`, [
+      newName,
+      oldName
+    ])
+  }
+}
+
+async function migrateUnitFullNameColumns(database: sqlite3.Database): Promise<void> {
+  for (const tableName of ['在编教职工基本信息', '人事信息']) {
+    const existing = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(tableName)})`
+    )
+    if (existing.length === 0) continue
+    const existingNames = new Set(existing.map((column) => column.name))
+    if (!existingNames.has('单位全称') || existingNames.has('单位名称')) continue
+    await exec(
+      database,
+      `ALTER TABLE ${quoteIdentifier(tableName)}
+       RENAME COLUMN ${quoteIdentifier('单位全称')} TO ${quoteIdentifier('单位名称')}`
+    )
+  }
+}
+
+async function hasTable(database: sqlite3.Database, tableName: string): Promise<boolean> {
+  const rows = await all<{ name: string }>(
+    database,
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    [tableName]
+  )
+  return rows.length > 0
+}
+
+async function ensureBudgetStatusColumns(database: sqlite3.Database): Promise<void> {
+  const targets = ['预算在职', '预算退休', '预算其他']
+  const statusColumns = [
+    { name: 'md_status', definition: 'TEXT' },
+    { name: 'md_status_changed_at', definition: 'TEXT' },
+    { name: 'md_status_reason', definition: 'TEXT' }
+  ]
+  for (const tableName of targets) {
+    const existing = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(tableName)})`
+    )
+    if (existing.length === 0) continue
+    const existingNames = new Set(existing.map((column) => column.name))
+    for (const column of statusColumns) {
+      if (!existingNames.has(column.name)) {
+        await exec(
+          database,
+          `ALTER TABLE ${quoteIdentifier(tableName)} ADD COLUMN ${quoteIdentifier(column.name)} ${column.definition}`
+        )
+      }
+    }
+  }
+}
+
+async function syncWorksheetColumns(database: sqlite3.Database): Promise<void> {
+  const worksheets = readWorksheetMetadata()
+  for (const worksheet of worksheets) {
+    const tableName = quoteIdentifier(worksheet.name)
+    const existingColumns = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${tableName})`
+    )
+    const existingNames = new Set(existingColumns.map((column) => column.name))
+    for (const column of getWorksheetLocalColumns(worksheet)) {
+      if (!existingNames.has(column.columnName)) {
+        await exec(
+          database,
+          `ALTER TABLE ${tableName} ADD COLUMN ${quoteIdentifier(column.columnName)} ${getSqlType(column.field)}`
+        )
+      }
+    }
+  }
+}
+
+export async function backfillHrBankFieldsFromBudget(database: sqlite3.Database): Promise<void> {
+  const worksheets = readWorksheetMetadata()
+  const hr = worksheets.find((item) => item.name === '人事信息')
+  if (!hr) return
+
+  const hrIdColumn = worksheetColumnName(hr, '身份证号码')
+  const hrBankNameColumn = worksheetColumnName(hr, '工资卡开户银行')
+  const hrBankCardColumn = worksheetColumnName(hr, '工资卡卡号')
+  if (!hrIdColumn || !hrBankNameColumn || !hrBankCardColumn) return
+  if (!(await hasColumns(database, hr.name, [hrIdColumn, hrBankNameColumn, hrBankCardColumn]))) return
+
+  const bankByIdCard = new Map<string, { bankName: string; bankCard: string }>()
+  const sources = [
+    { name: '预算在职', idField: '证件号码*', bankNameField: '工资卡开户银行*', bankCardField: '工资卡卡号*' },
+    { name: '预算退休', idField: '证件号码*', bankNameField: '工资卡开户银行*', bankCardField: '工资卡卡号*' },
+    { name: '预算其他', idField: '证件号码', bankNameField: '工资卡开户银行', bankCardField: '工资卡卡号' }
+  ]
+
+  for (const source of sources) {
+    const worksheet = worksheets.find((item) => item.name === source.name)
+    if (!worksheet) continue
+    const idColumn = worksheetColumnName(worksheet, source.idField)
+    const bankNameColumn = worksheetColumnName(worksheet, source.bankNameField)
+    const bankCardColumn = worksheetColumnName(worksheet, source.bankCardField)
+    if (!idColumn || !bankNameColumn || !bankCardColumn) continue
+    if (!(await hasColumns(database, worksheet.name, [idColumn, bankNameColumn, bankCardColumn]))) continue
+
+    const rows = await all<Record<string, unknown>>(
+      database,
+      `SELECT "id", ${quoteIdentifier(idColumn)} AS id_card,
+              ${quoteIdentifier(bankNameColumn)} AS bank_name,
+              ${quoteIdentifier(bankCardColumn)} AS bank_card
+       FROM ${quoteIdentifier(worksheet.name)}
+       ORDER BY "id" ASC`
+    )
+    for (const row of rows) {
+      const idCard = normalizeIdentityValue(row.id_card)
+      if (!idCard) continue
+      const existing = bankByIdCard.get(idCard) ?? { bankName: '', bankCard: '' }
+      const bankName = String(row.bank_name ?? '').trim()
+      const bankCard = String(row.bank_card ?? '').trim()
+      bankByIdCard.set(idCard, {
+        bankName: bankName || existing.bankName,
+        bankCard: bankCard || existing.bankCard
+      })
+    }
+  }
+
+  if (bankByIdCard.size === 0) return
+
+  const hrRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT "id", ${quoteIdentifier(hrIdColumn)} AS id_card,
+            ${quoteIdentifier(hrBankNameColumn)} AS bank_name,
+            ${quoteIdentifier(hrBankCardColumn)} AS bank_card
+     FROM ${quoteIdentifier(hr.name)}`
+  )
+  for (const row of hrRows) {
+    const idCard = normalizeIdentityValue(row.id_card)
+    const bank = idCard ? bankByIdCard.get(idCard) : undefined
+    if (!bank) continue
+    const currentBankName = String(row.bank_name ?? '').trim()
+    const currentBankCard = String(row.bank_card ?? '').trim()
+    const nextBankName = currentBankName || bank.bankName
+    const nextBankCard = currentBankCard || bank.bankCard
+    if (nextBankName === currentBankName && nextBankCard === currentBankCard) continue
+    await run(
+      database,
+      `UPDATE ${quoteIdentifier(hr.name)}
+       SET ${quoteIdentifier(hrBankNameColumn)} = ?,
+           ${quoteIdentifier(hrBankCardColumn)} = ?,
+           "md_updated_at" = ?
+       WHERE "id" = ?`,
+      [nextBankName, nextBankCard, new Date().toISOString(), row.id]
+    )
+  }
+}
+
+function worksheetColumnName(
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number],
+  fieldName: string
+): string | undefined {
+  return getWorksheetLocalColumns(worksheet).find((column) => column.field.name === fieldName)?.columnName
+}
+
+async function hasColumns(
+  database: sqlite3.Database,
+  tableName: string,
+  columnNames: string[]
+): Promise<boolean> {
+  const existing = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(tableName)})`
+  )
+  const existingNames = new Set(existing.map((column) => column.name))
+  return columnNames.every((columnName) => existingNames.has(columnName))
+}
+
+async function migrateNewHousingSubsidyColumns(database: sqlite3.Database): Promise<void> {
+  const tableName = '新房补'
+  const existingColumns = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(tableName)})`
+  )
+  if (existingColumns.length === 0) return
+
+  const existingNames = new Set(existingColumns.map((column) => column.name))
+  if (existingNames.has('退休金标准') && !existingNames.has('退休提租补贴')) {
+    await exec(
+      database,
+      `ALTER TABLE ${quoteIdentifier(tableName)}
+       RENAME COLUMN ${quoteIdentifier('退休金标准')} TO ${quoteIdentifier('退休提租补贴')}`
+    )
+  }
+}
+
+async function pruneHrInfoColumns(database: sqlite3.Database): Promise<void> {
+  await pruneWorksheetColumnsToMetadata(database, '人事信息')
+}
+
+async function pruneDeprecatedTownshipAllowanceColumns(database: sqlite3.Database): Promise<void> {
+  await pruneWorksheetColumnsToMetadata(database, '\u4e61\u9547\u8865\u8d34')
+}
+
+async function pruneWorksheetColumnsToMetadata(
+  database: sqlite3.Database,
+  tableName: string
+): Promise<void> {
+  const worksheet = readWorksheetMetadata().find((item) => item.name === tableName)
+  if (!worksheet) return
+
+  const expectedColumns = [
+    { name: 'id', definition: 'INTEGER PRIMARY KEY AUTOINCREMENT' },
+    { name: 'md_row_id', definition: 'TEXT UNIQUE' },
+    { name: 'md_created_at', definition: 'TEXT' },
+    { name: 'md_updated_at', definition: 'TEXT' },
+    ...getWorksheetLocalColumns(worksheet).map((column) => ({
+      name: column.columnName,
+      definition: getSqlType(column.field)
+    }))
+  ]
+  const columns = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(tableName)})`
+  )
+  const existingNames = new Set(columns.map((column) => column.name))
+  const expectedNames = new Set(expectedColumns.map((column) => column.name))
+  const hasDeprecatedColumns = columns.some((column) => !expectedNames.has(column.name))
+  if (!hasDeprecatedColumns) return
+
+  const tempTableName = `${tableName}__pruned`
+  const definitions = expectedColumns.map((column) => {
+    return `${quoteIdentifier(column.name)} ${column.definition}`
+  })
+  const retainedColumns = expectedColumns
+    .map((column) => column.name)
+    .filter((name) => existingNames.has(name))
+  const retainedColumnList = retainedColumns.map(quoteIdentifier).join(', ')
+
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(tempTableName)}`)
+    await exec(
+      database,
+      `CREATE TABLE ${quoteIdentifier(tempTableName)} (${definitions.join(', ')})`
+    )
+    if (retainedColumns.length > 0) {
+      await exec(
+        database,
+        `INSERT INTO ${quoteIdentifier(tempTableName)} (${retainedColumnList})
+         SELECT ${retainedColumnList} FROM ${quoteIdentifier(tableName)}`
+      )
+    }
+    await exec(database, `DROP TABLE ${quoteIdentifier(tableName)}`)
+    await exec(
+      database,
+      `ALTER TABLE ${quoteIdentifier(tempTableName)} RENAME TO ${quoteIdentifier(tableName)}`
+    )
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    throw error
+  }
+}
+
+export function getDatabasePath(): string {
+  return databasePath
+}
+
+function openDatabase(path: string): Promise<sqlite3.Database> {
+  return new Promise((resolve, reject) => {
+    const database = new sqlite3.Database(path, (error) => {
+      if (error) reject(error)
+      else resolve(database)
+    })
+  })
+}
+
+export function exec(database: sqlite3.Database, sql: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    database.exec(sql, (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
+export function all<T>(
+  database: sqlite3.Database,
+  sql: string,
+  params: unknown[] = []
+): Promise<T[]> {
+  return new Promise((resolve, reject) => {
+    database.all(sql, params, (error, rows: T[]) => {
+      if (error) reject(error)
+      else resolve(rows)
+    })
+  })
+}
+
+export function get<T>(
+  database: sqlite3.Database,
+  sql: string,
+  params: unknown[] = []
+): Promise<T | undefined> {
+  return new Promise((resolve, reject) => {
+    database.get(sql, params, (error, row: T | undefined) => {
+      if (error) reject(error)
+      else resolve(row)
+    })
+  })
+}
+
+export function run(
+  database: sqlite3.Database,
+  sql: string,
+  params: unknown[] = []
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    database.run(sql, params, (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
+export function runWithLastId(
+  database: sqlite3.Database,
+  sql: string,
+  params: unknown[] = []
+): Promise<{ lastId: number; changes: number }> {
+  return new Promise((resolve, reject) => {
+    database.run(sql, params, function (error) {
+      if (error) reject(error)
+      else resolve({ lastId: this.lastID, changes: this.changes })
+    })
+  })
+}
+
+async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
+  await exec(
+    database,
+    `
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS operation_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      target TEXT,
+      detail TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS import_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_name TEXT,
+      worksheet_id TEXT,
+      worksheet_name TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      row_count INTEGER NOT NULL DEFAULT 0,
+      message TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS import_batch_rows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      worksheet_name TEXT NOT NULL,
+      record_id INTEGER NOT NULL,
+      FOREIGN KEY (batch_id) REFERENCES import_batches(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_import_batch_rows_batch ON import_batch_rows (batch_id);
+
+    CREATE TABLE IF NOT EXISTS monthly_payroll_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      unit_full_name TEXT,
+      active_count INTEGER NOT NULL DEFAULT 0,
+      survivor_count INTEGER NOT NULL DEFAULT 0,
+      salary_total REAL NOT NULL DEFAULT 0,
+      withholding_total REAL NOT NULL DEFAULT 0,
+      tax_total REAL NOT NULL DEFAULT 0,
+      actual_pay REAL NOT NULL DEFAULT 0,
+      retired_housing REAL NOT NULL DEFAULT 0,
+      source_salary_path TEXT,
+      source_social_path TEXT,
+      source_tax_path TEXT,
+      insurance_import_path TEXT,
+      voucher_import_path TEXT,
+      payroll_backpay_path TEXT,
+      report_fingerprint TEXT,
+      archived_at TEXT,
+      archive_dir TEXT,
+      archive_manifest TEXT,
+      report_snapshot TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_monthly_payroll_runs_ym ON monthly_payroll_runs (year DESC, month DESC, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS import_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_name TEXT NOT NULL,
+      worksheet_name TEXT,
+      ok INTEGER NOT NULL,
+      imported_rows INTEGER NOT NULL DEFAULT 0,
+      message TEXT,
+      batch_id INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workflow_name TEXT NOT NULL,
+      ok INTEGER NOT NULL,
+      affected_rows INTEGER NOT NULL DEFAULT 0,
+      messages TEXT,
+      warnings TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS field_mappings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worksheet_id TEXT NOT NULL,
+      worksheet_name TEXT NOT NULL,
+      field_id TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      local_column TEXT NOT NULL,
+      UNIQUE (worksheet_id, field_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS lookup_failures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workflow TEXT,
+      worksheet TEXT,
+      id_card TEXT,
+      name TEXT,
+      lookup_table TEXT,
+      lookup_key TEXT,
+      lookup_value TEXT,
+      reason TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_lookup_failures_workflow ON lookup_failures (workflow);
+    CREATE INDEX IF NOT EXISTS idx_lookup_failures_idcard ON lookup_failures (id_card);
+
+    CREATE TABLE IF NOT EXISTS personnel_archive (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      archive_type TEXT NOT NULL,
+      source_worksheet TEXT NOT NULL,
+      id_card TEXT,
+      name TEXT,
+      unit_code TEXT,
+      unit_name TEXT,
+      original_data TEXT NOT NULL,
+      reason TEXT,
+      archived_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_personnel_archive_idcard ON personnel_archive (id_card);
+    CREATE INDEX IF NOT EXISTS idx_personnel_archive_type ON personnel_archive (archive_type);
+
+    CREATE TABLE IF NOT EXISTS personnel_status_index (
+      id_card TEXT PRIMARY KEY,
+      name TEXT,
+      status TEXT NOT NULL,
+      source_tables TEXT NOT NULL,
+      is_conflict INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_personnel_status_index_status ON personnel_status_index (status);
+    CREATE INDEX IF NOT EXISTS idx_personnel_status_index_name ON personnel_status_index (name);
+
+    CREATE TABLE IF NOT EXISTS pivot_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      primary_worksheet_id TEXT NOT NULL,
+      config_json TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `
+  )
+
+  await ensureColumns(database, 'import_batches', [
+    { name: 'worksheet_id', definition: 'TEXT' },
+    { name: 'worksheet_name', definition: 'TEXT' },
+    { name: 'row_count', definition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'message', definition: 'TEXT' }
+  ])
+  await ensureColumns(database, 'import_logs', [{ name: 'batch_id', definition: 'INTEGER' }])
+  await ensureColumns(database, 'monthly_payroll_runs', [
+    { name: 'report_fingerprint', definition: 'TEXT' },
+    { name: 'archived_at', definition: 'TEXT' },
+    { name: 'archive_dir', definition: 'TEXT' },
+    { name: 'archive_manifest', definition: 'TEXT' },
+    { name: 'report_snapshot', definition: 'TEXT' }
+  ])
+  await ensureColumns(database, 'personnel_status_index', [
+    { name: 'name', definition: 'TEXT' },
+    { name: 'status', definition: 'TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'source_tables', definition: 'TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'is_conflict', definition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'updated_at', definition: 'TEXT' }
+  ])
+}
+
+async function ensureColumns(
+  database: sqlite3.Database,
+  tableName: string,
+  expected: Array<{ name: string; definition: string }>
+): Promise<void> {
+  const existing = await all<{ name: string }>(database, `PRAGMA table_info(${tableName})`)
+  const existingNames = new Set(existing.map((column) => column.name))
+  for (const column of expected) {
+    if (!existingNames.has(column.name)) {
+      await exec(database, `ALTER TABLE ${tableName} ADD COLUMN ${column.name} ${column.definition}`)
+    }
+  }
+}
+
+async function ensurePerformanceIndexes(database: sqlite3.Database): Promise<void> {
+  // 给证件号码等 JOIN 关联列创建索引，显著提升透视查询和工作流的关联速度
+  const idCardIndexes: Array<{ table: string; column: string }> = [
+    { table: '一体化在职', column: '证件号码' },
+    { table: '一体化退休', column: '证件号码' },
+    { table: '一体化其他', column: '证件号码' },
+    { table: '预算在职', column: '证件号码*' },
+    { table: '预算退休', column: '证件号码*' },
+    { table: '预算其他', column: '证件号码' },
+    { table: '工资年报', column: '证件号码*' },
+    { table: '绩效工资', column: '证件号码*' },
+    { table: '乡镇补贴', column: '证件号码*' },
+    { table: '人员明细导出', column: '证件号码*' },
+    { table: '新房补', column: '证件号码' }
+  ]
+
+  for (const { table, column } of idCardIndexes) {
+    const existing = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(table)})`
+    )
+    const hasColumn = existing.some((col) => col.name === column)
+    if (!hasColumn) continue
+
+    const indexName = `idx_${table}_${column}`.replace(/[^a-zA-Z0-9\u4e00-\u9fff_]/g, '_')
+    await exec(
+      database,
+      `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(indexName)} ON ${quoteIdentifier(table)} (${quoteIdentifier(column)})`
+    )
+  }
+
+  // 给预算表的 md_status 列加索引（用于视图筛选）
+  const statusTables = ['预算在职', '预算退休', '预算其他']
+  for (const table of statusTables) {
+    const existing = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(table)})`
+    )
+    if (existing.some((col) => col.name === 'md_status')) {
+      await exec(
+        database,
+        `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(`idx_${table}_md_status`)} ON ${quoteIdentifier(table)} ("md_status")`
+      )
+    }
+  }
+
+  const worksheets = readWorksheetMetadata().filter(isPersonnelStatusTargetWorksheet)
+  for (const worksheet of worksheets) {
+    const statusColumn = getPersonnelStatusColumnName(worksheet)
+    if (!statusColumn) continue
+    const existing = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(worksheet.name)})`
+    )
+    if (!existing.some((col) => col.name === statusColumn)) continue
+
+    const indexName = `idx_${worksheet.name}_${statusColumn}`.replace(/[^a-zA-Z0-9\u4e00-\u9fff_]/g, '_')
+    await exec(
+      database,
+      `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(indexName)} ON ${quoteIdentifier(worksheet.name)} (${quoteIdentifier(statusColumn)})`
+    )
+  }
+}
+
+const identityUniqueFieldNames = new Set(['\u8eab\u4efd\u8bc1\u53f7\u7801', '\u8eab\u4efd\u8bc1\u53f7', '\u8bc1\u4ef6\u53f7\u7801*', '\u8bc1\u4ef6\u53f7\u7801'])
+
+const identityNonUniqueWorksheetIds = new Set([
+  'local-hr-edu',
+  'local-hr-cert',
+  'local-hr-teach',
+  'local-hr-work'
+])
+
+const identityCompositeFieldNames = new Map<string, string[]>([
+  ['\u4e00\u4f53\u5316\u5728\u804c', ['\u5de5\u8d44\u6279\u6b21']]
+])
+
+async function ensureIdentityUniqueIndexes(database: sqlite3.Database): Promise<void> {
+  const worksheets = readWorksheetMetadata()
+  for (const worksheet of worksheets) {
+    if (identityNonUniqueWorksheetIds.has(worksheet.worksheetId)) continue
+    const columns = getWorksheetLocalColumns(worksheet)
+    const idColumn = columns.find((column) =>
+      identityUniqueFieldNames.has(column.field.name)
+    )
+    if (!idColumn) continue
+
+    const existingCols = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(worksheet.name)})`
+    )
+    if (!existingCols.some((col) => col.name === idColumn.columnName)) continue
+
+    const extraFieldNames = identityCompositeFieldNames.get(worksheet.name) ?? []
+    const extraColumns = extraFieldNames
+      .map((fieldName) => columns.find((column) => column.field.name === fieldName))
+      .filter((column): column is NonNullable<typeof column> => Boolean(column))
+      .filter((column) => existingCols.some((col) => col.name === column.columnName))
+
+    // \u590d\u5408\u552f\u4e00\u7d22\u5f15\u542f\u7528\u524d\uff0c\u5148\u5220\u9664\u53ef\u80fd\u5b58\u5728\u7684\u65e7\u5355\u5217\u552f\u4e00\u7d22\u5f15\u3002
+    if (extraColumns.length > 0) {
+      const legacyIndexName = `uniq_${worksheet.name}_${idColumn.columnName}`.replace(
+        /[^a-zA-Z0-9\u4e00-\u9fff_]/g,
+        '_'
+      )
+      await exec(database, `DROP INDEX IF EXISTS ${quoteIdentifier(legacyIndexName)}`)
+    }
+
+    const allColumns = [idColumn, ...extraColumns]
+    const indexSuffix = allColumns.map((column) => column.columnName).join('_')
+    const indexName = `uniq_${worksheet.name}_${indexSuffix}`.replace(
+      /[^a-zA-Z0-9\u4e00-\u9fff_]/g,
+      '_'
+    )
+    const quotedColumn = quoteIdentifier(idColumn.columnName)
+    const indexColumnsClause = allColumns
+      .map((column) => quoteIdentifier(column.columnName))
+      .join(', ')
+    try {
+      await exec(
+        database,
+        `CREATE UNIQUE INDEX IF NOT EXISTS ${quoteIdentifier(indexName)}
+         ON ${quoteIdentifier(worksheet.name)} (${indexColumnsClause})
+         WHERE ${quotedColumn} IS NOT NULL AND ${quotedColumn} != ''`
+      )
+    } catch (error) {
+      const duplicates = await all<{ id_card: string; cnt: number }>(
+        database,
+        `SELECT ${quotedColumn} AS id_card, COUNT(*) AS cnt
+         FROM ${quoteIdentifier(worksheet.name)}
+         WHERE ${quotedColumn} IS NOT NULL AND ${quotedColumn} != ''
+         GROUP BY ${indexColumnsClause}
+         HAVING cnt > 1
+         LIMIT 3`
+      )
+      const sample = duplicates.map((row) => `${row.id_card}(${row.cnt})`).join('\u3001')
+      console.warn(
+        `\u65e0\u6cd5\u5728 ${worksheet.name}.${idColumn.columnName} \u521b\u5efa\u8eab\u4efd\u8bc1\u552f\u4e00\u7d22\u5f15\uff0c\u5b58\u5728\u91cd\u590d\u503c\uff08\u793a\u4f8b\uff1a${sample}\uff09\uff0c\u8bf7\u5148\u5728\u8868\u4e2d\u6e05\u7406\uff1a${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  }
+}
+
+export async function loadPersonnelStatusIdentitySets(
+  database: sqlite3.Database
+): Promise<{ activeIds: Set<string>; retiredIds: Set<string>; otherIds: Set<string> }> {
+  await refreshPersonnelStatusIndex(database)
+  const rows = await all<{ id_card: string; status: string }>(
+    database,
+    `SELECT id_card, status FROM personnel_status_index`
+  )
+
+  return {
+    activeIds: new Set(
+      rows
+        .filter((row) => row.status === activePersonnelStatus)
+        .map((row) => normalizeIdentityValue(row.id_card))
+        .filter(Boolean)
+    ),
+    retiredIds: new Set(
+      rows
+        .filter((row) => row.status === retiredPersonnelStatus)
+        .map((row) => normalizeIdentityValue(row.id_card))
+        .filter(Boolean)
+    ),
+    otherIds: new Set(
+      rows
+        .filter((row) => row.status === otherPersonnelStatus)
+        .map((row) => normalizeIdentityValue(row.id_card))
+        .filter(Boolean)
+    )
+  }
+}
+
+type PersonnelStatusSourceRow = {
+  idCard: string
+  name: string
+}
+
+async function refreshPersonnelStatusIndex(database: sqlite3.Database): Promise<void> {
+  const worksheets = readWorksheetMetadata()
+  const activeWorksheet = worksheets.find((item) => item.name === '一体化在职')
+  const retiredWorksheet = worksheets.find((item) => item.name === '一体化退休')
+  const otherWorksheet = worksheets.find((item) => item.name === '一体化其他')
+  const activeRows = activeWorksheet ? await loadIdentityRows(database, activeWorksheet) : []
+  const retiredRows = retiredWorksheet ? await loadIdentityRows(database, retiredWorksheet) : []
+  const otherRows = otherWorksheet ? await loadIdentityRows(database, otherWorksheet) : []
+  const entries = new Map<
+    string,
+    { name: string; inActive: boolean; inRetired: boolean; inOther: boolean; sourceTables: Set<string> }
+  >()
+
+  const append = (
+    row: PersonnelStatusSourceRow,
+    sourceTable: string,
+    flag: 'inActive' | 'inRetired' | 'inOther'
+  ): void => {
+    const idCard = normalizeIdentityValue(row.idCard)
+    if (!idCard) return
+    const current =
+      entries.get(idCard) ?? {
+        name: '',
+        inActive: false,
+        inRetired: false,
+        inOther: false,
+        sourceTables: new Set<string>()
+      }
+    if (!current.name && row.name) current.name = row.name
+    current[flag] = true
+    current.sourceTables.add(sourceTable)
+    entries.set(idCard, current)
+  }
+
+  for (const row of activeRows) append(row, '一体化在职', 'inActive')
+  for (const row of retiredRows) append(row, '一体化退休', 'inRetired')
+  for (const row of otherRows) append(row, '一体化其他', 'inOther')
+
+  const now = new Date().toISOString()
+  await run(database, `DELETE FROM personnel_status_index`)
+  for (const [idCard, entry] of entries) {
+    const status = entry.inActive
+      ? activePersonnelStatus
+      : entry.inRetired
+        ? retiredPersonnelStatus
+        : otherPersonnelStatus
+    await run(
+      database,
+      `INSERT INTO personnel_status_index (id_card, name, status, source_tables, is_conflict, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        idCard,
+        entry.name,
+        status,
+        Array.from(entry.sourceTables).join(','),
+        entry.inActive && entry.inRetired ? 1 : 0,
+        now
+      ]
+    )
+  }
+}
+
+async function loadIdentityRows(
+  database: sqlite3.Database,
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number]
+): Promise<PersonnelStatusSourceRow[]> {
+  const identityColumn = getIdentityColumnName(worksheet)
+  if (!identityColumn) return []
+  const nameColumn = getNameColumnName(worksheet)
+
+  const existing = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(worksheet.name)})`
+  )
+  const existingNames = new Set(existing.map((column) => column.name))
+  if (!existingNames.has(identityColumn)) return []
+
+  const nameExpr = nameColumn && existingNames.has(nameColumn) ? quoteIdentifier(nameColumn) : `''`
+  const rows = await all<{ id_value: unknown; name_value: unknown }>(
+    database,
+    `SELECT ${quoteIdentifier(identityColumn)} AS id_value, ${nameExpr} AS name_value FROM ${quoteIdentifier(worksheet.name)}`
+  )
+  return rows
+    .map((row) => ({
+      idCard: normalizeIdentityValue(row.id_value),
+      name: String(row.name_value ?? '').trim()
+    }))
+    .filter((row) => Boolean(row.idCard))
+}
+
+function getNameColumnName(worksheet: ReturnType<typeof readWorksheetMetadata>[number]): string | undefined {
+  const columns = getWorksheetLocalColumns(worksheet)
+  return columns.find((column) => column.field.name === '姓名' || column.field.name.includes('姓名'))?.columnName
+}
+
+export async function refreshAllPersonnelStatuses(database: sqlite3.Database): Promise<void> {
+  const worksheets = readWorksheetMetadata()
+  const { activeIds, retiredIds, otherIds } = await loadPersonnelStatusIdentitySets(database)
+
+  for (const worksheet of worksheets) {
+    if (!isPersonnelStatusTargetWorksheet(worksheet)) continue
+    await refreshWorksheetPersonnelStatus(database, worksheet, activeIds, retiredIds, otherIds)
+  }
+}
+
+export async function refreshWorksheetPersonnelStatus(
+  database: sqlite3.Database,
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number],
+  activeIds: Set<string>,
+  retiredIds: Set<string>,
+  otherIds: Set<string>
+): Promise<void> {
+  if (isPersonnelStatusSourceWorksheet(worksheet.name)) return
+  const identityColumn = getIdentityColumnName(worksheet)
+  const statusColumn = getPersonnelStatusColumnName(worksheet)
+  if (!identityColumn || !statusColumn) return
+
+  const existing = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(worksheet.name)})`
+  )
+  const existingNames = new Set(existing.map((column) => column.name))
+  if (!existingNames.has(identityColumn) || !existingNames.has(statusColumn)) return
+
+  const hasBudgetStatus = existingNames.has('md_status')
+  const budgetStatusExpr = hasBudgetStatus ? `"md_status" AS current_budget_status` : `NULL AS current_budget_status`
+  const budgetStatusReasonExpr = hasBudgetStatus ? `"md_status_reason" AS current_budget_status_reason` : `NULL AS current_budget_status_reason`
+  const rows = await all<{
+    id: number
+    id_value: unknown
+    current_status: string | null
+    current_budget_status: string | null
+    current_budget_status_reason: string | null
+  }>(
+    database,
+    `SELECT "id",
+            ${quoteIdentifier(identityColumn)} AS id_value,
+            ${quoteIdentifier(statusColumn)} AS current_status,
+            ${budgetStatusExpr},
+            ${budgetStatusReasonExpr}
+     FROM ${quoteIdentifier(worksheet.name)}`
+  )
+  for (const row of rows) {
+    const status = resolvePersonnelStatus(row.id_value, activeIds, retiredIds, otherIds)
+    const budgetStatus = resolveBudgetWorksheetStatus(
+      worksheet.name,
+      row.id_value,
+      activeIds,
+      retiredIds,
+      otherIds
+    )
+    if (budgetStatus && hasBudgetStatus && row.current_budget_status_reason === '手工设置') {
+      continue
+    }
+    if (budgetStatus && hasBudgetStatus && (row.current_budget_status ?? '') === budgetStatus) {
+      continue
+    }
+    if (!budgetStatus && (row.current_status ?? '') === status) {
+      continue
+    }
+    const assignments: string[] = []
+    const params: unknown[] = []
+    if (!budgetStatus) {
+      assignments.push(`${quoteIdentifier(statusColumn)} = ?`)
+      params.push(status)
+    }
+    if (budgetStatus && hasBudgetStatus) {
+      assignments.push(`"md_status" = ?`, `"md_status_changed_at" = ?`, `"md_status_reason" = ?`)
+      params.push(budgetStatus, new Date().toISOString(), '按一体化三张表刷新人员状态')
+    }
+    if (assignments.length === 0) continue
+    params.push(new Date().toISOString(), row.id)
+    await run(
+      database,
+      `UPDATE ${quoteIdentifier(worksheet.name)} SET ${assignments.join(', ')}, "md_updated_at" = ? WHERE "id" = ?`,
+      params
+    )
+  }
+}

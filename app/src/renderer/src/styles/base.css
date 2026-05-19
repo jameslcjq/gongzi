@@ -1,0 +1,89 @@
+/* ===== 设计变量 ===== */
+:root {
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-2: #fafbff;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text: #1f2937;
+  --text-2: #374151;
+  --text-3: #6b7280;
+  --text-muted: #9ca3af;
+  --primary: #2f54eb;
+  --primary-hover: #1d39c4;
+  --primary-soft: #e7eefe;
+  --primary-soft-2: #d6e4ff;
+  --primary-text: #2f6fed;
+  --success: #16a34a;
+  --success-soft: #f0fdf4;
+  --warn: #d97706;
+  --warn-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --gray-soft: #f3f4f6;
+  --gray-text: #374151;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 1px 3px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 8px 24px -4px rgba(16, 24, 40, 0.10);
+  --radius: 6px;
+  --radius-sm: 4px;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+
+  color: var(--text);
+  background: var(--bg);
+  font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 1100px;
+}
+
+/* ===== El Table 选中行 ===== */
+.el-table .is-selected-row > .el-table__cell {
+  background: var(--primary-soft) !important;
+}
+
+/* ===== 记录表单 ===== */
+.record-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  max-height: 60vh;
+  overflow: auto;
+  padding-right: 6px;
+}
+.record-form-grid .el-form-item { margin-bottom: 8px; }
+
+/* ===== 设置弹窗 ===== */
+.settings-section {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.settings-section h4 { margin: 0; font-size: 14px; }
+.settings-section p  { margin: 0; color: var(--text-3); font-size: 12px; }
+
+.danger-section {
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+}
+.danger-section h4 { color: var(--danger); }
+
+/* ===== 导入失败详情弹窗 ===== */
+.import-error-dialog .el-message-box__message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 300px;
+  overflow-y: auto;
+  color: var(--danger);
+}
