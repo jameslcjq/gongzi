@@ -889,6 +889,13 @@ export async function cancelMonthlyPayrollMonthClose(id: number): Promise<Monthl
   )
   if (!rows[0]) throw new Error('未找到要取消月结的工资报账记录')
   const targetRun = mapRunRow(rows[0])
+  const monthRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs
+     WHERE year = ? AND month = ? AND archived_at IS NOT NULL`,
+    [targetRun.year, targetRun.month]
+  )
+  await restoreMonthlyPayrollSourceFiles(monthRows.map(mapRunRow))
 
   await run(
     database,
@@ -1100,6 +1107,52 @@ async function moveArchiveFile(
 
 function archiveFileName(label: string, archiveDate: string, sourcePath: string): string {
   return `${label}_${archiveDate}_${basename(sourcePath)}`
+}
+
+async function restoreMonthlyPayrollSourceFiles(runs: MonthlyPayrollRun[]): Promise<void> {
+  const restoredTargets = new Set<string>()
+  for (const run of runs) {
+    await restoreArchiveSourceFile(run, run.sourceSalaryPath, '工资表', restoredTargets)
+    await restoreArchiveSourceFile(run, run.sourceSocialPath, '社保', restoredTargets)
+    await restoreArchiveSourceFile(run, run.sourceTaxPath, '个税', restoredTargets)
+  }
+}
+
+async function restoreArchiveSourceFile(
+  run: MonthlyPayrollRun,
+  originalPath: string | null,
+  label: string,
+  restoredTargets: Set<string>
+): Promise<void> {
+  if (!originalPath || restoredTargets.has(originalPath) || existsSync(originalPath)) return
+  const archivedPath = findArchivedSourcePath(run, originalPath, label)
+  if (!archivedPath || !existsSync(archivedPath)) return
+
+  mkdirSync(dirname(originalPath), { recursive: true })
+  const targetPath = uniqueArchivePath(dirname(originalPath), basename(originalPath))
+  try {
+    await rename(archivedPath, targetPath)
+  } catch {
+    await copyFile(archivedPath, targetPath)
+    await unlink(archivedPath)
+  }
+  restoredTargets.add(originalPath)
+}
+
+function findArchivedSourcePath(
+  run: MonthlyPayrollRun,
+  originalPath: string,
+  label: string
+): string | null {
+  const originalName = basename(originalPath)
+  const match = run.archiveManifest.find((filePath) => {
+    const name = basename(filePath)
+    return (
+      name === `${label}_${originalName}` ||
+      (name.startsWith(`${label}_`) && name.endsWith(`_${originalName}`))
+    )
+  })
+  return match ?? null
 }
 
 function uniqueArchivePath(targetDir: string, fileName: string): string {

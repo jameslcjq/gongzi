@@ -100,7 +100,7 @@ async function openMonthCloseFolder(row: MonthlyPayrollRun) {
 async function cancelMonthClose(row: MonthlyPayrollRun) {
   try {
     await ElMessageBox.confirm(
-      `取消 ${row.year}年${row.month}月 的月结后，该月所有历史记录都会解除月结锁定，可以重新预处理和生成报表；已经移入月结目录的源文件不会自动放回监控文件夹。`,
+      `取消 ${row.year}年${row.month}月 的月结后，该月所有历史记录都会解除月结锁定，工资、社保、个税源文件会放回监控文件夹，可以重新预处理和生成报表。`,
       '取消月结',
       {
         type: 'warning',
@@ -335,7 +335,7 @@ function formatMoney(value: number): string {
       <el-tab-pane label="工资月结" name="monthClose">
         <div class="settings-section">
           <h4>工资月结管理</h4>
-          <p>取消月结只解除本月锁定，不删除月结目录文件，也不会把源文件自动放回监控文件夹。</p>
+          <p>取消月结会解除本月锁定，并把工资、社保、个税源文件放回监控文件夹；已生成的报表文件仍保留在月结目录。</p>
           <div>
             <el-button @click="refreshMonthCloseRuns">刷新月结列表</el-button>
           </div>
