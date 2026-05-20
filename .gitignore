@@ -61,6 +61,10 @@ temp/
 *.zip
 *.rar
 *.7z
+!app/public/
+!app/public/templates/
+!app/public/templates/*.xls
+!app/public/templates/*.xlsx
 
 # Optional local automation/worktree folders
 .claude/

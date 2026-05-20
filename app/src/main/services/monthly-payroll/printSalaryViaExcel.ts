@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { parseSalaryWorkbook, parseTaxWorkbook } from './monthlyPayroll'
+import type { MonthlyPayrollSalaryPrintPageSummary } from '../../../shared/types'
 
 export type PrintSalaryViaExcelRequest = {
   salaryWorkbookPath: string
@@ -44,15 +45,34 @@ export async function printSalaryWorkbookViaExcel(
   await runPowerShellScript(script, 'Excel 处理工资表失败')
 }
 
-async function runPowerShellScript(script: string, errorPrefix: string): Promise<void> {
+export async function getSalaryWorkbookPrintPageSummary(
+  request: PrintSalaryViaExcelRequest
+): Promise<MonthlyPayrollSalaryPrintPageSummary> {
+  const script = buildPageSummaryScript({
+    salaryWorkbookPath: request.salaryWorkbookPath,
+    printerName: request.printerName ?? '',
+    invoicePaperName: request.invoicePaperName ?? DEFAULT_INVOICE_PAPER_NAME,
+    salarySheetNames: SALARY_SHEETS
+  })
+  const output = await runPowerShellScript(script, 'Excel 统计工资表打印页数失败')
+  const jsonLine = output.trim().split(/\r?\n/).find((line) => line.trim().startsWith('{'))
+  if (!jsonLine) throw new Error('Excel 统计工资表打印页数失败：未返回统计结果')
+  return JSON.parse(jsonLine) as MonthlyPayrollSalaryPrintPageSummary
+}
+
+async function runPowerShellScript(script: string, errorPrefix: string): Promise<string> {
   const encoded = Buffer.from(script, 'utf16le').toString('base64')
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const child = spawn(
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
       { windowsHide: true }
     )
+    let stdout = ''
     let stderr = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString()
     })
@@ -61,7 +81,7 @@ async function runPowerShellScript(script: string, errorPrefix: string): Promise
     })
     child.on('close', (code) => {
       if (code === 0) {
-        resolve()
+        resolve(stdout)
         return
       }
       const message = stderr.trim() || `PowerShell 退出码 ${code}`
@@ -292,6 +312,121 @@ try {
   $wb.Close($false)
   $xl.Quit()
   Write-Output ("printed=$printed taxApplied=$taxApplied paperId=$PaperId")
+  exit 0
+} catch {
+  try { if ($wb) { $wb.Close($false) } } catch {}
+  try { if ($xl) { $xl.Quit() } } catch {}
+  Write-Error $_.Exception.Message
+  exit 1
+} finally {
+  if ($wb) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb) | Out-Null }
+  if ($xl) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($xl) | Out-Null }
+  [System.GC]::Collect()
+  [System.GC]::WaitForPendingFinalizers()
+}
+`
+}
+
+function buildPageSummaryScript(input: Omit<ScriptInput, 'taxByIdCard'>): string {
+  const pathLit = psString(input.salaryWorkbookPath)
+  const printerLit = psString(input.printerName)
+  const paperNameLit = psString(input.invoicePaperName)
+  const sheetsLit = input.salarySheetNames.map(psString).join(', ')
+
+  return `
+$ErrorActionPreference = 'Stop'
+$Path = ${pathLit}
+$PrinterName = ${printerLit}
+$InvoicePaperName = ${paperNameLit}
+$SheetNames = @(${sheetsLit})
+
+$PaperId = 9
+try {
+  Add-Type -AssemblyName System.Drawing
+  if ($PrinterName -and $PrinterName.Length -gt 0) {
+    $prSet = New-Object System.Drawing.Printing.PrinterSettings
+    $prSet.PrinterName = $PrinterName
+    foreach ($p in $prSet.PaperSizes) {
+      if ($p.PaperName -match $InvoicePaperName -and $p.RawKind -ge 256) {
+        $PaperId = [int]$p.RawKind
+        break
+      }
+    }
+  }
+} catch {}
+
+$xl = $null
+$wb = $null
+try {
+  $xl = New-Object -ComObject Excel.Application
+  $xl.Visible = $false
+  $xl.DisplayAlerts = $false
+  $xl.ScreenUpdating = $false
+
+  $wb = $xl.Workbooks.Open($Path, 3, $false)
+
+  if ($PrinterName -and $PrinterName.Length -gt 0) {
+    $resolved = $null
+    try {
+      $escaped = $PrinterName -replace "'", "''"
+      $printerInfo = Get-CimInstance -ClassName Win32_Printer -Filter ("Name = '" + $escaped + "'") -ErrorAction SilentlyContinue
+      if ($printerInfo) {
+        $resolved = "$PrinterName on " + $printerInfo.PortName
+      }
+    } catch {}
+    foreach ($candidate in @($resolved, $PrinterName)) {
+      if (-not $candidate) { continue }
+      try {
+        $xl.ActivePrinter = $candidate
+        break
+      } catch {}
+    }
+  }
+
+  $items = New-Object System.Collections.Generic.List[object]
+  $seenSheets = @{}
+  foreach ($name in $SheetNames) {
+    $ws = $null
+    try { $ws = $wb.Sheets.Item($name) } catch { $ws = $null }
+    if ($null -eq $ws) { continue }
+    if ($seenSheets.ContainsKey($ws.Name)) { continue }
+    $seenSheets[$ws.Name] = $true
+
+    $pageSetup = $ws.PageSetup
+    $pageSetup.Orientation = 1
+    $pageSetup.Zoom = $false
+    $pageSetup.FitToPagesWide = 1
+    $pageSetup.FitToPagesTall = $false
+    $pageSetup.PrintArea = ''
+    try {
+      $pageSetup.PaperSize = $PaperId
+    } catch {
+      $pageSetup.PaperSize = 9
+    }
+
+    $ws.Activate()
+    try { $xl.ActiveWindow.View = 2 } catch {}
+    try { $ws.DisplayPageBreaks = $true } catch {}
+    $pages = [int]($ws.HPageBreaks.Count + 1)
+    if ($pages -lt 1) { $pages = 1 }
+    $label = if ($ws.Name -eq '公办在职') { '工资表' } else { '遗补' }
+    $items.Add([pscustomobject]@{
+      label = $label
+      sheetName = [string]$ws.Name
+      pages = $pages
+    }) | Out-Null
+  }
+
+  $total = 0
+  foreach ($item in $items) { $total += [int]$item.pages }
+  $result = [pscustomobject]@{
+    items = $items
+    totalPages = $total
+  }
+
+  $wb.Close($false)
+  $xl.Quit()
+  $result | ConvertTo-Json -Depth 5 -Compress
   exit 0
 } catch {
   try { if ($wb) { $wb.Close($false) } } catch {}

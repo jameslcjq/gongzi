@@ -5,6 +5,7 @@ import { Bell, CircleCheck, CircleClose, Setting, Tickets, Upload } from '@eleme
 import FieldStructureDialog from './components/FieldStructureDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import IntegratedPortalPage from './components/IntegratedPortalPage.vue'
+import AnnualAdjustmentPage from './components/AnnualAdjustmentPage.vue'
 import MonthlyPayrollPage from './components/MonthlyPayrollPage.vue'
 import PivotPage from './components/PivotPage.vue'
 import StatReportPage from './components/StatReportPage.vue'
@@ -44,6 +45,7 @@ const modules: ModuleGroup[] = [
   { key: 'integration', label: '一体化对接', tables: [] },
   { key: 'integrated', label: '一体化', tables: ['一体化在职', '一体化退休', '一体化其他'] },
   { key: 'payroll', label: '工资报账', tables: [] },
+  { key: 'annual-adjustment', label: '社保个税', tables: [] },
   { key: 'budget', label: '预算', tables: ['预算在职', '预算退休', '预算其他'] },
   { key: 'annual', label: '工资年报', tables: ['工资年报', '绩效工资'] },
   { key: 'township', label: '乡镇补贴', tables: ['乡镇补贴'] },
@@ -621,13 +623,17 @@ async function promptHrMasterSync() {
   hrMasterSyncPrompting = true
   try {
     const preview = await window.salaryApi.previewHrMasterSyncFromIntegrated()
-    if (preview.updatableRows === 0) return
+    const warnings = buildHrMasterSyncWarnings(preview)
+    if (preview.updatableRows === 0) {
+      await showIdCardLookupNotice('一体化在职身份证匹配提醒', warnings)
+      return
+    }
 
     const isEmptyMaster = preview.masterRows === 0
     const title = isEmptyMaster ? '更新人事信息主表' : '发现人事信息差异'
     const selections = await openSyncDiffDialog(
       title,
-      `一体化在职：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`,
+      appendSyncSummaryWarnings(`一体化在职：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
       flattenSyncDiffRows('一体化在职', preview.diffs, 'sourceRecordId')
     )
     if (!selections) return
@@ -684,12 +690,16 @@ async function promptBudgetActiveMasterSync() {
   budgetActiveSyncPrompting = true
   try {
     const preview = await window.salaryApi.previewBudgetActiveMasterSync()
-    if (preview.updatableRows === 0) return
+    const warnings = buildBudgetActiveMasterSyncWarnings(preview)
+    if (preview.updatableRows === 0) {
+      await showIdCardLookupNotice('预算在职身份证匹配提醒', warnings)
+      return
+    }
 
     const title = preview.masterRows === 0 ? '更新人事信息主表' : '发现人事信息差异'
     const selections = await openSyncDiffDialog(
       title,
-      `预算在职：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`,
+      appendSyncSummaryWarnings(`预算在职：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
       flattenSyncDiffRows('预算在职', preview.diffs, 'budgetRecordId')
     )
     if (!selections) return
@@ -744,12 +754,16 @@ async function promptTeacherDetailMasterSync() {
   teacherDetailSyncPrompting = true
   try {
     const preview = await window.salaryApi.previewTeacherDetailMasterSync()
-    if (preview.updatableRows === 0) return
+    const warnings = buildTeacherDetailMasterSyncWarnings(preview)
+    if (preview.updatableRows === 0) {
+      await showIdCardLookupNotice('在编教职工身份证匹配提醒', warnings)
+      return
+    }
 
     const title = preview.masterRows === 0 ? '更新人事信息主表' : '发现人事信息差异'
     const selections = await openSyncDiffDialog(
       title,
-      `在编教职工基本信息：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`,
+      appendSyncSummaryWarnings(`在编教职工基本信息：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
       flattenSyncDiffRows('在编教职工基本信息', preview.diffs, 'sourceRecordId')
     )
     if (!selections) return
@@ -847,6 +861,53 @@ function openSyncDiffDialog(
   })
 }
 
+function buildHrMasterSyncWarnings(preview: HrMasterSyncPreview): string[] {
+  return [
+    ...(preview.missingIdCardRows
+      ? [`一体化在职有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
+      : []),
+    ...(preview.missingLookupRows
+      ? [`一体化在职有 ${preview.missingLookupRows} 条按工资金额未匹配到岗位/薪级对照，未纳入本次更新。`]
+      : [])
+  ]
+}
+
+function buildBudgetActiveMasterSyncWarnings(preview: BudgetActiveMasterSyncPreview): string[] {
+  return preview.missingIdCardRows
+    ? [`预算在职有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
+    : []
+}
+
+function buildTeacherDetailMasterSyncWarnings(preview: TeacherDetailMasterSyncPreview): string[] {
+  return preview.missingIdCardRows
+    ? [`在编教职工基本信息有 ${preview.missingIdCardRows} 条缺少身份证号码，未纳入人事信息匹配。`]
+    : []
+}
+
+function buildTownshipMasterSyncWarnings(preview: TownshipMasterSyncPreview): string[] {
+  return preview.missingMasterRows
+    ? [`乡镇补贴有 ${preview.missingMasterRows} 条身份证号在人事信息中未匹配到，未纳入本次更新。`]
+    : []
+}
+
+function appendSyncSummaryWarnings(summary: string, warnings: string[]): string {
+  if (warnings.length === 0) return summary
+  return `${summary}；${warnings.join('；')}`
+}
+
+async function showIdCardLookupNotice(title: string, warnings: string[]): Promise<void> {
+  if (warnings.length === 0) return
+  await ElMessageBox.alert(
+    warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join(''),
+    title,
+    {
+      type: 'warning',
+      confirmButtonText: '知道了',
+      dangerouslyUseHTMLString: true
+    }
+  )
+}
+
 function confirmSyncDiffDialog() {
   const selected = syncDiffRows.value.filter((row) => row.selected)
   if (selected.length === 0) {
@@ -901,11 +962,15 @@ async function handleTownshipImported() {
     }
 
     const preview = await window.salaryApi.previewTownshipMasterSync()
-    if (preview.updatableRows === 0) return
+    const warnings = buildTownshipMasterSyncWarnings(preview)
+    if (preview.updatableRows === 0) {
+      await showIdCardLookupNotice('乡镇补贴身份证匹配提醒', warnings)
+      return
+    }
 
     const selections = await openSyncDiffDialog(
       '发现人事信息差异',
-      `乡镇补贴：更新 ${preview.updatableRows} 人`,
+      appendSyncSummaryWarnings(`乡镇补贴：更新 ${preview.updatableRows} 人`, warnings),
       flattenSyncDiffRows('乡镇补贴', preview.diffs, 'townshipRecordId')
     )
     if (!selections) return
@@ -1147,6 +1212,14 @@ onUnmounted(() => {
 
       <IntegratedPortalPage v-else-if="activeModuleKey === 'integration'" />
 
+      <AnnualAdjustmentPage
+        v-else-if="activeModuleKey === 'annual-adjustment'"
+        :import-watcher="importWatcher"
+        :loading="importWatcherLoading"
+        @refresh="refreshImportWatcher"
+        @open-folder="openImportWatcherFolder"
+      />
+
       <MonthlyPayrollPage
         v-else-if="activeModuleKey === 'payroll'"
         :import-watcher="importWatcher"
@@ -1156,7 +1229,7 @@ onUnmounted(() => {
         @open-folder="openImportWatcherFolder"
       />
 
-      <template v-if="activeModuleKey !== 'pivot' && activeModuleKey !== 'payroll' && activeModuleKey !== 'integration'">
+      <template v-if="activeModuleKey !== 'pivot' && activeModuleKey !== 'payroll' && activeModuleKey !== 'integration' && activeModuleKey !== 'annual-adjustment'">
         <aside class="md-sidebar">
           <div class="md-sidebar-list">
             <div

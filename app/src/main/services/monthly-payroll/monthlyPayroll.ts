@@ -19,6 +19,12 @@ import type {
   UnitSettings
 } from '../../../shared/types'
 import { readUnitSettings } from '../unitSettings'
+import {
+  importSocialSecurityDetail,
+  importTaxDetail,
+  importHousingFundDetail,
+  type HousingFundDetailRow
+} from './detailImport'
 
 type CellValue = string | number | boolean | Date | null | undefined
 
@@ -47,6 +53,7 @@ type PersonalInsuranceTotals = {
   annuity: number
   medical: number
   unemployment: number
+  housing: number
   total: number
 }
 
@@ -76,6 +83,21 @@ type RetiredHousingPerson = {
   backpay: number
   payable: number
   actualPay: number
+}
+
+type MonthlyPayrollBusinessSummary = {
+  activeCount: number
+  activePayableTotal: number
+  activeActualPay: number
+  survivorCount: number
+  survivorActualPay: number
+  retiredHousingCount: number
+  retiredHousingActualPay: number
+}
+
+type IntegratedSimplePaySummary = {
+  rowCount: number
+  actualPayTotal: number
 }
 
 type CompareSummary = {
@@ -126,6 +148,16 @@ type IntegratedRow = {
   name: string
   rowId: number
   values: Record<string, string | number>
+}
+
+function normalizeMonthlyPayrollInput(
+  input?: MonthlyPayrollWorkflowInput
+): MonthlyPayrollWorkflowInput | undefined {
+  if (!input) return input
+  if (input.processScope === 'salary') {
+    return { ...input, socialSecurityWorkbookPath: undefined }
+  }
+  return input
 }
 
 const workflowName = '月度工资报账预处理'
@@ -336,6 +368,40 @@ async function summarizeIntegratedActive(
   }
 }
 
+async function recomputeIntegratedOtherLikeWorksheet(
+  worksheetName: '一体化其他' | '一体化退休'
+): Promise<IntegratedSimplePaySummary> {
+  try {
+    const worksheet = getWorksheetByName(worksheetName)
+    const columns = getWorksheetLocalColumns(worksheet)
+    const colByName = (name: string): string | undefined =>
+      columns.find((column) => column.field.name === name)?.columnName
+    const idColumn = colByName('证件号码')
+    const actualPayColumn = colByName('实发合计')
+    if (!idColumn || !actualPayColumn) return { rowCount: 0, actualPayTotal: 0 }
+
+    const database = await getDatabase()
+    const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
+    const latestById = new Map<string, Record<string, unknown>>()
+    for (const row of rows) {
+      const idCard = normalizeIdCard(row[idColumn])
+      if (!idCard) continue
+      const previous = latestById.get(idCard)
+      if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
+    }
+
+    const latest = Array.from(latestById.values())
+    return {
+      rowCount: latest.length,
+      actualPayTotal: roundMoney(
+        latest.reduce((sum, row) => sum + num(row[actualPayColumn]), 0)
+      )
+    }
+  } catch {
+    return { rowCount: 0, actualPayTotal: 0 }
+  }
+}
+
 function buildTaxByIdCardFromSummary(tax: TaxSummary | undefined): Record<string, number> {
   const map: Record<string, number> = {}
   if (!tax) return map
@@ -382,11 +448,35 @@ function applyTaxToSalarySummary(
   }
 }
 
+function buildBusinessSummary(input: {
+  active?: IntegratedActiveRecomputeResult
+  survivor?: IntegratedSimplePaySummary
+  retiredHousing?: IntegratedSimplePaySummary
+}): MonthlyPayrollBusinessSummary {
+  return {
+    activeCount: input.active?.rowCount ?? 0,
+    activePayableTotal: input.active?.payableTotal ?? 0,
+    activeActualPay: input.active?.actualPayTotal ?? 0,
+    survivorCount: input.survivor?.rowCount ?? 0,
+    survivorActualPay: input.survivor?.actualPayTotal ?? 0,
+    retiredHousingCount: input.retiredHousing?.rowCount ?? 0,
+    retiredHousingActualPay: input.retiredHousing?.actualPayTotal ?? 0
+  }
+}
+
+function buildBusinessSummaryMessages(summary: MonthlyPayrollBusinessSummary): string[] {
+  return [
+    `在职 ${summary.activeCount} 人，应发 ${formatMoney(summary.activePayableTotal)} 元，实发 ${formatMoney(summary.activeActualPay)} 元`,
+    `遗补 ${summary.survivorCount} 人，实发 ${formatMoney(summary.survivorActualPay)} 元`,
+    `退休 ${summary.retiredHousingCount} 人，实发 ${formatMoney(summary.retiredHousingActualPay)} 元`
+  ]
+}
+
 export async function preprocessMonthlyPayroll(
   payload?: { monthlyPayroll?: MonthlyPayrollWorkflowInput }
 ): Promise<RuleResult> {
   try {
-    const input = payload?.monthlyPayroll
+    const input = normalizeMonthlyPayrollInput(payload?.monthlyPayroll)
     const targetDate = resolvePayrollPeriod(input)
     if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
       return {
@@ -396,13 +486,13 @@ export async function preprocessMonthlyPayroll(
         warnings: [`${targetDate.year}年${targetDate.month}月工资已月结，不能再次开始预处理。请在历史报表中查看月结记录。`]
       }
     }
-    if (!input?.salaryWorkbookPath) {
+    if (!input?.salaryWorkbookPath && !input?.socialSecurityWorkbookPath) {
       return {
         ok: false,
         affectedRows: 0,
         messages: [],
         warnings: [
-          '月度工资报账需要先在监控文件夹中放入本月工资表。社保每月都要处理；个税按单位实际情况处理。'
+          '月度工资报账需要先在监控文件夹中放入本月工资表或社保未申报汇总。社保每月都要处理；个税按单位实际情况处理。'
         ]
       }
     }
@@ -417,10 +507,93 @@ export async function preprocessMonthlyPayroll(
     ])
     const taxByIdCard = buildTaxByIdCardFromSummary(tax)
 
-    const salary = applyTaxToSalarySummary(
-      await parseSalaryWorkbook(input.salaryWorkbookPath),
-      taxByIdCard
-    )
+    const salary = input.salaryWorkbookPath
+      ? applyTaxToSalarySummary(
+          await parseSalaryWorkbook(input.salaryWorkbookPath),
+          taxByIdCard
+        )
+      : undefined
+    const [integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
+      recomputeIntegratedOtherLikeWorksheet('一体化其他'),
+      recomputeIntegratedOtherLikeWorksheet('一体化退休')
+    ])
+
+    await runDetailImports(input, salary)
+
+    if (input.processScope === 'social') {
+      if (!socialSecurity) {
+        return {
+          ok: false,
+          affectedRows: 0,
+          messages: [],
+          warnings: ['只处理社保时需要放入社保未申报汇总文件。']
+        }
+      }
+      const [integratedPersonalInsurance, integratedActiveHousingFund] = await Promise.all([
+        loadIntegratedActivePersonalInsuranceTotals(),
+        loadIntegratedActiveHousingFund()
+      ])
+      const activePaySummary = salary ? await summarizeIntegratedActive(taxByIdCard) : undefined
+      const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
+      const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
+      const detailMessages = [
+        `报账模式：只处理社保${tax ? '，包含个税扣款' : '，不处理个税'}`,
+        salary
+          ? '工资表：已读取，仅用于同时生成工资凭证；本次不生成工资相关打印报表'
+          : '工资表：未检测到，本次只能生成社保凭证',
+        `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`,
+        `住房公积金：按${salary ? '工资表/一体化在职' : '一体化在职'}当前公积金合计 ${formatMoney(salary ? resolveHousingFund(salary, integratedActiveHousingFund) : integratedActiveHousingFund)} 生成个人和单位公积金`,
+        tax
+          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}`
+          : '个税：未检测到个税文件，本次不报个税',
+        ...insuranceCheck.messages
+      ]
+      const messages = insuranceCheck.warnings.length === 0 && salary
+        ? buildBusinessSummaryMessages(buildBusinessSummary({
+            active: activePaySummary,
+            survivor: integratedOtherPaySummary,
+            retiredHousing: integratedRetiredPaySummary
+          }))
+        : detailMessages
+      return okRule(
+        workflowName,
+        (salary?.activePeople.length ?? 0) + (salary?.survivorPeople.length ?? 0) + socialSecurity.rowCount + (tax?.rows.length ?? 0),
+        messages,
+        insuranceCheck.warnings
+      )
+    }
+
+    if (!salary) {
+      if (!socialSecurity) {
+        return {
+          ok: false,
+          affectedRows: 0,
+          messages: [],
+          warnings: ['只处理社保时需要放入社保未申报汇总文件。']
+        }
+      }
+      const [integratedPersonalInsurance, integratedActiveHousingFund] = await Promise.all([
+        loadIntegratedActivePersonalInsuranceTotals(),
+        loadIntegratedActiveHousingFund()
+      ])
+      const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, undefined, integratedPersonalInsurance)
+      const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
+      const messages = [
+        `报账模式：只处理社保${tax ? '，包含个税扣款' : '，不处理个税'}`,
+        `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`,
+        `住房公积金：按一体化在职当前公积金合计 ${formatMoney(integratedActiveHousingFund)} 生成个人和单位公积金`,
+        tax
+          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}`
+          : '个税：未检测到个税文件，本次只处理五险一金',
+        ...insuranceCheck.messages
+      ]
+      return okRule(
+        workflowName,
+        socialSecurity.rowCount + (tax?.rows.length ?? 0),
+        messages,
+        insuranceCheck.warnings
+      )
+    }
     let activeWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
     let survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
     let writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
@@ -473,7 +646,7 @@ export async function preprocessMonthlyPayroll(
     const actualPayMatched = Math.abs(actualPayDiff) < 0.01
 
     const mode = socialSecurity ? '工资+社保' : '只报工资'
-    const messages = [
+    const detailMessages = [
       `报账模式：${mode}${tax ? '，包含个税扣款' : '，不处理个税'}`,
       `工资表：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`,
       formatCompareMessage(activeCompare),
@@ -514,6 +687,13 @@ export async function preprocessMonthlyPayroll(
         : [`工资表实发合计 ${formatMoney(salaryActualPay)} 与一体化在职实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 不一致（差 ${formatMoney(actualPayDiff)}），请先排查后再生成报表`]),
       ...insuranceCheck.warnings
     ]
+    const messages = warnings.length === 0
+      ? buildBusinessSummaryMessages(buildBusinessSummary({
+          active: integratedActiveRecompute,
+          survivor: integratedOtherPaySummary,
+          retiredHousing: integratedRetiredPaySummary
+        }))
+      : detailMessages
 
     const result = okRule(
       workflowName,
@@ -532,7 +712,7 @@ export async function generateMonthlyPayrollReports(
   payload?: { monthlyPayroll?: MonthlyPayrollWorkflowInput }
 ): Promise<RuleResult> {
   try {
-    const input = payload?.monthlyPayroll
+    const input = normalizeMonthlyPayrollInput(payload?.monthlyPayroll)
     const targetDate = resolvePayrollPeriod(input)
     if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
       return {
@@ -542,17 +722,19 @@ export async function generateMonthlyPayrollReports(
         warnings: [`${targetDate.year}年${targetDate.month}月工资已月结，不能重新生成报表。请在历史报表中查看月结记录。`]
       }
     }
-    if (!input?.salaryWorkbookPath) {
+    if (!input?.salaryWorkbookPath && !input?.socialSecurityWorkbookPath) {
       return {
         ok: false,
         affectedRows: 0,
         messages: [],
-        warnings: ['请先在监控文件夹中放入本月工资表，并完成预处理校验。']
+        warnings: ['请先在监控文件夹中放入本月工资表或社保未申报汇总，并完成预处理校验。']
       }
     }
 
     const [rawSalary, socialSecurity, tax] = await Promise.all([
-      parseSalaryWorkbook(input.salaryWorkbookPath),
+      input.salaryWorkbookPath
+        ? parseSalaryWorkbook(input.salaryWorkbookPath)
+        : Promise.resolve<SalarySummary | undefined>(undefined),
       input.socialSecurityWorkbookPath
         ? parseSocialSecurityWorkbook(input.socialSecurityWorkbookPath)
         : Promise.resolve<SocialSecuritySummary | undefined>(undefined),
@@ -560,19 +742,16 @@ export async function generateMonthlyPayrollReports(
         ? parseTaxWorkbook(input.taxWorkbookPath)
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
-    const salary = applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax))
-
-    const activeTotal = salary.active
-    const survivorTotal = salary.survivor
+    const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
     const integratedPersonalInsurance = await loadIntegratedActivePersonalInsuranceTotals()
     const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
     const socialTotal = socialSecurity
       ? roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
       : 0
     const taxTotal = tax?.totalTax ?? 0
-    const salaryBackpayRows = salary.activePeople.filter(
+    const salaryBackpayRows = salary?.activePeople.filter(
       (person) => num(person.values['基本补发']) !== 0 || num(person.values['绩效补发']) !== 0
-    )
+    ) ?? []
     const socialItems = socialSecurity
       ? Object.entries(socialSecurity.byItem)
           .sort((left, right) => right[1] - left[1])
@@ -581,10 +760,20 @@ export async function generateMonthlyPayrollReports(
       : []
 
     const messages = [
-      `工资报账汇总已生成预览：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`,
-      `工资汇总：岗位工资 ${formatMoney(activeTotal['岗位工资'])}，薪级工资 ${formatMoney(activeTotal['薪级工资'])}，岗位津贴 ${formatMoney(activeTotal['岗位津贴'])}，生活补贴 ${formatMoney(activeTotal['生活补贴'])}`,
-      `补贴汇总：乡镇补贴 ${formatMoney(activeTotal['乡镇补贴'])}，住房补贴 ${formatMoney(activeTotal['住房补贴'])}，交通补贴 ${formatMoney(activeTotal['交通补贴'])}`,
-      `遗补汇总：人数 ${formatMoney(survivorTotal['人数'] ?? 0)}，金额 ${formatMoney(survivorTotal['合计'] ?? 0)}`,
+      input.processScope === 'social'
+        ? salary
+          ? '社保报账汇总已生成预览：工资表仅用于同时生成工资凭证，本次不生成工资打印报表'
+          : '社保报账汇总已生成预览：本次只生成五险一金相关凭证'
+        : salary
+        ? `工资报账汇总已生成预览：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`
+        : '社保报账汇总已生成预览：本次只处理五险一金',
+      ...(salary && input.processScope !== 'social'
+        ? [
+            `工资汇总：岗位工资 ${formatMoney(salary.active['岗位工资'])}，薪级工资 ${formatMoney(salary.active['薪级工资'])}，岗位津贴 ${formatMoney(salary.active['岗位津贴'])}，生活补贴 ${formatMoney(salary.active['生活补贴'])}`,
+            `补贴汇总：乡镇补贴 ${formatMoney(salary.active['乡镇补贴'])}，住房补贴 ${formatMoney(salary.active['住房补贴'])}，交通补贴 ${formatMoney(salary.active['交通补贴'])}`,
+            `遗补汇总：人数 ${formatMoney(salary.survivor['人数'] ?? 0)}，金额 ${formatMoney(salary.survivor['合计'] ?? 0)}`
+          ]
+        : []),
       socialSecurity
         ? `社保汇总：${socialSecurity.rowCount} 行，合计 ${formatMoney(socialTotal)}；${socialItems.join('；')}`
         : '社保汇总：未检测到社保文件，本次不生成社保报账；社保属于每月必办，请补齐文件后单独处理社保',
@@ -599,7 +788,7 @@ export async function generateMonthlyPayrollReports(
 
     return okRule(
       generateWorkflowName,
-      salary.activePeople.length + salary.survivorPeople.length + (socialSecurity?.rowCount ?? 0) + (tax?.rows.length ?? 0),
+      (salary?.activePeople.length ?? 0) + (salary?.survivorPeople.length ?? 0) + (socialSecurity?.rowCount ?? 0) + (tax?.rows.length ?? 0),
       messages,
       insuranceCheck.warnings
     )
@@ -611,8 +800,9 @@ export async function generateMonthlyPayrollReports(
 export async function generateMonthlyPayrollReportView(
   input?: MonthlyPayrollWorkflowInput
 ): Promise<MonthlyPayrollReportResult> {
-  if (!input?.salaryWorkbookPath) {
-    throw new Error('请先在监控文件夹中放入本月工资表')
+  input = normalizeMonthlyPayrollInput(input)
+  if (!input?.salaryWorkbookPath && !input?.socialSecurityWorkbookPath) {
+    throw new Error('请先在监控文件夹中放入本月工资表或社保未申报汇总')
   }
   const targetDate = resolvePayrollPeriod(input)
   if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
@@ -620,7 +810,9 @@ export async function generateMonthlyPayrollReportView(
   }
 
   const [rawSalary, socialSecurity, tax] = await Promise.all([
-    parseSalaryWorkbook(input.salaryWorkbookPath),
+    input.salaryWorkbookPath
+      ? parseSalaryWorkbook(input.salaryWorkbookPath)
+      : Promise.resolve<SalarySummary | undefined>(undefined),
     input.socialSecurityWorkbookPath
       ? parseSocialSecurityWorkbook(input.socialSecurityWorkbookPath)
       : Promise.resolve<SocialSecuritySummary | undefined>(undefined),
@@ -628,23 +820,65 @@ export async function generateMonthlyPayrollReportView(
       ? parseTaxWorkbook(input.taxWorkbookPath)
       : Promise.resolve<TaxSummary | undefined>(undefined)
   ])
-  const salary = applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax))
+  const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
+  const taxByIdCard = buildTaxByIdCardFromSummary(tax)
+  const [integratedActiveSummary, integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
+    summarizeIntegratedActive(taxByIdCard),
+    recomputeIntegratedOtherLikeWorksheet('一体化其他'),
+    recomputeIntegratedOtherLikeWorksheet('一体化退休')
+  ])
 
-  const [retired, retiredHousingPeople, unit, integratedActiveHousingFund] = await Promise.all([
+  const [
+    retired,
+    retiredHousingPeople,
+    unit,
+    integratedActiveHousingFund,
+    integratedActiveAggregates,
+    integratedRetiredAggregates,
+    integratedOtherAggregates,
+    integratedBackpayRows
+  ] = await Promise.all([
     loadRetiredSummary(),
     loadRetiredHousingDetails(),
     readUnitSettings(),
-    loadIntegratedActiveHousingFund()
+    loadIntegratedActiveHousingFund(),
+    loadIntegratedActiveAggregates(),
+    loadIntegratedSimpleAggregates('一体化退休'),
+    loadIntegratedSimpleAggregates('一体化其他'),
+    loadIntegratedActiveBackpayRows()
   ])
-  const sheets = buildReportSheets(
-    salary,
-    socialSecurity,
-    tax,
-    retired,
-    unit,
-    integratedActiveHousingFund,
-    retiredHousingPeople
-  )
+  const integratedAggregates = {
+    active: integratedActiveAggregates,
+    retired: integratedRetiredAggregates,
+    other: integratedOtherAggregates
+  }
+  const sheets = salary
+    ? input.processScope === 'social'
+      ? buildSocialOnlyReportSheets(
+          socialSecurity,
+          tax,
+          unit,
+          integratedActiveHousingFund,
+          salary,
+          retired
+        )
+      : buildReportSheets(
+          salary,
+          socialSecurity,
+          tax,
+          retired,
+          unit,
+          integratedActiveHousingFund,
+          retiredHousingPeople,
+          integratedAggregates,
+          integratedBackpayRows
+        )
+    : buildSocialOnlyReportSheets(
+        socialSecurity,
+        tax,
+        unit,
+        integratedActiveHousingFund
+      )
   const reportFingerprint = fingerprintReportSheets(sheets)
   const period = resolvePayrollPeriod(input)
   const previousRun = await findSameMonthlyPayrollRun(
@@ -703,20 +937,31 @@ export async function generateMonthlyPayrollReportView(
     payrollBackpayPath ? '补发工资文件' : '',
     voucherImportPath ? '凭证导入文件' : ''
   ].filter(Boolean)
+  const businessSummary = buildBusinessSummary({
+    active: integratedActiveSummary,
+    survivor: integratedOtherPaySummary,
+    retiredHousing: integratedRetiredPaySummary
+  })
 
   await persistMonthlyPayrollRun({
     year: period.year,
     month: period.month,
     unitFullName: unit.unitFullName,
-    activeCount: salary.activePeople.length,
-    survivorCount: salary.survivorPeople.length,
-    salaryTotal: num(salary.active['应发工资合计']),
-    withholdingTotal: num(salary.active['五险一金']),
-    taxTotal: tax?.totalTax ?? num(salary.active['个税']) ?? 0,
-    actualPay: roundMoney(
-      num(salary.active['实发工资合计']) + num(salary.survivor['合计']) + retired.housing
-    ),
-    retiredHousing: retired.housing,
+    activeCount: businessSummary.activeCount,
+    survivorCount: businessSummary.survivorCount,
+    retiredHousingCount: businessSummary.retiredHousingCount,
+    salaryTotal: salary ? num(salary.active['应发工资合计']) : 0,
+    withholdingTotal: salary ? num(salary.active['五险一金']) : 0,
+    taxTotal: tax?.totalTax ?? (salary ? num(salary.active['个税']) : 0),
+    actualPay: salary
+      ? roundMoney(
+          num(salary.active['实发工资合计']) + num(salary.survivor['合计']) + retired.housing
+        )
+      : 0,
+    activeActualPay: businessSummary.activeActualPay,
+    survivorActualPay: businessSummary.survivorActualPay,
+    retiredHousingActualPay: businessSummary.retiredHousingActualPay,
+    retiredHousing: salary ? retired.housing : 0,
     sourceSalaryPath: input.salaryWorkbookPath ?? null,
     sourceSocialPath: input.socialSecurityWorkbookPath ?? null,
     sourceTaxPath: input.taxWorkbookPath ?? null,
@@ -755,21 +1000,26 @@ async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput): Promis
     database,
     `INSERT INTO monthly_payroll_runs (
       year, month, unit_full_name,
-      active_count, survivor_count,
-      salary_total, withholding_total, tax_total, actual_pay, retired_housing,
+      active_count, survivor_count, retired_housing_count,
+      salary_total, withholding_total, tax_total, actual_pay,
+      active_actual_pay, survivor_actual_pay, retired_housing_actual_pay, retired_housing,
       source_salary_path, source_social_path, source_tax_path,
       insurance_import_path, voucher_import_path, payroll_backpay_path, report_fingerprint, report_snapshot
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.year,
       payload.month,
       payload.unitFullName,
       payload.activeCount,
       payload.survivorCount,
+      payload.retiredHousingCount,
       payload.salaryTotal,
       payload.withholdingTotal,
       payload.taxTotal,
       payload.actualPay,
+      payload.activeActualPay,
+      payload.survivorActualPay,
+      payload.retiredHousingActualPay,
       payload.retiredHousing,
       payload.sourceSalaryPath,
       payload.sourceSocialPath,
@@ -787,8 +1037,9 @@ export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
   const database = await getDatabase()
   const rows = await all<Record<string, unknown>>(
     database,
-    `SELECT id, year, month, unit_full_name, active_count, survivor_count,
-      salary_total, withholding_total, tax_total, actual_pay, retired_housing,
+    `SELECT id, year, month, unit_full_name, active_count, survivor_count, retired_housing_count,
+      salary_total, withholding_total, tax_total, actual_pay,
+      active_actual_pay, survivor_actual_pay, retired_housing_actual_pay, retired_housing,
       source_salary_path, source_social_path, source_tax_path,
       insurance_import_path, voucher_import_path, payroll_backpay_path,
       report_fingerprint, archived_at, archive_dir, archive_manifest, created_at
@@ -819,16 +1070,25 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
   const archiveDir = monthlyPayrollArchiveDir(existingRun)
   mkdirSync(archiveDir, { recursive: true })
   const archiveDate = dateStamp()
+  const monthRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs
+     WHERE year = ? AND month = ? AND archived_at IS NULL`,
+    [existingRun.year, existingRun.month]
+  )
+  const monthRuns = monthRows.map(mapRunRow)
 
   const archivedFiles = (
-    await Promise.all([
-      moveArchiveFile(existingRun.sourceSalaryPath, archiveDir, '工资表', archiveDate),
-      moveArchiveFile(existingRun.sourceSocialPath, archiveDir, '社保', archiveDate),
-      moveArchiveFile(existingRun.sourceTaxPath, archiveDir, '个税', archiveDate),
-      copyArchiveFile(existingRun.insuranceImportPath, archiveDir, '保险导入', archiveDate),
-      copyArchiveFile(existingRun.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
-      copyArchiveFile(existingRun.voucherImportPath, archiveDir, '凭证', archiveDate)
-    ])
+    await Promise.all(
+      monthRuns.flatMap((run) => [
+        moveArchiveFile(run.sourceSalaryPath, archiveDir, '工资表', archiveDate),
+        moveArchiveFile(run.sourceSocialPath, archiveDir, '社保', archiveDate),
+        moveArchiveFile(run.sourceTaxPath, archiveDir, '个税', archiveDate),
+        copyArchiveFile(run.insuranceImportPath, archiveDir, '保险导入', archiveDate),
+        copyArchiveFile(run.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
+        copyArchiveFile(run.voucherImportPath, archiveDir, '凭证', archiveDate)
+      ])
+    )
   ).filter((item): item is string => Boolean(item))
 
   const archivedAt = new Date().toISOString()
@@ -846,10 +1106,14 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
         totals: {
           activeCount: existingRun.activeCount,
           survivorCount: existingRun.survivorCount,
+          retiredHousingCount: existingRun.retiredHousingCount,
           salaryTotal: existingRun.salaryTotal,
           withholdingTotal: existingRun.withholdingTotal,
           taxTotal: existingRun.taxTotal,
           actualPay: existingRun.actualPay,
+          activeActualPay: existingRun.activeActualPay,
+          survivorActualPay: existingRun.survivorActualPay,
+          retiredHousingActualPay: existingRun.retiredHousingActualPay,
           retiredHousing: existingRun.retiredHousing
         }
       },
@@ -864,8 +1128,8 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
     database,
     `UPDATE monthly_payroll_runs
        SET archived_at = ?, archive_dir = ?, archive_manifest = ?
-     WHERE id = ?`,
-    [archivedAt, archiveDir, JSON.stringify(archivedFiles), id]
+     WHERE year = ? AND month = ? AND archived_at IS NULL`,
+    [archivedAt, archiveDir, JSON.stringify(archivedFiles), existingRun.year, existingRun.month]
   )
 
   const updatedRows = await all<Record<string, unknown>>(
@@ -995,10 +1259,14 @@ function mapRunRow(row: Record<string, unknown>): MonthlyPayrollRun {
     unitFullName: String(row.unit_full_name ?? ''),
     activeCount: Number(row.active_count ?? 0),
     survivorCount: Number(row.survivor_count ?? 0),
+    retiredHousingCount: Number(row.retired_housing_count ?? 0),
     salaryTotal: Number(row.salary_total ?? 0),
     withholdingTotal: Number(row.withholding_total ?? 0),
     taxTotal: Number(row.tax_total ?? 0),
     actualPay: Number(row.actual_pay ?? 0),
+    activeActualPay: Number(row.active_actual_pay ?? 0) || Math.max(0, Number(row.actual_pay ?? 0) - Number(row.retired_housing ?? 0)),
+    survivorActualPay: Number(row.survivor_actual_pay ?? 0),
+    retiredHousingActualPay: Number(row.retired_housing_actual_pay ?? 0) || Number(row.retired_housing ?? 0),
     retiredHousing: Number(row.retired_housing ?? 0),
     sourceSalaryPath: (row.source_salary_path as string) ?? null,
     sourceSocialPath: (row.source_social_path as string) ?? null,
@@ -1378,7 +1646,13 @@ function buildReportSheets(
   retired: RetiredSummary = { count: 0, housing: 0 },
   unit: UnitSettings,
   integratedActiveHousingFund = 0,
-  retiredHousingPeople: RetiredHousingPerson[] = []
+  retiredHousingPeople: RetiredHousingPerson[] = [],
+  integratedAggregates?: {
+    active: IntegratedActiveAggregates
+    retired: IntegratedSimpleAggregates
+    other: IntegratedSimpleAggregates
+  },
+  integratedBackpayRows?: Array<Array<string | number>>
 ): MonthlyPayrollReportSheet[] {
   const active = { ...salary.active }
   const survivor = salary.survivor
@@ -1405,15 +1679,39 @@ function buildReportSheets(
   const salaryReimburseTotal = roundMoney(salaryTotal + survivorTotal + retiredHousing)
   const actualPay = roundMoney(num(active['实发工资合计']) + survivorTotal + retiredHousing)
   const withholdingTotal = activeInsurance
+  const useIntegrated = Boolean(integratedAggregates)
+  const integratedActive = integratedAggregates?.active
+  const integratedRetired = integratedAggregates?.retired
+  const integratedOther = integratedAggregates?.other
+  const summaryActiveCount = useIntegrated ? integratedActive!.count : salary.activePeople.length
+  const summaryBasic = useIntegrated ? integratedActive!.基本工资 : num(active['应发基础工资'])
+  const summaryTeachingAge = useIntegrated ? integratedActive!.教龄津贴 : num(active['教龄津贴'])
+  const summaryRural = useIntegrated ? integratedActive!.其他一 : num(active['乡镇补贴'])
+  const summaryRemote = useIntegrated ? 0 : num(active['边远乡镇补贴'])
+  const summaryHousing = useIntegrated ? integratedActive!.住房补贴 : num(active['住房补贴'])
+  const summaryPerformance = useIntegrated ? integratedActive!.基础性绩效 : num(active['基础性绩效'])
+  const summaryTraffic = useIntegrated ? integratedActive!.交通补贴 : num(active['交通补贴'])
+  const summaryActiveBackpay = useIntegrated ? integratedActive!.补发工资 : 0
+  const summarySurvivorCount = useIntegrated ? integratedOther!.count : salary.survivorPeople.length
+  const summarySurvivorTotal = useIntegrated ? integratedOther!.应发工资小计 : survivorTotal
+  const summaryRetiredHousingTotal = useIntegrated ? integratedRetired!.应发工资小计 : retiredHousing
+  const summaryActivePayable = useIntegrated
+    ? integratedActive!.应发工资
+    : roundMoney(
+        num(active['应发基础工资']) +
+          num(active['教龄津贴']) +
+          num(active['乡镇补贴']) +
+          num(active['边远乡镇补贴']) +
+          num(active['住房补贴']) +
+          num(active['基础性绩效']) +
+          num(active['交通补贴'])
+      )
   const salaryBudgetTotal = roundMoney(
-    num(active['应发基础工资']) +
-      num(active['教龄津贴']) +
-      num(active['乡镇补贴']) +
-      num(active['边远乡镇补贴']) +
-      num(active['住房补贴']) +
-      num(active['基础性绩效'])
+    summaryBasic + summaryTeachingAge + summaryRural + summaryRemote + summaryHousing + summaryPerformance
   )
-  const salaryBudgetGrandTotal = roundMoney(salaryBudgetTotal + num(active['交通补贴']) + survivorTotal)
+  const salaryBudgetGrandTotal = useIntegrated
+    ? roundMoney(summaryActivePayable + summarySurvivorTotal + summaryRetiredHousingTotal)
+    : roundMoney(salaryBudgetTotal + summaryTraffic + summarySurvivorTotal)
   const salaryBudgetActual = roundMoney(salaryBudgetGrandTotal - withholdingTotal)
   const insuranceVoucherTotal = roundMoney(socialTotal + activeTax + num(active['住房公积金']) * 2)
   const payrollMonth = `${new Date().getFullYear()}年${new Date().getMonth() + 1}月`
@@ -1425,20 +1723,133 @@ function buildReportSheets(
   const titleAuto = `${unit.unitFullName}${payrollMonth}工资发放汇总表`
   const subtitleLeft = '       （自动生成表）                单位：元'
   const subtitleRight = '（自动生成表）                            单位：元'
-  const housing = num(active['住房补贴'])
-  const teachingAge = num(active['教龄津贴'])
-  const traffic = num(active['交通补贴'])
-  const performance = num(active['基础性绩效'])
-  const ruralTotal = roundMoney(num(active['乡镇补贴']) + num(active['边远乡镇补贴']))
-  const middlePayBasicEtc = roundMoney(basicActual + teachingAge + housing + performance + activeInsurance)
+  // 自动生成 / 报销凭证 各行金额：useIntegrated 时全部走 一体化 三表汇总
+  const housing = useIntegrated ? integratedActive!.住房补贴 : num(active['住房补贴'])
+  const teachingAge = useIntegrated ? integratedActive!.教龄津贴 : num(active['教龄津贴'])
+  const traffic = useIntegrated ? integratedActive!.交通补贴 : num(active['交通补贴'])
+  const performance = useIntegrated ? integratedActive!.基础性绩效 : num(active['基础性绩效'])
+  const ruralTotal = useIntegrated
+    ? integratedActive!.其他一
+    : roundMoney(num(active['乡镇补贴']) + num(active['边远乡镇补贴']))
+  // 自动生成中的"基本工资"=一体化在职(岗位+薪级) - 个人代扣(不含个税)；其它项保持原口径
+  const autoActiveInsuranceWithoutTax = useIntegrated
+    ? roundMoney(
+        integratedActive!.养老保险 +
+          integratedActive!.职业年金 +
+          integratedActive!.医疗保险 +
+          integratedActive!.失业保险 +
+          integratedActive!.公积金
+      )
+    : activeInsuranceWithoutTax
+  const autoBasicActual = useIntegrated
+    ? roundMoney(integratedActive!.基本工资 - autoActiveInsuranceWithoutTax)
+    : basicActual
+  const autoSurvivorTotal = useIntegrated ? integratedOther!.应发工资小计 : survivorTotal
+  const autoRetiredHousing = useIntegrated ? integratedRetired!.应发工资小计 : retiredHousing
+  const autoActiveInsurance = useIntegrated ? integratedActive!.五险一金合计 : activeInsurance
+  const autoActiveTax = useIntegrated ? integratedActive!.个税 : activeTax
+  const autoPension = useIntegrated ? integratedActive!.养老保险 : num(active['养老保险'])
+  const autoAnnuity = useIntegrated ? integratedActive!.职业年金 : num(active['职业年金'])
+  const autoMedical = useIntegrated ? integratedActive!.医疗保险 : num(active['医保大病统筹'])
+  const autoUnemployment = useIntegrated ? integratedActive!.失业保险 : num(active['失业保险'])
+  const autoHousingFund = useIntegrated ? integratedActive!.公积金 : num(active['住房公积金'])
+  const middlePayBasicEtc = roundMoney(autoBasicActual + teachingAge + housing + performance + autoActiveInsurance)
   const middleBorrowTotal = roundMoney(
-    middlePayBasicEtc + traffic + ruralTotal + survivorTotal + retiredHousing
+    middlePayBasicEtc + traffic + ruralTotal + autoSurvivorTotal + autoRetiredHousing
   )
   const leftTotal = roundMoney(
-    basicActual + teachingAge + traffic + performance + ruralTotal + housing + survivorTotal + retiredHousing
+    autoBasicActual + teachingAge + traffic + performance + ruralTotal + housing + autoSurvivorTotal + autoRetiredHousing
   )
   const payrollSummaryTitle = `${unit.unitFullName}${payrollMonth}工资发放汇总表`
-  const payrollSummaryFooter = `本月应发：${formatVoucherAmount(salaryBudgetGrandTotal)}，  代扣未发：${formatVoucherAmount(withholdingTotal)}，  实发：${formatVoucherAmount(actualPay)}。`
+  const summaryActualPay = roundMoney(salaryBudgetGrandTotal - withholdingTotal)
+  const payrollSummaryFooter = `本月应发：${formatVoucherAmount(salaryBudgetGrandTotal)}，  代扣未发：${formatVoucherAmount(withholdingTotal)}，  实发：${formatVoucherAmount(summaryActualPay)}。`
+  const summaryColumnCount = 13
+  const blankRow = (): string[] => Array.from({ length: summaryColumnCount }, () => '')
+  const titleRow = (text: string): Array<string | number> => {
+    const row: Array<string | number> = blankRow()
+    row[0] = text
+    return row
+  }
+  // 上半部分（财政补助支出）13 列；下半部分（代扣款）8 项，靠 2 列合并撑出更宽的视觉宽度
+  const summaryColumnWidths = [7, 11, 9, 9, 9, 11, 9, 7, 10, 10, 9, 10, 11]
+  const summaryRows: Array<Array<string | number>> = [
+    titleRow(payrollSummaryTitle),
+    (() => { const r = blankRow() as Array<string | number>; r[summaryColumnCount - 1] = '单位：人、元'; return r })(),
+    titleRow('财政补助支出'),
+    [
+      '在职\n人数',
+      '基本\n工资',
+      '教龄\n津贴',
+      '农村\n补贴',
+      '住房\n补贴',
+      '基础性\n绩效工资',
+      '交通\n补贴',
+      '遗补\n人数',
+      '遗补\n金额',
+      '退休\n房补',
+      '民办合同\n人数',
+      '民办合同\n金额',
+      '其中在职\n补发数'
+    ],
+    [
+      summaryActiveCount,
+      summaryBasic,
+      summaryTeachingAge,
+      summaryRural,
+      summaryHousing,
+      summaryPerformance,
+      summaryTraffic,
+      summarySurvivorCount,
+      summarySurvivorTotal,
+      summaryRetiredHousingTotal,
+      0,
+      0,
+      summaryActiveBackpay
+    ],
+    blankRow(),
+    titleRow('代扣款'),
+    (() => {
+      const r = blankRow() as Array<string | number>
+      const headers = [
+        '养老\n保险',
+        '职业\n年金',
+        '医保\n大病统筹',
+        '失业\n保险',
+        '住房\n公积金',
+        '个税',
+        '合同代扣\n"五险"',
+        '小计'
+      ]
+      // 0-1, 2-3, 4-5, 6-7, 8-9, 10, 11, 12
+      const slots = [0, 2, 4, 6, 8, 10, 11, 12]
+      headers.forEach((value, idx) => { r[slots[idx]] = value })
+      return r
+    })(),
+    (() => {
+      const r = blankRow() as Array<string | number>
+      const values: Array<string | number> = [
+        num(active['养老保险']),
+        num(active['职业年金']),
+        num(active['医保大病统筹']),
+        num(active['失业保险']),
+        num(active['住房公积金']),
+        activeTax,
+        0,
+        withholdingTotal
+      ]
+      const slots = [0, 2, 4, 6, 8, 10, 11, 12]
+      values.forEach((value, idx) => { r[slots[idx]] = value })
+      return r
+    })(),
+    titleRow(payrollSummaryFooter)
+  ]
+
+  // 报销凭证 C1 行：useIntegrated 时全部用 一体化口径
+  const voucherReimburseTotal = useIntegrated ? salaryBudgetGrandTotal : salaryReimburseTotal
+  const voucherWithholding = useIntegrated ? autoActiveInsurance : activeInsurance
+  const voucherActualPay = useIntegrated
+    ? roundMoney(salaryBudgetGrandTotal - autoActiveInsurance - autoActiveTax)
+    : actualPay
 
   const sheets: MonthlyPayrollReportSheet[] = [
     {
@@ -1453,18 +1864,18 @@ function buildReportSheets(
         ['', '', subtitleLeft, '', '', subtitleRight, '', '', '', '', '', ''],
         ['', '', '', '', '', '财务会计', '', '', '', '预算会计', '', ''],
         ['序号', '项目', '账户', '金额', '', '项目', '借方金额', '贷方金额', '', '项目', '借方金额', '贷方金额'],
-        [1, '基本工资', '其他应解汇款', basicActual, '', '付基本工资、津补贴、绩效等', middlePayBasicEtc, '', '', '付基本工资', basicActual, ''],
+        [1, '基本工资', '其他应解汇款', autoBasicActual, '', '付基本工资、津补贴、绩效等', middlePayBasicEtc, '', '', '付基本工资', autoBasicActual, ''],
         [2, '教龄津贴、交通补贴', '其他应解汇款', roundMoney(teachingAge + traffic), '', '付交通补贴', traffic, '', '', '付教龄津贴', teachingAge, ''],
         [3, '基础性绩效', '其他应解汇款', performance, '', '付农村工作补贴(含边远)', ruralTotal, '', '', '付农村补贴（含边远）', ruralTotal, ''],
-        [4, '乡镇补贴（含边远）', '其他应解汇款', ruralTotal, '', '付遗属补助发放', survivorTotal, '', '', '付住房补贴', housing, ''],
-        [5, '住房补贴', '其他应解汇款', housing, '', '付退休人员房补', retiredHousing, '', '', '付绩效工资', performance, ''],
-        [6, '遗属补助', '其他应解汇款', survivorTotal, '', '付合同教师工资', 0, '', '', '付交通补贴', traffic, ''],
-        [7, '退休人员房补', '其他应解汇款', retiredHousing, '', '代扣养老保险', '', num(active['养老保险']), '', '付遗属补助', survivorTotal, ''],
-        [8, '合同教师', '其他应解汇款', 0, '', '代扣职业年金', '', num(active['职业年金']), '', '付退休人员房补', retiredHousing, ''],
-        ['合计：', '', '', leftTotal, '', '代扣医疗保险', '', num(active['医保大病统筹']), '', '付合同教师', 0, ''],
-        ['', '', '', '', '', '代扣失业保险', '', num(active['失业保险']), '', '付工资', '', leftTotal],
-        ['', '', '', '', '', '代扣住房公积金', '', num(active['住房公积金']), '', '', '', ''],
-        ['', '', '', '', '', '代扣个人所得税', '', activeTax, '', '', '', ''],
+        [4, '乡镇补贴（含边远）', '其他应解汇款', ruralTotal, '', '付遗属补助发放', autoSurvivorTotal, '', '', '付住房补贴', housing, ''],
+        [5, '住房补贴', '其他应解汇款', housing, '', '付退休人员房补', autoRetiredHousing, '', '', '付绩效工资', performance, ''],
+        [6, '遗属补助', '其他应解汇款', autoSurvivorTotal, '', '付合同教师工资', 0, '', '', '付交通补贴', traffic, ''],
+        [7, '退休人员房补', '其他应解汇款', autoRetiredHousing, '', '代扣养老保险', '', autoPension, '', '付遗属补助', autoSurvivorTotal, ''],
+        [8, '合同教师', '其他应解汇款', 0, '', '代扣职业年金', '', autoAnnuity, '', '付退休人员房补', autoRetiredHousing, ''],
+        ['合计：', '', '', leftTotal, '', '代扣医疗保险', '', autoMedical, '', '付合同教师', 0, ''],
+        ['', '', '', '', '', '代扣失业保险', '', autoUnemployment, '', '付工资', '', leftTotal],
+        ['', '', '', '', '', '代扣住房公积金', '', autoHousingFund, '', '', '', ''],
+        ['', '', '', '', '', '代扣个人所得税', '', autoActiveTax, '', '', '', ''],
         ['', '', '', '', '', '代扣"合同教师保险"', '', 0, '', '', '', ''],
         ['', '', '', '', '', '付工资', '', leftTotal, '', '', '', ''],
         ['', '', '', '', '', '合计', middleBorrowTotal, middleBorrowTotal, '', '合计', leftTotal, leftTotal]
@@ -1472,54 +1883,19 @@ function buildReportSheets(
     },
     {
       name: '工退遗汇总',
-      columns: gridColumns(27),
+      columns: gridColumns(summaryColumnCount),
       showColumnHeader: false,
-      columnWidths: [4.5, 6.5, 4.5, 5.25, 3.5, 4.5, 4.5, 5.25, 6.5, 5.25, 4.5, 4.5, 4.5, 3.5, 3.5, 6.5, 4.5, 6.5, 6.5, 5.75, 5.75, 5.16, 4.5, 6.5, 7.25, 7.25, 7.5],
-      rowHeights: [29.65, 17.25, 21, 21.75, 43.5, 44.25, 23],
+      columnWidths: summaryColumnWidths,
+      rowHeights: [29.65, 17.25, 22, 36, 24, 8, 22, 34, 24, 23],
       merges: [
-        'A1:AA1',
-        'A2:F2', 'Y2:AA2',
-        'A3:A5', 'B3:B5', 'C3:Q3', 'R3:Y4', 'Z3:Z5', 'AA3:AA5',
-        'C4:J4', 'K4:K5', 'L4:M4', 'N4:O4', 'P4:P5', 'Q4:Q5',
-        'A7:AA7'
+        'A1:M1',
+        'A3:M3',
+        'A7:M7',
+        'A10:M10',
+        'A8:B8', 'C8:D8', 'E8:F8', 'G8:H8', 'I8:J8',
+        'A9:B9', 'C9:D9', 'E9:F9', 'G9:H9', 'I9:J9'
       ],
-      rows: [
-        [payrollSummaryTitle],
-        ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '单位：人、元 ', '', ''],
-        ['序号', '学校', '财政补助支出', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '代    扣    款', '', '', '', '', '', '', '', '实发数', '退休房补'],
-        ['', '', '在职人员', '', '', '', '', '', '', '', '交通\n补贴', '遗属补助', '', '民办合同', '', '其中在职补发数', '合   计', '', '', '', '', '', '', '', '', '', ''],
-        ['', '', '人数', '基本\n工资', '教龄\n津贴', '农村\n补贴', '边远乡镇补贴', '住房\n补贴', '基础性\n绩效工资', '小计', '', '人数', '金额', '人数', '金额', '', '', '养老\n保险', '职业\n年金', '医保\n大病统筹', '失业\n保险 ', '住房\n公积金', '个税', '合同代扣"五险"', '小计', '', ''],
-        [
-          '',
-          unit.unitFullName,
-          salary.activePeople.length,
-          num(active['应发基础工资']),
-          teachingAge,
-          num(active['乡镇补贴']),
-          num(active['边远乡镇补贴']),
-          housing,
-          performance,
-          salaryBudgetTotal,
-          traffic,
-          salary.survivorPeople.length,
-          survivorTotal,
-          0,
-          0,
-          0,
-          salaryBudgetGrandTotal,
-          num(active['养老保险']),
-          num(active['职业年金']),
-          num(active['医保大病统筹']),
-          num(active['失业保险']),
-          num(active['住房公积金']),
-          activeTax,
-          0,
-          withholdingTotal,
-          salaryBudgetActual,
-          retiredHousing
-        ],
-        [payrollSummaryFooter]
-      ]
+      rows: summaryRows
     },
     {
       name: '报销凭证',
@@ -1546,18 +1922,18 @@ function buildReportSheets(
         [
           'C1工资遗补房补',
           unit.unitFullName,
-          salaryReimburseTotal,
-          activeInsurance,
-          actualPay,
+          voucherReimburseTotal,
+          voucherWithholding,
+          voucherActualPay,
           unitCode,
           '',
           '转账支票',
-          buildSalaryVoucherUsage(active, survivorTotal, retiredHousing, basicActual, activeInsurance, salaryReimburseTotal),
-          toChineseRmb(salaryReimburseTotal),
+          buildSalaryVoucherUsage(active, autoSurvivorTotal, autoRetiredHousing, autoBasicActual, voucherWithholding, voucherReimburseTotal),
+          toChineseRmb(voucherReimburseTotal),
           today.getFullYear(),
           today.getMonth() + 1,
           today.getDate(),
-          toChineseRmb(activeInsurance)
+          toChineseRmb(voucherWithholding)
         ]
       ]
     },
@@ -1590,31 +1966,36 @@ function buildReportSheets(
         '支出一'
       ],
       columnWidths: [20, 6, 10, 9, 10, 10, 10, 10, 10, 10, 11, 12, 12, 9, 9, 10, 11, 10, 10, 9, 9, 9, 13, 9],
-      rows: buildBackpayRows(salary, tax)
+      rows: integratedBackpayRows ?? buildBackpayRows(salary, tax)
     }
   ]
 
-  const voucherSheet = buildVoucherSheet({
-    unit,
-    today,
-    active,
-    socialSecurity,
-    activeTax,
-    actualPay,
-    basicActual,
-    teachingAge: num(active['教龄津贴']),
-    ruralTotal: roundMoney(num(active['乡镇补贴']) + num(active['边远乡镇补贴'])),
-    housing: num(active['住房补贴']),
-    performance: num(active['基础性绩效']),
-    traffic: num(active['交通补贴']),
-    survivorTotal,
-    retiredHousing,
-    salaryReimburseTotal,
-    insuranceVoucherTotal,
-    withholdingTotal,
-    activeInsurance
-  })
-  sheets.splice(sheets.findIndex((s) => s.name === '报销凭证') + 1, 0, voucherSheet)
+  if (socialSecurity) {
+    const voucherSheet = buildVoucherSheet(
+      {
+        unit,
+        today,
+        active,
+        socialSecurity,
+        activeTax,
+        actualPay,
+        basicActual,
+        teachingAge: num(active['教龄津贴']),
+        ruralTotal: roundMoney(num(active['乡镇补贴']) + num(active['边远乡镇补贴'])),
+        housing: num(active['住房补贴']),
+        performance: num(active['基础性绩效']),
+        traffic: num(active['交通补贴']),
+        survivorTotal,
+        retiredHousing,
+        salaryReimburseTotal,
+        insuranceVoucherTotal,
+        withholdingTotal,
+        activeInsurance
+      },
+      { includeSalaryVoucher: true, includeInsuranceVoucher: true }
+    )
+    sheets.splice(sheets.findIndex((s) => s.name === '报销凭证') + 1, 0, voucherSheet)
+  }
 
   if (socialSecurity) {
     const insurancePersonalPension = sumSocialByCanonicalName(socialSecurity, '养老保险个人')
@@ -1702,7 +2083,7 @@ function buildReportSheets(
   }
 
   if (retiredHousingPeople.length > 0) {
-    const integratedTitle = `${unit.unitFullName}${payrollMonth}一体化退休`
+    const integratedTitle = `${unit.unitFullName}${payrollMonth}退休教师房补`
     const integratedRows = retiredHousingPeople.map((row, index) => [
       index + 1,
       row.name,
@@ -1734,6 +2115,182 @@ function buildReportSheets(
   }
 
   return sheets
+}
+
+function buildSocialOnlyReportSheets(
+  socialSecurity: SocialSecuritySummary | undefined,
+  tax: TaxSummary | undefined,
+  unit: UnitSettings,
+  integratedActiveHousingFund = 0,
+  salary?: SalarySummary,
+  retired: RetiredSummary = { count: 0, housing: 0 }
+): MonthlyPayrollReportSheet[] {
+  if (!socialSecurity) throw new Error('只处理社保时需要放入社保未申报汇总文件')
+
+  const today = new Date()
+  const payrollMonth = `${today.getFullYear()}年${today.getMonth() + 1}月`
+  const summaryMonth = `${today.getMonth() + 1}月份`
+  const unitCode = text(unit.unitImportCode)
+  const summaryUnitName = shortInsuranceSummaryUnitName(unit.unitFullName)
+  const subtitleRight = '（自动生成表）                            单位：元'
+  const active: Record<string, number> = salary ? { ...salary.active } : {}
+  active['住房公积金'] = salary
+    ? resolveHousingFund(salary, integratedActiveHousingFund)
+    : roundMoney(integratedActiveHousingFund)
+  const activeTax = tax?.totalTax ?? num(active['个税'])
+  active['个税'] = activeTax
+  const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, amount) => sum + amount, 0))
+  const insuranceVoucherTotal = roundMoney(socialTotal + activeTax + num(active['住房公积金']) * 2)
+  const survivorTotal = salary ? num(salary.survivor['合计']) : 0
+  const retiredHousing = salary ? retired.housing : 0
+  const activeInsurance = salary ? num(active['五险一金']) : 0
+  const activeInsuranceWithoutTax = salary
+    ? roundMoney(
+        num(active['养老保险']) +
+          num(active['职业年金']) +
+          num(active['医保大病统筹']) +
+          num(active['失业保险']) +
+          num(active['住房公积金'])
+      )
+    : 0
+  const basicActual = salary ? roundMoney(num(active['应发基础工资']) - activeInsuranceWithoutTax) : 0
+  const salaryReimburseTotal = salary
+    ? roundMoney(num(active['应发工资合计']) + survivorTotal + retiredHousing)
+    : 0
+  const actualPay = salary
+    ? roundMoney(num(active['实发工资合计']) + survivorTotal + retiredHousing)
+    : 0
+
+  const insurancePersonalPension = sumSocialByCanonicalName(socialSecurity, '养老保险个人')
+  const insuranceUnitPension = sumSocialByCanonicalName(socialSecurity, '养老保险单位')
+  const insurancePersonalAnnuity = sumSocialByCanonicalName(socialSecurity, '职业年金个人')
+  const insuranceUnitAnnuity = sumSocialByCanonicalName(socialSecurity, '职业年金单位')
+  const insurancePersonalMedical = sumSocialByCanonicalName(socialSecurity, '医保个人')
+  const insuranceUnitMedical = sumSocialByCanonicalName(socialSecurity, '医保单位')
+  const insuranceMaternity = sumSocialByCanonicalName(socialSecurity, '生育保险')
+  const insurancePersonalUnemployment = sumSocialByCanonicalName(socialSecurity, '失业保险个人')
+  const insuranceUnitUnemployment = roundMoney(
+    sumSocialByCanonicalName(socialSecurity, '失业保险单位') +
+      sumSocialByCanonicalName(socialSecurity, '工伤保险')
+  )
+  const titleInsurance = `${unit.unitFullName}${payrollMonth}五险一金明细`
+  const insuranceSheet: MonthlyPayrollReportSheet = {
+    name: '五险一金',
+    columns: gridColumns(7),
+    showColumnHeader: false,
+    columnWidths: [25.75, 9.16, 8, 1.75, 26.25, 9.16, 9.16],
+    rowHeights: [27, null, 22.5, 21, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    merges: ['A1:G1', 'A2:G2', 'A3:C3', 'E3:G3', 'D3:D21'],
+    rows: [
+      [titleInsurance, '', '', '', '', '', ''],
+      [subtitleRight, '', '', '', '', '', ''],
+      ['财务会计', '', '', '', '预算会计', '', ''],
+      ['项目', '借方金额', '贷方金额', '', '项目', '借方金额', '贷方金额'],
+      ['养老保险', roundMoney(insurancePersonalPension + insuranceUnitPension), '', '', '养老保险（个人）', insurancePersonalPension, ''],
+      ['职业年金', roundMoney(insurancePersonalAnnuity + insuranceUnitAnnuity), '', '', '养老保险（单位）', insuranceUnitPension, ''],
+      ['医保', roundMoney(insurancePersonalMedical + insuranceUnitMedical), '', '', '职业年金（个人）', insurancePersonalAnnuity, ''],
+      ['生育保险', insuranceMaternity, '', '', '职业年金（单位）', insuranceUnitAnnuity, ''],
+      ['工伤失业', roundMoney(insurancePersonalUnemployment + insuranceUnitUnemployment), '', '', '医保等（个人）', insurancePersonalMedical, ''],
+      ['住房公积金（个人）', num(active['住房公积金']), '', '', '医保等（单位）', insuranceUnitMedical, ''],
+      ['住房公积金（单位）', num(active['住房公积金']), '', '', '生育保险', insuranceMaternity, ''],
+      ['个税', activeTax, '', '', '工伤失业（个人）', insurancePersonalUnemployment, ''],
+      ['补缴养老保险', 0, '', '', '工伤失业（单位）', insuranceUnitUnemployment, ''],
+      ['补缴职业年金', 0, '', '', '住房公积金（个人）', num(active['住房公积金']), ''],
+      ['补缴医保、工伤失业等', 0, '', '', '住房公积金（单位）', num(active['住房公积金']), ''],
+      ['付五险一金、个税等（零余额）', '', roundMoney(insuranceVoucherTotal), '', '个税', activeTax, ''],
+      ['付补交各类保险等（9674银行存款）', '', 0, '', '补缴养老保险', 0, ''],
+      ['', '', '', '', '补缴职业年金', 0, ''],
+      ['', '', '', '', '补缴医保、工伤失业等', 0, ''],
+      ['', '', '', '', '付五险一金、个税等（零余额）', '', insuranceVoucherTotal],
+      ['', '', '', '', '付补交各类保险等（9674银行存款）', '', 0]
+    ]
+  }
+
+  const voucherPrintSheet: MonthlyPayrollReportSheet = {
+    name: '报销凭证',
+    columns: ['项目', '报账单位', '报销金额', '未报销金额', '实际付款金额', '支付令', '同城转账', '支付方式', '用途', '大写金额', '年', '月', '日', '未报销大写'],
+    rows: [[
+      '五险一金',
+      unit.unitFullName,
+      insuranceVoucherTotal,
+      '',
+      insuranceVoucherTotal,
+      unitCode,
+      '',
+      '转账支票',
+      buildInsuranceVoucherUsage(active, socialSecurity, activeTax, insuranceVoucherTotal),
+      toChineseRmb(insuranceVoucherTotal),
+      today.getFullYear(),
+      today.getMonth() + 1,
+      today.getDate(),
+      ''
+    ]]
+  }
+
+  const voucherSheet = buildVoucherSheet(
+    {
+      unit,
+      today,
+      active,
+      socialSecurity,
+      activeTax,
+      actualPay,
+      basicActual,
+      teachingAge: salary ? num(active['教龄津贴']) : 0,
+      ruralTotal: salary ? roundMoney(num(active['乡镇补贴']) + num(active['边远乡镇补贴'])) : 0,
+      housing: salary ? num(active['住房补贴']) : 0,
+      performance: salary ? num(active['基础性绩效']) : 0,
+      traffic: salary ? num(active['交通补贴']) : 0,
+      survivorTotal,
+      retiredHousing,
+      salaryReimburseTotal,
+      insuranceVoucherTotal,
+      withholdingTotal: activeInsurance,
+      activeInsurance
+    },
+    { includeSalaryVoucher: Boolean(salary), includeInsuranceVoucher: true }
+  )
+
+  const insuranceImportSheet: MonthlyPayrollReportSheet = {
+    name: '保险导入',
+    columns: [
+      '*单位代码',
+      '*单位名称',
+      '*部门经济科目代码',
+      '*部门经济科目名称',
+      '摘要',
+      '*金额',
+      '*收款账户名称',
+      '*收款账户开户行',
+      '*收款账户账号',
+      '经办人',
+      '审核人',
+      '支付业务类型',
+      '确认不是政府采购项目支付'
+    ],
+    columnWidths: [12, 18, 14, 18, 28, 12, 22, 22, 22, 10, 10, 14, 22],
+    rows: buildInsuranceImportItems(socialSecurity, active, activeTax).map(([item, amount]) => {
+      const isHousing = item.includes('公积金')
+      const economicSubject = departmentEconomicSubjectForSocialItem(item)
+      return [
+        unitCode,
+        unit.unitFullName,
+        economicSubject.code,
+        economicSubject.name,
+        `${summaryUnitName}${summaryMonth}${item}`,
+        amount,
+        isHousing ? unit.housingPayeeName : unit.socialPayeeName,
+        isHousing ? unit.housingPayeeBank : unit.socialPayeeBank,
+        isHousing ? unit.housingPayeeAccount : unit.socialPayeeAccount,
+        '',
+        '',
+        '',
+        '是'
+      ]
+    })
+  }
+
+  return [insuranceSheet, voucherPrintSheet, voucherSheet, insuranceImportSheet]
 }
 
 function buildBackpayRows(
@@ -1851,22 +2408,50 @@ function buildInsuranceImportItems(
 
 function buildPersonalInsuranceCheck(
   socialSecurity: SocialSecuritySummary | undefined,
-  salary: SalarySummary,
+  salary: SalarySummary | undefined,
   integrated: PersonalInsuranceTotals
 ): { messages: string[]; warnings: string[] } {
   if (!socialSecurity) return { messages: [], warnings: [] }
   const social = socialPersonalInsuranceTotals(socialSecurity)
-  const salaryTotals = salaryPersonalInsuranceTotals(salary)
-  const salaryDiffs = diffPersonalInsuranceTotals(social, salaryTotals, '工资表')
-  const integratedDiffs = diffPersonalInsuranceTotals(social, integrated, '一体化在职')
+  const salaryTotals = salary ? salaryPersonalInsuranceTotals(salary) : undefined
+  const salaryDiffs = salaryTotals
+    ? diffPersonalInsuranceTotals(social, salaryTotals, '工资表', { includeHousing: false })
+    : []
+  const integratedDiffs = diffPersonalInsuranceTotals(social, integrated, '一体化在职', { includeHousing: false })
+  const socialFourTotal = roundMoney(social.pension + social.annuity + social.medical + social.unemployment)
+  const salaryFourTotal = salaryTotals
+    ? roundMoney(salaryTotals.pension + salaryTotals.annuity + salaryTotals.medical + salaryTotals.unemployment)
+    : 0
+  const integratedFourTotal = roundMoney(
+    integrated.pension + integrated.annuity + integrated.medical + integrated.unemployment
+  )
   const messages = [
-    `个人四险核对：社保文件四项合计 ${formatMoney(social.total)}，工资表 ${formatMoney(salaryTotals.total)}，一体化在职 ${formatMoney(integrated.total)}`
+    salaryTotals
+      ? `个人四险核对：社保文件四项合计 ${formatMoney(socialFourTotal)}，工资表 ${formatMoney(salaryFourTotal)}，一体化在职 ${formatMoney(integratedFourTotal)}`
+      : `个人四险核对：社保文件四项合计 ${formatMoney(socialFourTotal)}，一体化在职 ${formatMoney(integratedFourTotal)}`
   ]
+  // 公积金双方对比（社保 XLS 没有公积金数据）
+  const housingDiff = salaryTotals ? roundMoney(salaryTotals.housing - integrated.housing) : 0
+  if (salaryTotals) {
+    messages.push(
+      `公积金个人核对：工资表 ${formatMoney(salaryTotals.housing)}，一体化在职 ${formatMoney(integrated.housing)}` +
+        (Math.abs(housingDiff) < 0.01 ? '（一致）' : `，差额 ${formatMoney(housingDiff)}`)
+    )
+  }
   const warnings = [
     ...(salaryDiffs.length ? [`社保个人四险与工资表不一致：${salaryDiffs.join('；')}`] : []),
-    ...(integratedDiffs.length ? [`社保个人四险与一体化在职不一致：${integratedDiffs.join('；')}`] : [])
+    ...(integratedDiffs.length ? [`社保个人四险与一体化在职不一致：${integratedDiffs.join('；')}`] : []),
+    ...(salaryTotals && Math.abs(housingDiff) >= 0.01
+      ? [`公积金个人与一体化在职不一致：差额 ${formatMoney(housingDiff)}`]
+      : [])
   ]
-  if (warnings.length === 0) messages.push('个人四险核对：社保文件、工资表、一体化在职金额一致')
+  if (warnings.length === 0) {
+    messages.push(
+      salaryTotals
+        ? '个人五险一金核对：社保文件、工资表、一体化在职金额一致'
+        : '个人四险核对：社保文件与一体化在职金额一致'
+    )
+  }
   return { messages, warnings }
 }
 
@@ -1875,7 +2460,8 @@ function socialPersonalInsuranceTotals(socialSecurity: SocialSecuritySummary): P
     pension: sumSocialByCanonicalName(socialSecurity, '养老保险个人'),
     annuity: sumSocialByCanonicalName(socialSecurity, '职业年金个人'),
     medical: sumSocialByCanonicalName(socialSecurity, '医保个人'),
-    unemployment: sumSocialByCanonicalName(socialSecurity, '失业保险个人')
+    unemployment: sumSocialByCanonicalName(socialSecurity, '失业保险个人'),
+    housing: 0
   })
 }
 
@@ -1884,7 +2470,8 @@ function salaryPersonalInsuranceTotals(salary: SalarySummary): PersonalInsurance
     pension: num(salary.active['养老保险']),
     annuity: num(salary.active['职业年金']),
     medical: num(salary.active['医保大病统筹']),
-    unemployment: num(salary.active['失业保险'])
+    unemployment: num(salary.active['失业保险']),
+    housing: num(salary.active['住房公积金'])
   })
 }
 
@@ -1893,27 +2480,46 @@ function personalInsuranceTotals(
 ): PersonalInsuranceTotals {
   return {
     ...values,
-    total: roundMoney(values.pension + values.annuity + values.medical + values.unemployment)
+    total: roundMoney(
+      values.pension + values.annuity + values.medical + values.unemployment + values.housing
+    )
   }
 }
 
 function diffPersonalInsuranceTotals(
   social: PersonalInsuranceTotals,
   target: PersonalInsuranceTotals,
-  targetName: string
+  targetName: string,
+  options: { includeHousing?: boolean } = {}
 ): string[] {
-  const items: Array<[keyof PersonalInsuranceTotals, string]> = [
+  const includeHousing = options.includeHousing ?? true
+  const itemDiffs: Array<[keyof PersonalInsuranceTotals, string]> = [
     ['pension', '养老保险个人'],
     ['annuity', '职业年金个人'],
     ['medical', '医保个人'],
     ['unemployment', '失业保险个人'],
-    ['total', '四项合计']
+    ...(includeHousing ? [['housing', '住房公积金个人'] as [keyof PersonalInsuranceTotals, string]] : [])
   ]
-  return items.flatMap(([key, label]) => {
+  const messages: string[] = []
+  for (const [key, label] of itemDiffs) {
     const difference = roundMoney(social[key] - target[key])
-    if (Math.abs(difference) < 0.01) return []
-    return `${label} 社保=${formatMoney(social[key])} / ${targetName}=${formatMoney(target[key])} / 差额=${formatMoney(difference)}`
-  })
+    if (Math.abs(difference) >= 0.01) {
+      messages.push(`${label} 社保=${formatMoney(social[key])} / ${targetName}=${formatMoney(target[key])} / 差额=${formatMoney(difference)}`)
+    }
+  }
+  // 合计单独算：不含公积金时，仅对 4 项求和；包含公积金时用 5 项 total
+  const socialSum = includeHousing
+    ? social.total
+    : roundMoney(social.pension + social.annuity + social.medical + social.unemployment)
+  const targetSum = includeHousing
+    ? target.total
+    : roundMoney(target.pension + target.annuity + target.medical + target.unemployment)
+  const totalDiff = roundMoney(socialSum - targetSum)
+  if (Math.abs(totalDiff) >= 0.01) {
+    const label = includeHousing ? '五项合计' : '四项合计'
+    messages.push(`${label} 社保=${formatMoney(socialSum)} / ${targetName}=${formatMoney(targetSum)} / 差额=${formatMoney(totalDiff)}`)
+  }
+  return messages
 }
 
 function sumSocialByAnyKeywordGroups(
@@ -2020,11 +2626,19 @@ type VoucherEntry = {
   hasDifference?: boolean
 }
 
+type VoucherBuildOptions = {
+  includeSalaryVoucher: boolean
+  includeInsuranceVoucher: boolean
+}
+
 function lastDayOfPayrollMonth(today: Date): Date {
   return new Date(today.getFullYear(), today.getMonth() + 1, 0)
 }
 
-function buildVoucherSheet(input: VoucherInput): MonthlyPayrollReportSheet {
+function buildVoucherSheet(
+  input: VoucherInput,
+  options: VoucherBuildOptions
+): MonthlyPayrollReportSheet {
   const { unit, today, active, socialSecurity, activeTax } = input
   const date = lastDayOfPayrollMonth(today)
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -2045,7 +2659,10 @@ function buildVoucherSheet(input: VoucherInput): MonthlyPayrollReportSheet {
     : 0
   const housingFund = num(active['住房公积金'])
 
-  const entries: VoucherEntry[] = [
+  const entries: VoucherEntry[] = []
+
+  if (options.includeSalaryVoucher) {
+    entries.push(
     // 凭证 1：本月工资发放
     { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: roundMoney(input.basicActual + input.teachingAge + input.housing + input.performance + input.activeInsurance), summary: '本月工资', hasDifference: true },
     { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: input.ruralTotal, summary: '农村补贴', hasDifference: true },
@@ -2071,9 +2688,10 @@ function buildVoucherSheet(input: VoucherInput): MonthlyPayrollReportSheet {
     // 平行预算会计 (退休房补)
     { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.retiredHousing, summary: '退休房补', budgetCode: unit.budgetRetiredCode, budgetName: '人员支出', functionCode: unit.retiredFunctionCode, functionName: unit.retiredFunctionName, fundCode: '111', fundName: '一般公共预算资金', econCode: '30302', econName: '退休费', hasDifference: true },
     { voucherNo: '1', subjectCode: '60010101', subjectName: '财政拨款预算收入', credit: input.retiredHousing, summary: '退休房补', budgetCode: unit.budgetRetiredCode, budgetName: '人员支出', functionCode: unit.retiredFunctionCode, functionName: unit.retiredFunctionName, fundCode: '111', fundName: '一般公共预算资金', hasDifference: true }
-  ]
+    )
+  }
 
-  if (socialSecurity) {
+  if (options.includeInsuranceVoucher && socialSecurity) {
     entries.push(
     // 凭证 2：五险一金缴纳
     { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: insurancePersonalPension, summary: '养老保险（个人）', partyCode: '999', partyName: '新养老保险' },
@@ -2191,6 +2809,7 @@ async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[]> {
     const unitColumn = colByName('单位名称')
     const housingColumn = colByName('住房补贴')
     const backpayColumn = colByName('补发工资')
+    const otherOneColumn = colByName('其他一')
     const payableColumn = colByName('应发工资小计')
     const actualPayColumn = colByName('实发合计')
     if (!idColumn || !housingColumn) return []
@@ -2209,8 +2828,16 @@ async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[]> {
       unitName: unitColumn ? text(row[unitColumn]) : '',
       housing: roundMoney(num(row[housingColumn])),
       backpay: roundMoney(backpayColumn ? num(row[backpayColumn]) : 0),
-      payable: roundMoney(payableColumn ? num(row[payableColumn]) : 0),
-      actualPay: roundMoney(actualPayColumn ? num(row[actualPayColumn]) : 0)
+      payable: roundMoney(
+        num(row[housingColumn]) +
+          (backpayColumn ? num(row[backpayColumn]) : 0) +
+          (otherOneColumn ? num(row[otherOneColumn]) : 0)
+      ),
+      actualPay: roundMoney(
+        num(row[housingColumn]) +
+          (backpayColumn ? num(row[backpayColumn]) : 0) +
+          (otherOneColumn ? num(row[otherOneColumn]) : 0)
+      )
     }))
   } catch {
     return []
@@ -2226,6 +2853,226 @@ async function loadIntegratedActiveHousingFund(): Promise<number> {
   }
 }
 
+type IntegratedActiveAggregates = {
+  count: number
+  基本工资: number
+  教龄津贴: number
+  其他一: number
+  住房补贴: number
+  基础性绩效: number
+  交通补贴: number
+  绩效工资: number
+  工作性津贴: number
+  特岗性津补贴: number
+  补发工资: number
+  其他二: number
+  其他三: number
+  应发工资: number
+  个税: number
+  实发合计: number
+  养老保险: number
+  职业年金: number
+  医疗保险: number
+  失业保险: number
+  公积金: number
+  五险一金合计: number
+}
+
+const integratedActivePayableFields = [
+  '岗位工资',
+  '薪级工资',
+  '岗位津贴',
+  '生活补贴',
+  '绩效工资',
+  '工作性津贴',
+  '教（工）龄补贴',
+  '特岗性津补贴',
+  '交通费',
+  '公车补贴',
+  '住房补贴',
+  '基础绩效奖',
+  '补发工资',
+  '其他一',
+  '其他二',
+  '其他三'
+]
+
+async function loadIntegratedActiveAggregates(): Promise<IntegratedActiveAggregates> {
+  const empty: IntegratedActiveAggregates = {
+    count: 0,
+    基本工资: 0,
+    教龄津贴: 0,
+    其他一: 0,
+    住房补贴: 0,
+    基础性绩效: 0,
+    交通补贴: 0,
+    绩效工资: 0,
+    工作性津贴: 0,
+    特岗性津补贴: 0,
+    补发工资: 0,
+    其他二: 0,
+    其他三: 0,
+    应发工资: 0,
+    个税: 0,
+    实发合计: 0,
+    养老保险: 0,
+    职业年金: 0,
+    医疗保险: 0,
+    失业保险: 0,
+    公积金: 0,
+    五险一金合计: 0
+  }
+  try {
+    const rows = await loadIntegratedRows('一体化在职')
+    const sumField = (name: string): number =>
+      rows.reduce((sum, row) => sum + num(row.values[name]), 0)
+    const result: IntegratedActiveAggregates = {
+      count: rows.length,
+      基本工资: roundMoney(sumField('岗位工资') + sumField('薪级工资')),
+      教龄津贴: roundMoney(sumField('教（工）龄补贴')),
+      其他一: roundMoney(sumField('其他一')),
+      住房补贴: roundMoney(sumField('住房补贴')),
+      基础性绩效: roundMoney(sumField('岗位津贴') + sumField('生活补贴')),
+      交通补贴: roundMoney(sumField('交通费') + sumField('公车补贴')),
+      绩效工资: roundMoney(sumField('绩效工资')),
+      工作性津贴: roundMoney(sumField('工作性津贴')),
+      特岗性津补贴: roundMoney(sumField('特岗性津补贴')),
+      补发工资: roundMoney(sumField('补发工资')),
+      其他二: roundMoney(sumField('其他二')),
+      其他三: roundMoney(sumField('其他三')),
+      应发工资: roundMoney(
+        integratedActivePayableFields.reduce((sum, name) => sum + sumField(name), 0)
+      ),
+      个税: roundMoney(sumField('当月个人所得税')),
+      实发合计: roundMoney(sumField('实发合计')),
+      养老保险: roundMoney(sumField('养老保险缴费')),
+      职业年金: roundMoney(sumField('职业年金缴费')),
+      医疗保险: roundMoney(sumField('医疗保险')),
+      失业保险: roundMoney(sumField('失业保险')),
+      公积金: roundMoney(sumField('公积金')),
+      五险一金合计: roundMoney(
+        sumField('养老保险缴费') +
+          sumField('职业年金缴费') +
+          sumField('医疗保险') +
+          sumField('失业保险') +
+          sumField('公积金')
+      )
+    }
+    return result
+  } catch {
+    return empty
+  }
+}
+
+type IntegratedSimpleAggregates = {
+  count: number
+  住房补贴: number
+  补发工资: number
+  应发工资小计: number
+  实发合计: number
+}
+
+async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<string | number>>> {
+  try {
+    const rows = await loadIntegratedRows('一体化在职')
+    const year = new Date().getFullYear()
+    const month = new Date().getMonth() + 1
+    return rows
+      .filter((row) => num(row.values['补发工资']) !== 0 || num(row.values['当月个人所得税']) !== 0)
+      .map((row) => {
+        const out: Array<string | number> = [
+          row.idCard,
+          month,
+          row.name,
+          '事业',
+          year,
+          '', '', '', '', '', '', '', '', '', '', '',
+          roundMoney(num(row.values['补发工资'])), // 补发工资
+          0, // 补扣工资
+          '', '', '',
+          roundMoney(num(row.values['当月个人所得税'])), // 当月个人所得税
+          ''
+        ]
+        return out
+      })
+  } catch {
+    return []
+  }
+}
+
+async function loadIntegratedSimpleAggregates(
+  worksheetName: '一体化退休' | '一体化其他'
+): Promise<IntegratedSimpleAggregates> {
+  const empty: IntegratedSimpleAggregates = {
+    count: 0,
+    住房补贴: 0,
+    补发工资: 0,
+    应发工资小计: 0,
+    实发合计: 0
+  }
+  try {
+    const rows = await loadIntegratedRows(worksheetName)
+    const sumField = (name: string): number =>
+      rows.reduce((sum, row) => sum + num(row.values[name]), 0)
+    return {
+      count: rows.length,
+      住房补贴: roundMoney(sumField('住房补贴')),
+      补发工资: roundMoney(sumField('补发工资')),
+      应发工资小计: roundMoney(sumField('应发工资小计')),
+      实发合计: roundMoney(sumField('实发合计'))
+    }
+  } catch {
+    return empty
+  }
+}
+
+async function runDetailImports(
+  input: MonthlyPayrollWorkflowInput,
+  salary: SalarySummary | undefined
+): Promise<void> {
+  const unit = await readUnitSettings()
+  const unitCode = text(unit.unitImportCode)
+  const unitName = text(unit.unitFullName)
+
+  if (input.socialSecurityWorkbookPath) {
+    try {
+      await importSocialSecurityDetail(input.socialSecurityWorkbookPath, unitCode, unitName)
+    } catch (error) {
+      console.warn('社保明细入库失败：', error)
+    }
+  }
+  if (input.taxWorkbookPath) {
+    try {
+      await importTaxDetail(input.taxWorkbookPath, unitCode, unitName)
+    } catch (error) {
+      console.warn('个税明细入库失败：', error)
+    }
+  }
+  if (salary && input.salaryWorkbookPath) {
+    try {
+      const period = resolvePayrollPeriod(input)
+      const detailRows: HousingFundDetailRow[] = salary.activePeople
+        .filter((person) => person.idCard)
+        .map((person) => ({
+          idCard: person.idCard,
+          name: person.name,
+          personal: num(person.values['公积金']),
+          unitAmount: num(person.values['公积金'])
+        }))
+      await importHousingFundDetail(
+        detailRows,
+        period.year,
+        period.month,
+        unitCode,
+        unitName,
+        input.salaryWorkbookPath ? input.salaryWorkbookPath.split(/[/\\]/).pop() ?? '' : ''
+      )
+    } catch (error) {
+      console.warn('公积金明细入库失败：', error)
+    }
+  }
+}
+
 async function loadIntegratedActivePersonalInsuranceTotals(): Promise<PersonalInsuranceTotals> {
   try {
     const rows = await loadIntegratedRows('一体化在职')
@@ -2233,20 +3080,27 @@ async function loadIntegratedActivePersonalInsuranceTotals(): Promise<PersonalIn
       pension: roundMoney(rows.reduce((sum, row) => sum + num(row.values['养老保险缴费']), 0)),
       annuity: roundMoney(rows.reduce((sum, row) => sum + num(row.values['职业年金缴费']), 0)),
       medical: roundMoney(rows.reduce((sum, row) => sum + num(row.values['医疗保险']), 0)),
-      unemployment: roundMoney(rows.reduce((sum, row) => sum + num(row.values['失业保险']), 0))
+      unemployment: roundMoney(rows.reduce((sum, row) => sum + num(row.values['失业保险']), 0)),
+      housing: roundMoney(rows.reduce((sum, row) => sum + num(row.values['公积金']), 0))
     })
   } catch {
     return personalInsuranceTotals({
       pension: 0,
       annuity: 0,
       medical: 0,
-      unemployment: 0
+      unemployment: 0,
+      housing: 0
     })
   }
 }
 
 function gridColumns(count: number): string[] {
   return Array.from({ length: count }, (_, index) => columnLabel(index))
+}
+
+function removeIndexes<T>(items: T[], indexes: number[]): T[] {
+  const hidden = new Set(indexes)
+  return items.filter((_, index) => !hidden.has(index))
 }
 
 function columnLabel(index: number): string {
@@ -2889,7 +3743,7 @@ function formatCompareMessage(summary: CompareSummary): string {
 function formatCompareWarning(summary: CompareSummary): string {
   const hasPersonDiff = summary.added > 0 || summary.removed > 0
   const lead = hasPersonDiff
-    ? `${summary.sourceName}与${summary.targetName}存在人员差异`
+    ? `${summary.sourceName}与${summary.targetName}按身份证匹配存在找不到的人员`
     : `${summary.sourceName}与${summary.targetName}人员一致，但映射字段有变化`
   const counts = `新增 ${summary.added} 人，减少 ${summary.removed} 人，字段变化 ${summary.changed} 人`
   const examples = summary.changedExamples.length > 0

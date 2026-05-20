@@ -10053,5 +10053,1133 @@
       }
     ],
     "views": []
+  },
+  {
+    "name": "社保明细",
+    "worksheetId": "local-social-detail-001",
+    "fieldCount": 22,
+    "fields": [
+      {
+        "fieldId": "local-detail-单位编号",
+        "name": "单位编号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 0
+      },
+      {
+        "fieldId": "local-detail-费款所属期起",
+        "name": "费款所属期起",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 1
+      },
+      {
+        "fieldId": "local-detail-费款所属期止",
+        "name": "费款所属期止",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 2
+      },
+      {
+        "fieldId": "local-detail-缴费人数",
+        "name": "缴费人数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 3
+      },
+      {
+        "fieldId": "local-detail-缴费工资合计",
+        "name": "缴费工资合计",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 4
+      },
+      {
+        "fieldId": "local-detail-缴费基数",
+        "name": "缴费基数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 5
+      },
+      {
+        "fieldId": "local-detail-费率",
+        "name": "费率",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 6
+      },
+      {
+        "fieldId": "local-detail-应缴费额",
+        "name": "应缴费额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 7
+      },
+      {
+        "fieldId": "local-detail-减免金额",
+        "name": "减免金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 8
+      },
+      {
+        "fieldId": "local-detail-应补退费额",
+        "name": "应补退费额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 9
+      },
+      {
+        "fieldId": "local-detail-抵缴金额",
+        "name": "抵缴金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 10
+      },
+      {
+        "fieldId": "local-detail-实际应缴纳费额",
+        "name": "实际应缴纳费额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 11
+      },
+      {
+        "fieldId": "local-detail-征收项目",
+        "name": "征收项目",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 12
+      },
+      {
+        "fieldId": "local-detail-征收品目",
+        "name": "征收品目",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 13
+      },
+      {
+        "fieldId": "local-detail-征收子目",
+        "name": "征收子目",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 14
+      },
+      {
+        "fieldId": "local-detail-数据来源",
+        "name": "数据来源",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 15
+      },
+      {
+        "fieldId": "local-detail-缴费类型",
+        "name": "缴费类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 16
+      },
+      {
+        "fieldId": "local-detail-主管税务机关",
+        "name": "主管税务机关",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 17
+      },
+      {
+        "fieldId": "local-detail-社保经办机构",
+        "name": "社保经办机构",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 18
+      },
+      {
+        "fieldId": "local-detail-社保流水号",
+        "name": "社保流水号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 19
+      },
+      {
+        "fieldId": "local-detail-来源文件",
+        "name": "来源文件",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 20
+      },
+      {
+        "fieldId": "local-detail-导入时间",
+        "name": "导入时间",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 21
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "local-social-detail-001-view-all",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "个税明细",
+    "worksheetId": "local-tax-detail-001",
+    "fieldCount": 53,
+    "fields": [
+      {
+        "fieldId": "local-detail-工号",
+        "name": "工号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 0
+      },
+      {
+        "fieldId": "local-detail-姓名",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 1
+      },
+      {
+        "fieldId": "local-detail-证件类型",
+        "name": "证件类型",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 2
+      },
+      {
+        "fieldId": "local-detail-证件号码",
+        "name": "证件号码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 3
+      },
+      {
+        "fieldId": "local-detail-税款所属期起",
+        "name": "税款所属期起",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 4
+      },
+      {
+        "fieldId": "local-detail-税款所属期止",
+        "name": "税款所属期止",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 5
+      },
+      {
+        "fieldId": "local-detail-所得项目",
+        "name": "所得项目",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 6
+      },
+      {
+        "fieldId": "local-detail-本期收入",
+        "name": "本期收入",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 7
+      },
+      {
+        "fieldId": "local-detail-本期费用",
+        "name": "本期费用",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 8
+      },
+      {
+        "fieldId": "local-detail-本期免税收入",
+        "name": "本期免税收入",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 9
+      },
+      {
+        "fieldId": "local-detail-本期基本养老保险费",
+        "name": "本期基本养老保险费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 10
+      },
+      {
+        "fieldId": "local-detail-本期基本医疗保险费",
+        "name": "本期基本医疗保险费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 11
+      },
+      {
+        "fieldId": "local-detail-本期失业保险费",
+        "name": "本期失业保险费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 12
+      },
+      {
+        "fieldId": "local-detail-本期住房公积金",
+        "name": "本期住房公积金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 13
+      },
+      {
+        "fieldId": "local-detail-本期企业职业年金",
+        "name": "本期企业职业年金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 14
+      },
+      {
+        "fieldId": "local-detail-本期商业健康保险费",
+        "name": "本期商业健康保险费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 15
+      },
+      {
+        "fieldId": "local-detail-本期税延养老保险费",
+        "name": "本期税延养老保险费",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 16
+      },
+      {
+        "fieldId": "local-detail-本期公务交通费用",
+        "name": "本期公务交通费用",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 17
+      },
+      {
+        "fieldId": "local-detail-本期通讯费用",
+        "name": "本期通讯费用",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 18
+      },
+      {
+        "fieldId": "local-detail-本期律师办案费用",
+        "name": "本期律师办案费用",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 19
+      },
+      {
+        "fieldId": "local-detail-本期西藏附加减除费用",
+        "name": "本期西藏附加减除费用",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 20
+      },
+      {
+        "fieldId": "local-detail-本期展业成本",
+        "name": "本期展业成本",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 21
+      },
+      {
+        "fieldId": "local-detail-本期其他扣除",
+        "name": "本期其他扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 22
+      },
+      {
+        "fieldId": "local-detail-累计收入额",
+        "name": "累计收入额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 23
+      },
+      {
+        "fieldId": "local-detail-累计免税收入",
+        "name": "累计免税收入",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 24
+      },
+      {
+        "fieldId": "local-detail-累计减除费用",
+        "name": "累计减除费用",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 25
+      },
+      {
+        "fieldId": "local-detail-累计专项扣除",
+        "name": "累计专项扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 26
+      },
+      {
+        "fieldId": "local-detail-累计子女教育支出扣除",
+        "name": "累计子女教育支出扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 27
+      },
+      {
+        "fieldId": "local-detail-累计继续教育支出扣除",
+        "name": "累计继续教育支出扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 28
+      },
+      {
+        "fieldId": "local-detail-累计住房贷款利息支出扣除",
+        "name": "累计住房贷款利息支出扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 29
+      },
+      {
+        "fieldId": "local-detail-累计住房租金支出扣除",
+        "name": "累计住房租金支出扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 30
+      },
+      {
+        "fieldId": "local-detail-累计赡养老人支出扣除",
+        "name": "累计赡养老人支出扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 31
+      },
+      {
+        "fieldId": "local-detail-累计3岁以下婴幼儿照护",
+        "name": "累计3岁以下婴幼儿照护",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 32
+      },
+      {
+        "fieldId": "local-detail-累计个人养老金",
+        "name": "累计个人养老金",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 33
+      },
+      {
+        "fieldId": "local-detail-累计其他扣除",
+        "name": "累计其他扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 34
+      },
+      {
+        "fieldId": "local-detail-累计准予扣除的捐赠",
+        "name": "累计准予扣除的捐赠",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 35
+      },
+      {
+        "fieldId": "local-detail-其他单位累计收入",
+        "name": "其他单位累计收入",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 36
+      },
+      {
+        "fieldId": "local-detail-其他单位累计扣除",
+        "name": "其他单位累计扣除",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 37
+      },
+      {
+        "fieldId": "local-detail-其他单位累计减免税额",
+        "name": "其他单位累计减免税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 38
+      },
+      {
+        "fieldId": "local-detail-其他单位累计已缴税额",
+        "name": "其他单位累计已缴税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 39
+      },
+      {
+        "fieldId": "local-detail-累计应纳税所得额",
+        "name": "累计应纳税所得额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 40
+      },
+      {
+        "fieldId": "local-detail-税率",
+        "name": "税率",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 41
+      },
+      {
+        "fieldId": "local-detail-速算扣除数",
+        "name": "速算扣除数",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 42
+      },
+      {
+        "fieldId": "local-detail-累计应纳税额",
+        "name": "累计应纳税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 43
+      },
+      {
+        "fieldId": "local-detail-累计减免税额",
+        "name": "累计减免税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 44
+      },
+      {
+        "fieldId": "local-detail-累计应扣缴税额",
+        "name": "累计应扣缴税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 45
+      },
+      {
+        "fieldId": "local-detail-已缴税额",
+        "name": "已缴税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 46
+      },
+      {
+        "fieldId": "local-detail-应补退税额",
+        "name": "应补退税额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 47
+      },
+      {
+        "fieldId": "local-detail-备注",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 48
+      },
+      {
+        "fieldId": "local-detail-单位编码",
+        "name": "单位编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 49
+      },
+      {
+        "fieldId": "local-detail-单位名称",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 50
+      },
+      {
+        "fieldId": "local-detail-来源文件",
+        "name": "来源文件",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 51
+      },
+      {
+        "fieldId": "local-detail-导入时间",
+        "name": "导入时间",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 52
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "local-tax-detail-001-view-all",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
+    "name": "公积金明细",
+    "worksheetId": "local-housing-fund-detail-001",
+    "fieldCount": 10,
+    "fields": [
+      {
+        "fieldId": "local-detail-单位编码",
+        "name": "单位编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 0
+      },
+      {
+        "fieldId": "local-detail-单位名称",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 1
+      },
+      {
+        "fieldId": "local-detail-年",
+        "name": "年",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 2
+      },
+      {
+        "fieldId": "local-detail-月",
+        "name": "月",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 3
+      },
+      {
+        "fieldId": "local-detail-证件号码",
+        "name": "证件号码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 4
+      },
+      {
+        "fieldId": "local-detail-姓名",
+        "name": "姓名",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 5
+      },
+      {
+        "fieldId": "local-detail-个人金额",
+        "name": "个人金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 6
+      },
+      {
+        "fieldId": "local-detail-单位金额",
+        "name": "单位金额",
+        "type": "数值",
+        "controlType": 6,
+        "desc": "Double",
+        "hidden": false,
+        "displayOrder": 7
+      },
+      {
+        "fieldId": "local-detail-来源文件",
+        "name": "来源文件",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 8
+      },
+      {
+        "fieldId": "local-detail-导入时间",
+        "name": "导入时间",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 9
+      }
+    ],
+    "systemFields": [
+      {
+        "fieldId": "rowid",
+        "alias": "(rowId)",
+        "name": "记录ID",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "ownerid",
+        "alias": "(_owner)",
+        "name": "拥有者",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "caid",
+        "alias": "(_createdBy)",
+        "name": "创建人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "ctime",
+        "alias": "(_createdAt)",
+        "name": "创建时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "utime",
+        "alias": "(_updatedAt)",
+        "name": "最近修改时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "uaid",
+        "alias": "(_updatedBy)",
+        "name": "最近修改人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfname",
+        "alias": "(_processName)",
+        "name": "流程名称",
+        "type": "文本框",
+        "controlType": 2
+      },
+      {
+        "fieldId": "wfcuaids",
+        "alias": "(_nodeAssignees)",
+        "name": "节点负责人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfcaid",
+        "alias": "(_initiatedBy)",
+        "name": "发起人",
+        "type": "成员",
+        "controlType": 26
+      },
+      {
+        "fieldId": "wfctime",
+        "alias": "(_initiatedAt)",
+        "name": "发起时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfrtime",
+        "alias": "(_nodeStartedAt)",
+        "name": "节点开始时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfcotime",
+        "alias": "(_approvalCompletedAt)",
+        "name": "审批完成时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfdtime",
+        "alias": "(_dueAt)",
+        "name": "截止时间",
+        "type": "日期和时间",
+        "controlType": 16
+      },
+      {
+        "fieldId": "wfftime",
+        "alias": "(_remainingTime)",
+        "name": "剩余时间",
+        "type": "公式（日期）",
+        "controlType": 38
+      },
+      {
+        "fieldId": "wfstatus",
+        "alias": "(_processStatus)",
+        "name": "流程状态",
+        "type": "下拉",
+        "controlType": 11
+      }
+    ],
+    "views": [
+      {
+        "viewId": "local-housing-fund-detail-001-view-all",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
   }
 ]

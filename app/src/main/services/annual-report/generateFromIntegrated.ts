@@ -17,6 +17,7 @@ export type GenerateAnnualReportFromIntegratedResult = {
   staffCount: number
   totalPerformance: number
   totalOvertime: number
+  warnings: string[]
 }
 
 type SheetCtx = {
@@ -58,6 +59,7 @@ export async function generateAnnualReportFromIntegrated(
   if (rows.length === 0) throw new Error('一体化在职没有可生成工资年报的数据')
 
   const lookups = await loadLookups()
+  const warnings = buildAnnualReportLookupWarnings(rows, source, lookups)
   const totalPerformance = Math.trunc(
     Number(input.totalPerformance || 0) + Number(input.totalHeadTeacher || 0)
   )
@@ -91,7 +93,7 @@ export async function generateAnnualReportFromIntegrated(
 
   await refreshAllPersonnelStatuses(database)
 
-  return { staffCount: rows.length, totalPerformance, totalOvertime }
+  return { staffCount: rows.length, totalPerformance, totalOvertime, warnings }
 }
 
 function buildAnnualReportRow(args: {
@@ -286,6 +288,52 @@ function lookupByAmount(lookup: Map<number, Row>, value: Value): Row | undefined
 function pick(row: Row | undefined, fieldName: string): Value {
   if (!row) return null
   return row[fieldName] ?? null
+}
+
+function buildAnnualReportLookupWarnings(
+  rows: Row[],
+  source: SheetCtx,
+  lookups: LookupCtx
+): string[] {
+  return [
+    ...buildMissingIdCardLookupWarnings(rows, source, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingIdCardLookupWarnings(rows, source, lookups.educationByIdCard, '教职工学历')
+  ]
+}
+
+function buildMissingIdCardLookupWarnings(
+  rows: Row[],
+  source: SheetCtx,
+  lookup: Map<string, Row>,
+  lookupName: string
+): string[] {
+  const missing = rows
+    .map((row) => {
+      const idCard = normalizeIdCard(readSourceValue(source, row, '证件号码'))
+      const name = text(readSourceValue(source, row, '姓名'))
+      return {
+        idCard,
+        label: name ? `${name}(${idCard})` : idCard
+      }
+    })
+    .filter((item) => item.idCard && !lookup.has(item.idCard))
+
+  if (missing.length === 0) return []
+  return [
+    `生成工资年报时有 ${missing.length} 人按身份证在${lookupName}中未找到，相关字段已留空。${formatExamples(missing.map((item) => item.label))}`
+  ]
+}
+
+function readSourceValue(source: SheetCtx, row: Row, fieldName: string): Value {
+  const column = source.columns.get(fieldName)
+  return column ? row[column] ?? null : null
+}
+
+function formatExamples(items: string[]): string {
+  const examples = items.filter(Boolean).slice(0, 8)
+  if (examples.length === 0) return ''
+  const suffix = items.length > examples.length ? `等 ${items.length} 人` : ''
+  return `示例：${examples.join('、')}${suffix ? `，${suffix}` : ''}`
 }
 
 async function loadRowsByIdCard(worksheetName: string): Promise<Map<string, Row>> {

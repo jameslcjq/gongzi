@@ -13,7 +13,7 @@ export async function generateAnnualSalaryReport(payload?: WorkflowRunPayload): 
     return okRule('生成工资年报', result.staffCount, [
       `奖励性绩效及班主任费合计：${result.totalPerformance}`,
       `延时费合计：${result.totalOvertime}`
-    ])
+    ], result.warnings)
   } catch (error) {
     return failRule('生成工资年报', error)
   }

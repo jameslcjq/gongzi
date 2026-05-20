@@ -44,7 +44,17 @@ import {
   getMonthlyPayrollRunReport,
   listMonthlyPayrollRuns
 } from '../services/monthly-payroll/monthlyPayroll'
-import { printSalaryWorkbookViaExcel } from '../services/monthly-payroll/printSalaryViaExcel'
+import {
+  getSalaryWorkbookPrintPageSummary,
+  printSalaryWorkbookViaExcel
+} from '../services/monthly-payroll/printSalaryViaExcel'
+import {
+  applyAnnualAdjustment,
+  chooseAnnualAdjustmentFiles,
+  exportSocialInsuranceBaseWorkbook,
+  generatePersonalTaxImportWorkbook,
+  previewAnnualAdjustment
+} from '../services/annualAdjustment'
 import { readUnitSettings, writeUnitSettings } from '../services/unitSettings'
 import {
   readMonthlyPayrollPrintSettings,
@@ -127,10 +137,21 @@ import type {
   LookupFailureEntry,
   PersonnelArchiveEntry,
   MonthlyPayrollRun,
+  MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
   PrintRequest,
   PrinterSummary,
-  UnitSettings
+  UnitSettings,
+  AnnualAdjustmentApplyInput,
+  AnnualAdjustmentApplyResult,
+  AnnualAdjustmentChooseFilesRequest,
+  AnnualAdjustmentFilePick,
+  AnnualAdjustmentPreview,
+  AnnualAdjustmentPreviewInput,
+  PersonalTaxImportGenerateInput,
+  PersonalTaxImportGenerateResult,
+  SocialInsuranceBaseExportInput,
+  SocialInsuranceBaseExportResult
 } from '../../shared/types'
 
 export function registerAppIpc(): void {
@@ -235,6 +256,79 @@ export function registerAppIpc(): void {
     await shell.openExternal(url)
   })
 
+  ipcMain.handle(
+    'integration:exec-in-all-frames',
+    async (
+      _event,
+      payload: { webContentsId: number; code: string }
+    ): Promise<{ ok: true; count: number } | { ok: false; reason: string }> => {
+      try {
+        const { webContents } = await import('electron')
+        const wc = webContents.fromId(payload.webContentsId)
+        if (!wc) return { ok: false, reason: '找不到 webContents' }
+
+        const frames = wc.mainFrame.framesInSubtree
+        let count = 0
+        await Promise.all(
+          frames.map(async (frame) => {
+            try {
+              await frame.executeJavaScript(payload.code, false)
+              count += 1
+            } catch (error) {
+              // 跨域 / 已销毁的 frame 会抛错，单个 frame 失败不影响其他
+            }
+          })
+        )
+        return { ok: true, count }
+      } catch (error) {
+        return {
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'salary-export:save-xls',
+    async (
+      _event,
+      payload: { filename: string; base64: string }
+    ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> => {
+      try {
+        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        // 复用 watcher 当前监控的文件夹；watcher 一旦 add 就自动入库
+        const status = await getImportWatcherStatus()
+        const folder = status.folderPath
+        if (!folder) return { ok: false, reason: '导入文件夹未配置（请先在"导入监视"里设置）' }
+        if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
+
+        // 文件名做时间戳防冲突，扩展名保持 .xls
+        const safeBase = (payload.filename || 'salary-export.xls').replace(/[\\/:*?"<>|]/g, '_')
+        const ts = new Date()
+          .toISOString()
+          .replace(/[-:]/g, '')
+          .replace(/[T.]/g, '_')
+          .slice(0, 17)
+        const dotIdx = safeBase.lastIndexOf('.')
+        const stem = dotIdx > 0 ? safeBase.slice(0, dotIdx) : safeBase
+        const ext = dotIdx > 0 ? safeBase.slice(dotIdx) : '.xls'
+        const finalName = `${stem}_${ts}${ext}`
+        const fullPath = join(folder, finalName)
+
+        const buf = Buffer.from(payload.base64, 'base64')
+        writeFileSync(fullPath, buf)
+        return { ok: true, path: fullPath }
+      } catch (error) {
+        return {
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+  )
+
   ipcMain.handle('app:open-path', async (_event, path: string): Promise<string> => {
     return shell.openPath(path)
   })
@@ -273,7 +367,11 @@ export function registerAppIpc(): void {
             silent: Boolean(deviceName),
             deviceName,
             printBackground: true,
-            margins: { marginType: 'none' }
+            margins: { marginType: 'none' },
+            landscape: request.landscape,
+            scaleFactor: request.scaleFactor,
+            pageRanges: request.pageRanges,
+            pageSize: request.pageSize
           },
           (success, failureReason) => {
             if (success) resolve()
@@ -323,6 +421,51 @@ export function registerAppIpc(): void {
     ): Promise<void> => {
       await printSalaryWorkbookViaExcel(request)
     }
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:salary-print-page-summary',
+    async (
+      _event,
+      request: {
+        salaryWorkbookPath: string
+        taxWorkbookPath?: string
+        printerName?: string
+        invoicePaperName?: string
+      }
+    ): Promise<MonthlyPayrollSalaryPrintPageSummary> => {
+      return getSalaryWorkbookPrintPageSummary(request)
+    }
+  )
+
+  ipcMain.handle(
+    'annual-adjustment:choose-files',
+    (_event, request: AnnualAdjustmentChooseFilesRequest): Promise<AnnualAdjustmentFilePick[] | null> =>
+      chooseAnnualAdjustmentFiles(request)
+  )
+
+  ipcMain.handle(
+    'annual-adjustment:preview',
+    (_event, input: AnnualAdjustmentPreviewInput): Promise<AnnualAdjustmentPreview> =>
+      previewAnnualAdjustment(input)
+  )
+
+  ipcMain.handle(
+    'annual-adjustment:apply',
+    (_event, input: AnnualAdjustmentApplyInput): Promise<AnnualAdjustmentApplyResult> =>
+      applyAnnualAdjustment(input)
+  )
+
+  ipcMain.handle(
+    'personal-tax:generate-import',
+    (_event, input: PersonalTaxImportGenerateInput): Promise<PersonalTaxImportGenerateResult> =>
+      generatePersonalTaxImportWorkbook(input)
+  )
+
+  ipcMain.handle(
+    'social-insurance:export-base',
+    (_event, input: SocialInsuranceBaseExportInput): Promise<SocialInsuranceBaseExportResult> =>
+      exportSocialInsuranceBaseWorkbook(input)
   )
 
   ipcMain.handle('unit-settings:get', (): Promise<UnitSettings> => readUnitSettings())

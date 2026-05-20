@@ -12,11 +12,17 @@ ${pdfLibBundle}
 
 ;(async function installVoucherMerge() {
   const AUTO_START = ${autoStart ? 'true' : 'false'}
+  const SCRIPT_VERSION = '20260520-registered-tab-voucher-page'
 
-  if (window.__salaryVoucherMerge) {
+  if (window.__salaryVoucherMerge && window.__salaryVoucherMerge.version === SCRIPT_VERSION) {
     window.__salaryVoucherMerge.injectButton()
     if (AUTO_START) return window.__salaryVoucherMerge.startBatchProcess()
     return { ok: true, message: 'installed' }
+  }
+
+  if (window.__salaryVoucherMergeTimer) {
+    clearInterval(window.__salaryVoucherMergeTimer)
+    window.__salaryVoucherMergeTimer = null
   }
 
   const CONFIG = {
@@ -232,21 +238,78 @@ ${pdfLibBundle}
     }
   }
 
-  function injectButton() {
-    const topNav = document.getElementById('topnav')
-    if (!topNav || document.getElementById('my-merge-btn')) return
+  function compactText(element) {
+    return (element && (element.innerText || element.textContent) ? element.innerText || element.textContent : '')
+      .replace(/\\s+/g, '')
+      .trim()
+  }
 
-    const spans = topNav.querySelectorAll('span')
-    let targetSpan = null
-    for (let i = 0; i < spans.length; i++) {
-      if (spans[i].innerText && spans[i].innerText.includes('已登记')) {
-        targetSpan = spans[i]
-        break
+  function findTextElement(doc, labels) {
+    const nodes = doc.querySelectorAll('a,button,span,div,td,li')
+    for (let i = 0; i < labels.length; i++) {
+      for (let j = 0; j < nodes.length; j++) {
+        if (compactText(nodes[j]) === labels[i]) return nodes[j]
       }
     }
-    if (!targetSpan) return
+    return null
+  }
 
-    const btn = document.createElement('span')
+  function getTabInsertTarget(element) {
+    if (!element || !element.closest) return element
+    return element.closest('li,a,button,td') || element
+  }
+
+  function findVoucherRegisteredTabMount(doc) {
+    const pageText = compactText(doc.body)
+    if (!pageText.includes('直接支付入账通知书')) return null
+
+    const textElement = findTextElement(doc, ['已登记'])
+    if (!textElement) return null
+
+    const targetElement = getTabInsertTarget(textElement)
+    return { doc, targetElement }
+  }
+
+  function findLegacyTopNavMount(doc) {
+    const topNav = doc.getElementById('topnav')
+    if (!topNav) return null
+
+    const spans = topNav.querySelectorAll('span')
+    for (let i = 0; i < spans.length; i++) {
+      if (spans[i].innerText && spans[i].innerText.includes('已登记')) {
+        return { doc, targetElement: spans[i] }
+      }
+    }
+    return null
+  }
+
+  function findButtonMount(win) {
+    try {
+      const doc = win.document
+      const existing = doc.getElementById('my-merge-btn')
+      if (existing) return { existing }
+
+      const voucherRegisteredTabMount = findVoucherRegisteredTabMount(doc)
+      if (voucherRegisteredTabMount) return voucherRegisteredTabMount
+
+      const legacyTopNavMount = findLegacyTopNavMount(doc)
+      if (legacyTopNavMount) return legacyTopNavMount
+
+      const frames = win.frames
+      for (let i = 0; i < frames.length; i++) {
+        const result = findButtonMount(frames[i])
+        if (result) return result
+      }
+    } catch (error) {}
+
+    return null
+  }
+
+  function injectButton() {
+    const mount = findButtonMount(window.top)
+    if (!mount || mount.existing || !mount.doc || !mount.targetElement) return
+
+    const btn = mount.doc.createElement('span')
     btn.id = 'my-merge-btn'
     btn.innerText = '自动合并'
     btn.style.cssText =
@@ -258,10 +321,17 @@ ${pdfLibBundle}
       startBatchProcess()
     }
 
-    if (targetSpan.parentNode) targetSpan.parentNode.insertBefore(btn, targetSpan.nextSibling)
+    const target = mount.targetElement
+    if (target.tagName === 'TD' && target.parentNode && target.parentNode.tagName === 'TR') {
+      const cell = mount.doc.createElement('td')
+      cell.appendChild(btn)
+      target.parentNode.insertBefore(cell, target.nextSibling)
+    } else if (target.parentNode) {
+      target.parentNode.insertBefore(btn, target.nextSibling)
+    }
   }
 
-  window.__salaryVoucherMerge = { startBatchProcess, injectButton }
+  window.__salaryVoucherMerge = { version: SCRIPT_VERSION, startBatchProcess, injectButton }
   window.addEventListener('load', injectButton)
   window.__salaryVoucherMergeTimer = window.__salaryVoucherMergeTimer || setInterval(injectButton, 1000)
   injectButton()

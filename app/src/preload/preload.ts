@@ -38,10 +38,21 @@ import type {
   WorksheetRecordsQuery,
   WorksheetRecordsResult,
   MonthlyPayrollRun,
+  MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
   PrintRequest,
   PrinterSummary,
-  UnitSettings
+  UnitSettings,
+  AnnualAdjustmentApplyInput,
+  AnnualAdjustmentApplyResult,
+  AnnualAdjustmentChooseFilesRequest,
+  AnnualAdjustmentFilePick,
+  AnnualAdjustmentPreview,
+  AnnualAdjustmentPreviewInput,
+  PersonalTaxImportGenerateInput,
+  PersonalTaxImportGenerateResult,
+  SocialInsuranceBaseExportInput,
+  SocialInsuranceBaseExportResult
 } from '../shared/types'
 
 type PivotConfigSummary = {
@@ -100,6 +111,16 @@ const salaryApi = {
     ipcRenderer.invoke('monthly-payroll:generate-report-view', payload),
   openIntegrationExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke('integration:open-external', url),
+  execInAllPortalFrames: (
+    webContentsId: number,
+    code: string
+  ): Promise<{ ok: true; count: number } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('integration:exec-in-all-frames', { webContentsId, code }),
+  saveSalaryExportXls: (
+    filename: string,
+    base64: string
+  ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('salary-export:save-xls', { filename, base64 }),
   getUnitSettings: (): Promise<UnitSettings> => ipcRenderer.invoke('unit-settings:get'),
   setUnitSettings: (settings: UnitSettings): Promise<UnitSettings> =>
     ipcRenderer.invoke('unit-settings:set', settings),
@@ -119,6 +140,31 @@ const salaryApi = {
     printerName?: string
     invoicePaperName?: string
   }): Promise<void> => ipcRenderer.invoke('monthly-payroll:print-salary-via-excel', request),
+  getSalaryWorkbookPrintPageSummary: (request: {
+    salaryWorkbookPath: string
+    taxWorkbookPath?: string
+    printerName?: string
+    invoicePaperName?: string
+  }): Promise<MonthlyPayrollSalaryPrintPageSummary> =>
+    ipcRenderer.invoke('monthly-payroll:salary-print-page-summary', request),
+  chooseAnnualAdjustmentFiles: (
+    request: AnnualAdjustmentChooseFilesRequest
+  ): Promise<AnnualAdjustmentFilePick[] | null> =>
+    ipcRenderer.invoke('annual-adjustment:choose-files', request),
+  previewAnnualAdjustment: (
+    input: AnnualAdjustmentPreviewInput
+  ): Promise<AnnualAdjustmentPreview> => ipcRenderer.invoke('annual-adjustment:preview', input),
+  applyAnnualAdjustment: (
+    input: AnnualAdjustmentApplyInput
+  ): Promise<AnnualAdjustmentApplyResult> => ipcRenderer.invoke('annual-adjustment:apply', input),
+  generatePersonalTaxImport: (
+    input: PersonalTaxImportGenerateInput
+  ): Promise<PersonalTaxImportGenerateResult> =>
+    ipcRenderer.invoke('personal-tax:generate-import', input),
+  exportSocialInsuranceBase: (
+    input: SocialInsuranceBaseExportInput
+  ): Promise<SocialInsuranceBaseExportResult> =>
+    ipcRenderer.invoke('social-insurance:export-base', input),
   openLocalPath: (path: string): Promise<string> => ipcRenderer.invoke('app:open-path', path),
   listPrinters: (): Promise<PrinterSummary[]> => ipcRenderer.invoke('print:list-printers'),
   printCurrentView: (request?: PrintRequest): Promise<void> =>

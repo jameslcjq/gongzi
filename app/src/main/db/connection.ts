@@ -541,10 +541,14 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       unit_full_name TEXT,
       active_count INTEGER NOT NULL DEFAULT 0,
       survivor_count INTEGER NOT NULL DEFAULT 0,
+      retired_housing_count INTEGER NOT NULL DEFAULT 0,
       salary_total REAL NOT NULL DEFAULT 0,
       withholding_total REAL NOT NULL DEFAULT 0,
       tax_total REAL NOT NULL DEFAULT 0,
       actual_pay REAL NOT NULL DEFAULT 0,
+      active_actual_pay REAL NOT NULL DEFAULT 0,
+      survivor_actual_pay REAL NOT NULL DEFAULT 0,
+      retired_housing_actual_pay REAL NOT NULL DEFAULT 0,
       retired_housing REAL NOT NULL DEFAULT 0,
       source_salary_path TEXT,
       source_social_path TEXT,
@@ -656,6 +660,10 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
   ])
   await ensureColumns(database, 'import_logs', [{ name: 'batch_id', definition: 'INTEGER' }])
   await ensureColumns(database, 'monthly_payroll_runs', [
+    { name: 'retired_housing_count', definition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'active_actual_pay', definition: 'REAL NOT NULL DEFAULT 0' },
+    { name: 'survivor_actual_pay', definition: 'REAL NOT NULL DEFAULT 0' },
+    { name: 'retired_housing_actual_pay', definition: 'REAL NOT NULL DEFAULT 0' },
     { name: 'report_fingerprint', definition: 'TEXT' },
     { name: 'archived_at', definition: 'TEXT' },
     { name: 'archive_dir', definition: 'TEXT' },

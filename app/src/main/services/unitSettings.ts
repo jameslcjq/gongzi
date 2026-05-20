@@ -1,7 +1,13 @@
 import { getDatabase, get, run } from '../db/connection'
-import type { UnitSettings } from '../../shared/types'
+import type { SalaryExportTarget, UnitSettings } from '../../shared/types'
 
 const STORAGE_KEY = 'unit'
+
+export const defaultSalaryExportTargets: SalaryExportTarget[] = [
+  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '1', salbatch_name: '批次001' },
+  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '2', salbatch_name: '批次002' },
+  { saltype_id: '6', saltype_name: '006事业退休', salbatch_id: '1', salbatch_name: '批次001' }
+]
 
 export const defaultUnitSettings: UnitSettings = {
   unitFullName: '',
@@ -17,7 +23,8 @@ export const defaultUnitSettings: UnitSettings = {
   socialPayeeAccount: '',
   housingPayeeName: '',
   housingPayeeBank: '',
-  housingPayeeAccount: ''
+  housingPayeeAccount: '',
+  salaryExportTargets: defaultSalaryExportTargets.map((t) => ({ ...t }))
 }
 
 export async function readUnitSettings(): Promise<UnitSettings> {

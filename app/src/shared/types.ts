@@ -42,6 +42,7 @@ export type MonthlyPayrollWorkflowInput = {
   year?: number
   month?: number
   confirmWriteBack?: boolean
+  processScope?: 'auto' | 'salary' | 'social' | 'salary-social'
 }
 
 export type MonthlyPayrollWriteBackPreview = {
@@ -190,6 +191,7 @@ export type ImportWatcherStatus = {
   running: boolean
   logs: ExcelImportLog[]
   monthlyPayroll?: MonthlyPayrollDetectedFiles
+  annualAdjustment?: AnnualAdjustmentDetectedFiles
 }
 
 export type MonthlyPayrollDetectedFiles = {
@@ -199,7 +201,34 @@ export type MonthlyPayrollDetectedFiles = {
   socialSecurityWorkbookName?: string
   taxWorkbookPath?: string
   taxWorkbookName?: string
-  mode: 'missing-salary' | 'salary-only' | 'salary-social' | 'salary-tax' | 'salary-social-tax'
+  mode:
+    | 'missing-source'
+    | 'salary-only'
+    | 'salary-social'
+    | 'salary-tax'
+    | 'salary-social-tax'
+    | 'social-only'
+    | 'social-tax'
+}
+
+export type AnnualAdjustmentDetectedFiles = {
+  salaryWorkbookPath?: string
+  salaryWorkbookName?: string
+  housingAccountWorkbookPath?: string
+  housingAccountWorkbookName?: string
+  insuranceDetailWorkbookPaths: string[]
+  insuranceDetailWorkbookNames: string[]
+  taxTemplateWorkbookPath?: string
+  taxTemplateWorkbookName?: string
+  socialBaseTemplateWorkbookPath?: string
+  socialBaseTemplateWorkbookName?: string
+}
+
+export type SalaryExportTarget = {
+  saltype_id: string
+  saltype_name: string
+  salbatch_id: string
+  salbatch_name: string
 }
 
 export type UnitSettings = {
@@ -217,6 +246,8 @@ export type UnitSettings = {
   housingPayeeName: string
   housingPayeeBank: string
   housingPayeeAccount: string
+  /** 一键导出工资时要遍历的"类别+批次"组合；为空则用内置默认值 */
+  salaryExportTargets?: SalaryExportTarget[]
 }
 
 export type MonthlyPayrollReportSheet = {
@@ -236,10 +267,14 @@ export type MonthlyPayrollRun = {
   unitFullName: string
   activeCount: number
   survivorCount: number
+  retiredHousingCount: number
   salaryTotal: number
   withholdingTotal: number
   taxTotal: number
   actualPay: number
+  activeActualPay: number
+  survivorActualPay: number
+  retiredHousingActualPay: number
   retiredHousing: number
   sourceSalaryPath: string | null
   sourceSocialPath: string | null
@@ -281,10 +316,132 @@ export type PrinterSummary = {
 export type MonthlyPayrollPrintSettings = {
   reportPrinterName: string
   voucherPrinterName: string
+  voucherOffsetX: number
+  voucherOffsetY: number
+}
+
+export type MonthlyPayrollSalaryPrintPageSummary = {
+  items: Array<{
+    label: string
+    sheetName: string
+    pages: number
+  }>
+  totalPages: number
 }
 
 export type PrintRequest = {
   printerName?: string
+  landscape?: boolean
+  scaleFactor?: number
+  pageRanges?: Array<{
+    from: number
+    to: number
+  }>
+  pageSize?: {
+    width: number
+    height: number
+  }
+}
+
+export type AnnualAdjustmentFilePick = {
+  filePath: string
+  fileName: string
+}
+
+export type AnnualAdjustmentChooseFilesRequest = {
+  title?: string
+  multi?: boolean
+}
+
+export type AnnualAdjustmentPreviewInput = {
+  salaryWorkbookPath: string
+  housingAccountWorkbookPath?: string
+  insuranceDetailWorkbookPaths: string[]
+}
+
+export type AnnualAdjustmentApplyInput = AnnualAdjustmentPreviewInput & {
+  confirmIntegratedWriteBack: boolean
+}
+
+export type AnnualAdjustmentSourceRow = {
+  sourceFile: string
+  rowNumber: number
+  idCard: string
+  name: string
+  rate: string
+  amount: number
+  fieldName: string
+  status: 'matched' | 'id-conflict' | 'missing' | 'skipped'
+  reason: string
+}
+
+export type AnnualIntegratedChangePreview = {
+  idCard: string
+  name: string
+  fieldName: string
+  sourceValue: number
+  targetValue: number
+  reason: string
+}
+
+export type AnnualAdjustmentPreviewSummary = {
+  salaryPeople: number
+  housingAccountRows: number
+  insuranceRows: number
+  matchedInsuranceRows: number
+  blockedInsuranceRows: number
+  integratedChangeCount: number
+  integratedManualCount: number
+  warnings: string[]
+}
+
+export type AnnualAdjustmentPreview = {
+  unitName: string
+  summary: AnnualAdjustmentPreviewSummary
+  sourceRows: AnnualAdjustmentSourceRow[]
+  integratedChanges: AnnualIntegratedChangePreview[]
+  manualIntegratedChanges: AnnualIntegratedChangePreview[]
+}
+
+export type AnnualAdjustmentApplyResult = {
+  ok: boolean
+  message: string
+  salaryOutputPath: string
+  housingDeclarationPath?: string
+  housingMissingLogPath?: string
+  salaryApplied: number
+  integratedApplied: number
+  integratedManualCount: number
+  warnings: string[]
+}
+
+export type PersonalTaxImportGenerateInput = {
+  templateWorkbookPath?: string
+  incomeFields: string[]
+}
+
+export type PersonalTaxImportGenerateResult = {
+  ok: boolean
+  filePath: string
+  rowCount: number
+  incomeTotal: number
+  pensionTotal: number
+  medicalTotal: number
+  unemploymentTotal: number
+  housingTotal: number
+  annuityTotal: number
+}
+
+export type SocialInsuranceBaseExportInput = {
+  templateWorkbookPath?: string
+  baseFields: string[]
+}
+
+export type SocialInsuranceBaseExportResult = {
+  ok: boolean
+  filePath: string
+  rowCount: number
+  baseTotal: number
 }
 
 export type ImportBatchSummary = {

@@ -5,7 +5,9 @@ const STORAGE_KEY = 'monthlyPayrollPrintSettings'
 
 export const defaultMonthlyPayrollPrintSettings: MonthlyPayrollPrintSettings = {
   reportPrinterName: '',
-  voucherPrinterName: ''
+  voucherPrinterName: '',
+  voucherOffsetX: 0,
+  voucherOffsetY: 0
 }
 
 export async function readMonthlyPayrollPrintSettings(): Promise<MonthlyPayrollPrintSettings> {

@@ -2,7 +2,13 @@
 import { reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsistencyAuditPage from './ConsistencyAuditPage.vue'
-import type { BackupSummary, ImportWatcherStatus, MonthlyPayrollRun, UnitSettings } from '@shared/types'
+import type {
+  BackupSummary,
+  ImportWatcherStatus,
+  MonthlyPayrollRun,
+  SalaryExportTarget,
+  UnitSettings
+} from '@shared/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -25,6 +31,12 @@ const monthCloseLoading = ref(false)
 const cancelingMonthCloseId = ref<number | null>(null)
 const activeTab = ref('unit')
 
+const defaultSalaryExportTargets: SalaryExportTarget[] = [
+  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '1', salbatch_name: '批次001' },
+  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '2', salbatch_name: '批次002' },
+  { saltype_id: '6', saltype_name: '006事业退休', salbatch_id: '1', salbatch_name: '批次001' }
+]
+
 const unitForm = reactive<UnitSettings>({
   unitFullName: '',
   unitImportCode: '',
@@ -39,9 +51,29 @@ const unitForm = reactive<UnitSettings>({
   socialPayeeAccount: '',
   housingPayeeName: '',
   housingPayeeBank: '',
-  housingPayeeAccount: ''
+  housingPayeeAccount: '',
+  salaryExportTargets: defaultSalaryExportTargets.map((t) => ({ ...t }))
 })
 const unitSaving = ref(false)
+
+function addSalaryExportTarget(): void {
+  if (!unitForm.salaryExportTargets) unitForm.salaryExportTargets = []
+  unitForm.salaryExportTargets.push({
+    saltype_id: '',
+    saltype_name: '',
+    salbatch_id: '',
+    salbatch_name: ''
+  })
+}
+
+function removeSalaryExportTarget(index: number): void {
+  if (!unitForm.salaryExportTargets) return
+  unitForm.salaryExportTargets.splice(index, 1)
+}
+
+function resetSalaryExportTargets(): void {
+  unitForm.salaryExportTargets = defaultSalaryExportTargets.map((t) => ({ ...t }))
+}
 
 watch(
   () => props.modelValue,
@@ -57,6 +89,9 @@ watch(
 async function loadUnitSettings() {
   const settings = await window.salaryApi.getUnitSettings()
   Object.assign(unitForm, settings)
+  if (!unitForm.salaryExportTargets || !unitForm.salaryExportTargets.length) {
+    unitForm.salaryExportTargets = defaultSalaryExportTargets.map((t) => ({ ...t }))
+  }
 }
 
 async function saveUnitSettings() {
@@ -325,6 +360,57 @@ function formatMoney(value: number): string {
                 </el-form-item>
               </el-col>
             </el-row>
+
+            <h4 style="margin-top: 24px">一体化工资导出组合</h4>
+            <p>
+              在"一体化对接"里点"导出工资"时，会按照下面这张表逐条导出。每条 = 一个"工资类别 + 批次"，对应内网系统里的下拉值。
+            </p>
+            <el-table
+              :data="unitForm.salaryExportTargets || []"
+              border
+              size="small"
+              style="margin-bottom: 12px"
+            >
+              <el-table-column label="工资类别 ID" width="120">
+                <template #default="{ row }">
+                  <el-input v-model="row.saltype_id" placeholder="如：2" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="工资类别名称（用于文件名）" min-width="200">
+                <template #default="{ row }">
+                  <el-input v-model="row.saltype_name" placeholder="如：002事业" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="批次 ID" width="120">
+                <template #default="{ row }">
+                  <el-input v-model="row.salbatch_id" placeholder="如：1" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="批次名称（用于文件名）" min-width="180">
+                <template #default="{ row }">
+                  <el-input v-model="row.salbatch_name" placeholder="如：批次001" size="small" />
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    size="small"
+                    text
+                    @click="removeSalaryExportTarget($index)"
+                    >删除</el-button
+                  >
+                </template>
+              </el-table-column>
+            </el-table>
+            <div style="margin-bottom: 16px">
+              <el-button size="small" @click="addSalaryExportTarget">+ 新增一行</el-button>
+              <el-button size="small" @click="resetSalaryExportTargets">恢复默认</el-button>
+              <span style="margin-left: 12px; color: var(--text-3); font-size: 12px">
+                提示：ID 是数字字符串，名称会出现在导出 xls 的文件名里。
+              </span>
+            </div>
+
             <div>
               <el-button type="primary" :loading="unitSaving" @click="saveUnitSettings">保存单位信息</el-button>
             </div>

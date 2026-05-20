@@ -3,7 +3,12 @@ import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { all, get, getDatabase, run } from '../db/connection'
-import type { ExcelImportLog, ImportWatcherStatus, MonthlyPayrollDetectedFiles } from '../../shared/types'
+import type {
+  AnnualAdjustmentDetectedFiles,
+  ExcelImportLog,
+  ImportWatcherStatus,
+  MonthlyPayrollDetectedFiles
+} from '../../shared/types'
 import { commitExcelImport } from './excelImport'
 import { inferWorksheet } from './worksheetInference'
 
@@ -81,7 +86,8 @@ export async function getImportWatcherStatus(): Promise<ImportWatcherStatus> {
     templateFolderPath: getTemplateFolderPath(),
     running,
     logs: await readRecentImportLogs(),
-    monthlyPayroll: detectMonthlyPayrollFiles(folderPath)
+    monthlyPayroll: detectMonthlyPayrollFiles(folderPath),
+    annualAdjustment: detectAnnualAdjustmentFiles(folderPath)
   }
 }
 
@@ -150,13 +156,13 @@ async function readRecentImportLogs(): Promise<ExcelImportLog[]> {
 async function importExcelFile(filePath: string): Promise<void> {
   const extension = extname(filePath).toLowerCase()
   if (!importableExtensions.has(extension) || basename(filePath).startsWith('~$')) return
-  if (isMonthlyPayrollFile(filePath)) {
+  if (isReservedWorkflowFile(filePath)) {
     pushMemoryLog({
       fileName: basename(filePath),
-      worksheetName: '工资报账',
+      worksheetName: isAnnualAdjustmentFile(filePath) ? '社保个税' : '工资报账',
       ok: true,
       importedRows: 0,
-      message: '已识别为工资报账文件，保留在监控文件夹供工资报账模块使用',
+      message: '已识别为专项处理文件，保留在监控文件夹供业务模块使用',
       createdAt: new Date().toISOString()
     })
     return
@@ -291,15 +297,19 @@ function detectMonthlyPayrollFiles(path: string): MonthlyPayrollDetectedFiles {
   const socialSecurity = pickLatestFile(files.filter((filePath) => isSocialSecurityWorkbook(filePath)))
   const tax = pickLatestFile(files.filter((filePath) => isTaxWorkbook(filePath)))
 
-  const mode: MonthlyPayrollDetectedFiles['mode'] = !salary
-    ? 'missing-salary'
-    : socialSecurity && tax
+  const mode: MonthlyPayrollDetectedFiles['mode'] = salary
+    ? socialSecurity && tax
       ? 'salary-social-tax'
       : socialSecurity
         ? 'salary-social'
         : tax
           ? 'salary-tax'
           : 'salary-only'
+    : socialSecurity && tax
+      ? 'social-tax'
+      : socialSecurity
+        ? 'social-only'
+        : 'missing-source'
 
   return {
     salaryWorkbookPath: salary,
@@ -309,6 +319,32 @@ function detectMonthlyPayrollFiles(path: string): MonthlyPayrollDetectedFiles {
     taxWorkbookPath: tax,
     taxWorkbookName: tax ? basename(tax) : undefined,
     mode
+  }
+}
+
+function detectAnnualAdjustmentFiles(path: string): AnnualAdjustmentDetectedFiles {
+  const files = listRootImportableFiles(path)
+  const salary = pickLatestFile(files.filter((filePath) => isSalaryWorkbook(filePath)))
+  const housingAccount = pickLatestFile(files.filter((filePath) => isHousingAccountWorkbook(filePath)))
+  const insuranceDetails = files
+    .filter((filePath) => isPersonalInsuranceDetailWorkbook(filePath))
+    .map((filePath) => ({ filePath, mtimeMs: safeMtimeMs(filePath) }))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .map((item) => item.filePath)
+  const taxTemplate = pickLatestFile(files.filter((filePath) => isPersonalTaxTemplateWorkbook(filePath)))
+  const socialBaseTemplate = pickLatestFile(files.filter((filePath) => isSocialBaseTemplateWorkbook(filePath)))
+
+  return {
+    salaryWorkbookPath: salary,
+    salaryWorkbookName: salary ? basename(salary) : undefined,
+    housingAccountWorkbookPath: housingAccount,
+    housingAccountWorkbookName: housingAccount ? basename(housingAccount) : undefined,
+    insuranceDetailWorkbookPaths: insuranceDetails,
+    insuranceDetailWorkbookNames: insuranceDetails.map((filePath) => basename(filePath)),
+    taxTemplateWorkbookPath: taxTemplate,
+    taxTemplateWorkbookName: taxTemplate ? basename(taxTemplate) : undefined,
+    socialBaseTemplateWorkbookPath: socialBaseTemplate,
+    socialBaseTemplateWorkbookName: socialBaseTemplate ? basename(socialBaseTemplate) : undefined
   }
 }
 
@@ -338,8 +374,22 @@ function safeMtimeMs(filePath: string): number {
   }
 }
 
-function isMonthlyPayrollFile(filePath: string): boolean {
-  return isSalaryWorkbook(filePath) || isSocialSecurityWorkbook(filePath) || isTaxWorkbook(filePath)
+function isReservedWorkflowFile(filePath: string): boolean {
+  return (
+    isSalaryWorkbook(filePath) ||
+    isSocialSecurityWorkbook(filePath) ||
+    isTaxWorkbook(filePath) ||
+    isAnnualAdjustmentFile(filePath)
+  )
+}
+
+function isAnnualAdjustmentFile(filePath: string): boolean {
+  return (
+    isHousingAccountWorkbook(filePath) ||
+    isPersonalInsuranceDetailWorkbook(filePath) ||
+    isPersonalTaxTemplateWorkbook(filePath) ||
+    isSocialBaseTemplateWorkbook(filePath)
+  )
 }
 
 function isSalaryWorkbook(filePath: string): boolean {
@@ -358,4 +408,30 @@ function isSocialSecurityWorkbook(filePath: string): boolean {
 
 function isTaxWorkbook(filePath: string): boolean {
   return basename(filePath).includes('税款计算_工资薪金所得')
+}
+
+function isHousingAccountWorkbook(filePath: string): boolean {
+  return basename(filePath).toLowerCase().startsWith('grxxlist')
+}
+
+function isPersonalInsuranceDetailWorkbook(filePath: string): boolean {
+  const name = basename(filePath)
+  if (!name.includes('未申报信息明细')) return false
+  if (name.startsWith('社保费未申报汇总信息')) return false
+  return (
+    name.includes('个人缴纳') ||
+    name.includes('个人缴费') ||
+    name.includes('养老保险费') ||
+    name.includes('职业年金') ||
+    name.includes('医疗保险') ||
+    name.includes('失业保险')
+  )
+}
+
+function isPersonalTaxTemplateWorkbook(filePath: string): boolean {
+  return basename(filePath).includes('正常工资薪金所得')
+}
+
+function isSocialBaseTemplateWorkbook(filePath: string): boolean {
+  return basename(filePath).includes('参保职工列表模板')
 }

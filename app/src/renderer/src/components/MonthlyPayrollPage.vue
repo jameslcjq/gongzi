@@ -8,7 +8,9 @@ import type {
   MonthlyPayrollReportSheet,
   MonthlyPayrollPrintSettings,
   MonthlyPayrollRun,
+  MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollWriteBackPreview,
+  PrintRequest,
   PrinterSummary,
   WorkflowRunPayload,
   WorkflowRunResult
@@ -31,15 +33,20 @@ const result = ref<WorkflowRunResult | null>(null)
 const generateResult = ref<WorkflowRunResult | null>(null)
 const report = ref<MonthlyPayrollReportResult | null>(null)
 const activeReportSheet = ref('')
+const printPageRangeText = ref('')
 const history = ref<MonthlyPayrollRun[]>([])
 const historyLoading = ref(false)
 const archivingId = ref<number | null>(null)
 const printers = ref<PrinterSummary[]>([])
 const printSettings = ref<MonthlyPayrollPrintSettings>({
   reportPrinterName: '',
-  voucherPrinterName: ''
+  voucherPrinterName: '',
+  voucherOffsetX: 0,
+  voucherOffsetY: 0
 })
 const printing = ref(false)
+const voucherPrintTotalPages = ref<number | null>(null)
+const voucherPrintTotalPagesLoading = ref(false)
 
 onMounted(() => {
   void refreshHistory({ autoOpenCurrentMonth: true })
@@ -61,7 +68,9 @@ async function loadPrintOptions() {
   printers.value = nextPrinters
   printSettings.value = {
     reportPrinterName: settings.reportPrinterName || nextPrinters.find((item: PrinterSummary) => item.isDefault)?.name || '',
-    voucherPrinterName: settings.voucherPrinterName || ''
+    voucherPrinterName: settings.voucherPrinterName || '',
+    voucherOffsetX: Number(settings.voucherOffsetX ?? 0),
+    voucherOffsetY: Number(settings.voucherOffsetY ?? 0)
   }
 }
 
@@ -143,6 +152,59 @@ function formatMoney(value: number): string {
 }
 
 const detected = computed(() => props.importWatcher?.monthlyPayroll)
+type ProcessMode = 'salary' | 'social' | 'salary-social'
+const selectedProcessMode = ref<ProcessMode>('salary')
+const processModeTouched = ref(false)
+
+const availableProcessModes = computed<Array<{ label: string; value: ProcessMode }>>(() => {
+  const hasSalary = Boolean(detected.value?.salaryWorkbookPath)
+  const hasSocial = Boolean(detected.value?.socialSecurityWorkbookPath)
+  if (hasSalary && hasSocial) {
+    return [
+      { label: '工资+社保', value: 'salary-social' },
+      { label: '只报工资', value: 'salary' },
+      { label: '只报社保', value: 'social' }
+    ]
+  }
+  if (hasSalary) return [{ label: '只报工资', value: 'salary' }]
+  if (hasSocial) return [{ label: '只报社保', value: 'social' }]
+  return []
+})
+
+function defaultProcessMode(): ProcessMode {
+  if (detected.value?.salaryWorkbookPath && detected.value?.socialSecurityWorkbookPath) {
+    return 'salary-social'
+  }
+  if (detected.value?.socialSecurityWorkbookPath) return 'social'
+  return 'salary'
+}
+
+watch(
+  detected,
+  () => {
+    const available = new Set(availableProcessModes.value.map((item) => item.value))
+    if (!available.has(selectedProcessMode.value) || !processModeTouched.value) {
+      selectedProcessMode.value = defaultProcessMode()
+    }
+  },
+  { immediate: true }
+)
+
+function markProcessModeTouched(): void {
+  processModeTouched.value = true
+}
+
+watch(
+  () => [selectedProcessMode.value, report.value] as const,
+  () => {
+    const first = firstVisibleSheetName(visibleSheets.value)
+    if (!first) return
+    if (!visibleSheets.value.some((sheet) => sheet.name === activeReportSheet.value)) {
+      activeReportSheet.value = first
+    }
+  }
+)
+
 const currentPeriodKey = computed(() => {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -155,37 +217,41 @@ const currentMonthArchivedRun = computed(() =>
   )
 )
 const isCurrentMonthArchived = computed(() => Boolean(currentMonthArchivedRun.value))
-const canRun = computed(() => Boolean(detected.value?.salaryWorkbookPath) && !isCurrentMonthArchived.value)
+const canRun = computed(() =>
+  availableProcessModes.value.some((item) => item.value === selectedProcessMode.value) &&
+  !isCurrentMonthArchived.value
+)
 
 const modeText = computed(() => {
-  switch (detected.value?.mode) {
-    case 'salary-social-tax':
-      return '工资 + 社保 + 个税'
-    case 'salary-social':
-      return '工资 + 社保'
-    case 'salary-tax':
-      return '工资 + 个税'
-    case 'salary-only':
-      return '本次只报工资'
-    default:
-      return '等待工资表'
+  const hasTax = Boolean(detected.value?.taxWorkbookPath)
+  if (selectedProcessMode.value === 'salary-social') {
+    return hasTax ? '工资 + 社保 + 个税' : '工资 + 社保'
   }
+  if (selectedProcessMode.value === 'social') {
+    return hasTax ? '只报社保 + 个税' : '只报社保'
+  }
+  if (detected.value?.salaryWorkbookPath) return hasTax ? '只报工资 + 个税' : '只报工资'
+  return '等待工资表或社保'
 })
 
 const fileRows = computed(() => [
   {
     label: '本月工资表',
-    required: true,
+    required: selectedProcessMode.value !== 'social',
     name: detected.value?.salaryWorkbookName,
     path: detected.value?.salaryWorkbookPath,
-    hint: '工资表是必需文件，例如 512扎下小学--2026年5月份工资表.xlsx'
+    hint: selectedProcessMode.value === 'social'
+      ? '本次只报社保，工资表仅用于同时生成工资凭证'
+      : '工资表或社保文件至少需要一个，例如 512扎下小学--2026年5月份工资表.xlsx'
   },
   {
     label: '社保未申报汇总',
-    required: true,
+    required: selectedProcessMode.value !== 'salary',
     name: detected.value?.socialSecurityWorkbookName,
     path: detected.value?.socialSecurityWorkbookPath,
-    hint: '社保每月都要处理；未检测到时本次只报工资，社保可补齐后再处理'
+    hint: selectedProcessMode.value === 'salary'
+      ? '本次只报工资，社保后续单独处理'
+      : '只处理社保时需要放入社保未申报汇总文件'
   },
   {
     label: '个税计算表',
@@ -198,28 +264,26 @@ const fileRows = computed(() => [
 
 async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
   const files = detected.value
-  const hasSocial = Boolean(files?.socialSecurityWorkbookPath)
+  const hasSalary = Boolean(files?.salaryWorkbookPath)
   const hasTax = Boolean(files?.taxWorkbookPath)
-  const mode = hasSocial
+  const mode = selectedProcessMode.value === 'salary-social'
     ? hasTax
-      ? '本次将处理：工资报账、社保报账、个税扣款。'
-      : '本次将处理：工资报账、社保报账；未检测到个税文件，本次不处理个税。'
-    : hasTax
-      ? '本次将处理：工资报账、个税扣款；未检测到社保文件，本次不生成社保报账。'
-      : '本次将处理：工资报账；未检测到社保和个税文件，本次不生成社保报账，也不处理个税。'
-  const socialLine = hasSocial
-    ? `社保文件：已检测到「${files?.socialSecurityWorkbookName}」。`
-    : '社保文件：未检测到。社保属于每月必办事项，请确认本次先只报工资，后续补齐社保文件后再单独处理社保。'
-  const taxLine = hasTax
-    ? `个税文件：已检测到「${files?.taxWorkbookName}」。`
-    : '个税文件：未检测到。个税按单位实际情况处理；没有个税或由其他渠道代收时，可以不放个税文件。'
+      ? '本次处理：工资报账、社保报账、个税扣款。'
+      : '本次处理：工资报账、社保报账；不报个税。'
+    : selectedProcessMode.value === 'social'
+      ? hasTax
+        ? `本次只打印社保相关报表，并生成工资和社保凭证；包含个税。${hasSalary ? '' : '未检测到工资表，只生成社保凭证。'}`
+        : `本次只打印社保相关报表，并生成工资和社保凭证；不报个税。${hasSalary ? '' : '未检测到工资表，只生成社保凭证。'}`
+      : hasTax
+        ? '本次只处理工资报账和个税扣款；不生成凭证。'
+        : '本次只处理工资报账，不报个税。'
 
   try {
     await ElMessageBox.confirm(
-      `${mode}\n\n工资表：${files?.salaryWorkbookName ?? '已检测'}。\n${socialLine}\n${taxLine}`,
-      '确认本月工资处理方式',
+      mode,
+      '确认处理范围',
       {
-        type: hasSocial ? 'info' : 'warning',
+        type: selectedProcessMode.value === 'salary-social' ? 'info' : 'warning',
         confirmButtonText: '继续预处理',
         cancelButtonText: '返回检查',
         dangerouslyUseHTMLString: false
@@ -232,16 +296,18 @@ async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
 }
 
 function currentPayload(options: { confirmWriteBack?: boolean } = {}): WorkflowRunPayload | null {
-  if (!detected.value?.salaryWorkbookPath) return null
+  if (!detected.value?.salaryWorkbookPath && !detected.value?.socialSecurityWorkbookPath) return null
   const now = new Date()
+  const processScope = selectedProcessMode.value
   return {
     monthlyPayroll: {
       salaryWorkbookPath: detected.value.salaryWorkbookPath,
-      socialSecurityWorkbookPath: detected.value.socialSecurityWorkbookPath,
+      socialSecurityWorkbookPath: processScope === 'salary' ? undefined : detected.value.socialSecurityWorkbookPath,
       taxWorkbookPath: detected.value.taxWorkbookPath,
       year: now.getFullYear(),
       month: now.getMonth() + 1,
-      confirmWriteBack: options.confirmWriteBack
+      confirmWriteBack: options.confirmWriteBack,
+      processScope
     }
   }
 }
@@ -276,8 +342,8 @@ async function runPreprocess(): Promise<void> {
     ElMessage.warning('本月工资已月结，不能再次开始预处理')
     return
   }
-  if (!detected.value?.salaryWorkbookPath) {
-    ElMessage.warning('请先把本月工资表放入监控文件夹')
+  if (!detected.value?.salaryWorkbookPath && !detected.value?.socialSecurityWorkbookPath) {
+    ElMessage.warning('请先把本月工资表或社保未申报汇总放入监控文件夹')
     return
   }
   const confirmedMode = await confirmMonthlyPayrollPreprocess()
@@ -336,8 +402,8 @@ async function runGenerate(options: { skipWorkflow?: boolean } = {}): Promise<vo
     ElMessage.warning('本月工资已月结，不能重新生成报表')
     return
   }
-  if (!detected.value?.salaryWorkbookPath) {
-    ElMessage.warning('请先把本月工资表放入监控文件夹')
+  if (!detected.value?.salaryWorkbookPath && !detected.value?.socialSecurityWorkbookPath) {
+    ElMessage.warning('请先把本月工资表或社保未申报汇总放入监控文件夹')
     return
   }
   generating.value = true
@@ -395,6 +461,61 @@ const currentPrinterName = computed(() =>
     : printSettings.value.reportPrinterName
 )
 
+function currentPrintRequest(printerName: string, sheetName = activeSheet.value?.name): PrintRequest {
+  const pageRanges = parsePrintPageRanges(printPageRangeText.value)
+  if (isVoucherPrintSheet(sheetName)) {
+    return {
+      printerName,
+      scaleFactor: 100,
+      pageRanges,
+      pageSize: { width: 230000, height: 132000 }
+    }
+  }
+  return { printerName, pageRanges }
+}
+
+function parsePrintPageRanges(value: string): PrintRequest['pageRanges'] {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const ranges = trimmed.split(/[,，]/).flatMap((part) => {
+    const rangeText = part.trim()
+    if (!rangeText) return []
+    const [fromText, toText = fromText] = rangeText.split(/[-~～]/).map((item) => item.trim())
+    const from = Number(fromText)
+    const to = Number(toText)
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from <= 0 || to <= 0) return []
+    const start = Math.min(from, to) - 1
+    const end = Math.max(from, to) - 1
+    return [{ from: start, to: end }]
+  })
+  return ranges.length ? ranges : undefined
+}
+
+async function printCurrentViewForSheet(printerName: string, sheetName = activeSheet.value?.name): Promise<void> {
+  const removeVoucherPrintStyle = isVoucherPrintSheet(sheetName)
+    ? installVoucherPrintPageStyle()
+    : undefined
+  try {
+    await window.salaryApi.printCurrentView(currentPrintRequest(printerName, sheetName))
+  } finally {
+    removeVoucherPrintStyle?.()
+  }
+}
+
+function installVoucherPrintPageStyle(): () => void {
+  const style = document.createElement('style')
+  style.textContent = `
+@media print {
+  @page {
+    size: 230mm 132mm;
+    margin: 0;
+  }
+}
+`
+  document.head.appendChild(style)
+  return () => style.remove()
+}
+
 async function printCurrentReport(): Promise<void> {
   if (!activeSheet.value) return
   const printerName = currentPrinterName.value
@@ -404,7 +525,10 @@ async function printCurrentReport(): Promise<void> {
   }
   printing.value = true
   try {
-    await window.salaryApi.printCurrentView({ printerName })
+    if (isVoucherPrintSheet(activeSheet.value.name)) {
+      await refreshVoucherPrintTotalPages()
+    }
+    await printCurrentViewForSheet(printerName)
     ElMessage.success('已发送到打印机')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '打印失败')
@@ -415,9 +539,37 @@ async function printCurrentReport(): Promise<void> {
 
 const HIDDEN_TAB_SHEETS = new Set<string>()
 
-const visibleSheets = computed(() =>
-  report.value?.sheets.filter((sheet) => !HIDDEN_TAB_SHEETS.has(sheet.name)) ?? []
+const scopedSheets = computed(() =>
+  scopeReportSheets(report.value?.sheets ?? [], selectedProcessMode.value)
 )
+
+const visibleSheets = computed(() =>
+  scopedSheets.value.filter((sheet) => !HIDDEN_TAB_SHEETS.has(sheet.name))
+)
+
+function scopeReportSheets(
+  sheets: MonthlyPayrollReportSheet[],
+  mode: ProcessMode
+): MonthlyPayrollReportSheet[] {
+  if (mode === 'salary-social') return sheets
+  return sheets.flatMap((sheet) => {
+    if (mode === 'salary') {
+      if (['五险一金', '保险导入', '凭证'].includes(sheet.name)) return []
+      if (sheet.name === '报销凭证') {
+        const rows = sheet.rows.filter((row) => isSalaryVoucher(row))
+        return rows.length ? [{ ...sheet, rows }] : []
+      }
+      return [sheet]
+    }
+
+    if (['自动生成', '工退遗汇总', '补发工资', '一体化退休'].includes(sheet.name)) return []
+    if (sheet.name === '报销凭证') {
+      const rows = sheet.rows.filter((row) => !isSalaryVoucher(row))
+      return rows.length ? [{ ...sheet, rows }] : []
+    }
+    return [sheet]
+  })
+}
 
 const availableMonths = computed(() => {
   const seen = new Map<string, { year: number; month: number; latestId: number; archived: boolean }>()
@@ -482,14 +634,14 @@ async function onMonthChange(key: string): Promise<void> {
 }
 
 const availablePrintAllSheets = computed(() =>
-  PRINT_ALL_SHEETS.filter((name) => report.value?.sheets.some((sheet) => sheet.name === name))
+  PRINT_ALL_SHEETS.filter((name) => visibleSheets.value.some((sheet) => sheet.name === name))
 )
 
 const canPrintAll = computed(() => {
-  const hasSalary = Boolean(detected.value?.salaryWorkbookPath)
-  if (availablePrintAllSheets.value.length === 0 && !hasSalary) return false
+  const shouldPrintSalaryWorkbook = selectedProcessMode.value !== 'social' && Boolean(detected.value?.salaryWorkbookPath)
+  if (availablePrintAllSheets.value.length === 0 && !shouldPrintSalaryWorkbook) return false
   const needsReport =
-    hasSalary || availablePrintAllSheets.value.some((name) => !isVoucherPrintSheet(name))
+    shouldPrintSalaryWorkbook || availablePrintAllSheets.value.some((name) => !isVoucherPrintSheet(name))
   const needsVoucher = availablePrintAllSheets.value.some((name) => isVoucherPrintSheet(name))
   if (needsReport && !printSettings.value.reportPrinterName) return false
   if (needsVoucher && !printSettings.value.voucherPrinterName) return false
@@ -498,7 +650,7 @@ const canPrintAll = computed(() => {
 
 async function printAllReports(): Promise<void> {
   const targets = availablePrintAllSheets.value
-  const salaryPath = detected.value?.salaryWorkbookPath
+  const salaryPath = selectedProcessMode.value === 'social' ? undefined : detected.value?.salaryWorkbookPath
   if (targets.length === 0 && !salaryPath) {
     ElMessage.warning('没有可打印的报表')
     return
@@ -517,6 +669,9 @@ async function printAllReports(): Promise<void> {
   printing.value = true
   try {
     let count = 0
+    if (needsVoucher) {
+      await refreshVoucherPrintTotalPages()
+    }
     if (salaryPath) {
       await window.salaryApi.printSalaryWorkbookViaExcel({
         salaryWorkbookPath: salaryPath,
@@ -532,7 +687,7 @@ async function printAllReports(): Promise<void> {
       const printerName = isVoucherPrintSheet(name)
         ? printSettings.value.voucherPrinterName
         : printSettings.value.reportPrinterName
-      await window.salaryApi.printCurrentView({ printerName })
+      await printCurrentViewForSheet(printerName, name)
       count += 1
     }
     ElMessage.success(`已发送 ${count} 项到打印机`)
@@ -543,6 +698,62 @@ async function printAllReports(): Promise<void> {
   }
 }
 
+type VoucherPrintPageSummaryItem = {
+  label: string
+  pages: number
+  note?: string
+}
+
+async function refreshVoucherPrintTotalPages(): Promise<void> {
+  voucherPrintTotalPagesLoading.value = true
+  try {
+    const summary = await buildVoucherPrintPageSummary()
+    voucherPrintTotalPages.value = summary.totalPages
+    await nextTick()
+  } finally {
+    voucherPrintTotalPagesLoading.value = false
+  }
+}
+
+async function buildVoucherPrintPageSummary(): Promise<{
+  items: VoucherPrintPageSummaryItem[]
+  totalPages: number
+}> {
+  const items: VoucherPrintPageSummaryItem[] = []
+  const salarySummary = await getSalaryPrintPageSummary()
+  const salaryPages = salarySummary?.items.find((item) => item.label === '工资表')?.pages ?? 0
+  const survivorPages = salarySummary?.items
+    .filter((item) => item.label === '遗补')
+    .reduce((sum, item) => sum + item.pages, 0) ?? 0
+  items.push({ label: '工资表', pages: salaryPages })
+  items.push({ label: '遗补', pages: survivorPages })
+  items.push({ label: '退休教师房补', pages: getRetiredHousingPrintPageCount() })
+  return {
+    items,
+    totalPages: items.reduce((sum, item) => sum + item.pages, 0)
+  }
+}
+
+async function getSalaryPrintPageSummary(): Promise<MonthlyPayrollSalaryPrintPageSummary | null> {
+  const salaryWorkbookPath = detected.value?.salaryWorkbookPath || selectedHistoryRun.value?.sourceSalaryPath || ''
+  if (!salaryWorkbookPath) return null
+  try {
+    return await window.salaryApi.getSalaryWorkbookPrintPageSummary({
+      salaryWorkbookPath,
+      taxWorkbookPath: detected.value?.taxWorkbookPath || selectedHistoryRun.value?.sourceTaxPath || undefined,
+      printerName: printSettings.value.reportPrinterName
+    })
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : '工资表页数统计失败')
+    return null
+  }
+}
+
+function getRetiredHousingPrintPageCount(): number {
+  const sheet = report.value?.sheets.find((item) => item.name === '一体化退休')
+  return sheet ? splitRetiredHousingSheet(sheet).length : 0
+}
+
 const printButtonText = computed(() =>
   activeSheet.value?.name === '报销凭证' ? '打印报销凭证' : '打印当前视图'
 )
@@ -551,8 +762,29 @@ const currentPrinterLabel = computed(() =>
   isVoucherPrintSheet(activeSheet.value?.name) ? '票据打印机' : '报表打印机'
 )
 
+const voucherPageStyle = computed(() => ({
+  '--voucher-offset-x': `${Number(printSettings.value.voucherOffsetX || 0)}mm`,
+  '--voucher-offset-y': `${Number(printSettings.value.voucherOffsetY || 0)}mm`
+}))
+
 const activeSheet = computed(() =>
-  report.value?.sheets.find((sheet) => sheet.name === activeReportSheet.value)
+  scopedSheets.value.find((sheet) => sheet.name === activeReportSheet.value)
+)
+
+watch(
+  () => [
+    activeSheet.value?.name,
+    detected.value?.salaryWorkbookPath,
+    selectedHistoryRun.value?.sourceSalaryPath,
+    printSettings.value.reportPrinterName
+  ] as const,
+  () => {
+    if (isVoucherPrintSheet(activeSheet.value?.name)) {
+      void refreshVoucherPrintTotalPages()
+    } else {
+      voucherPrintTotalPages.value = null
+    }
+  }
 )
 
 const activePages = computed<MonthlyPayrollReportSheet[]>(() => {
@@ -811,9 +1043,22 @@ function isCustomStyledSheet(name: string): boolean {
       </div>
     </div>
 
+    <div v-if="availableProcessModes.length" class="process-mode-panel">
+      <strong>处理范围</strong>
+      <el-radio-group v-model="selectedProcessMode" size="small" @change="markProcessModeTouched">
+        <el-radio-button
+          v-for="item in availableProcessModes"
+          :key="item.value"
+          :label="item.value"
+        >
+          {{ item.label }}
+        </el-radio-button>
+      </el-radio-group>
+    </div>
+
     <div class="rule-note">
       <strong>自动判断规则</strong>
-      <p>工资表和社保属于每月必办；监控文件夹只有工资表时，可先只报工资，社保文件补齐后再处理社保。个税按单位实际情况处理，未检测到个税文件时跳过个税扣款和补发工资。</p>
+      <p>选择“只报工资”时不生成凭证；选择“只报社保”时只打印五险一金等社保相关报表，但会读取工资表一起生成工资凭证和社保凭证。未检测到个税文件时不报个税。</p>
     </div>
 
     <div v-if="result" class="result-panel" :class="{ failed: !result.ok }">
@@ -882,69 +1127,69 @@ function isCustomStyledSheet(name: string): boolean {
         <el-table-column label="单位" prop="unitFullName" min-width="180" show-overflow-tooltip />
         <el-table-column label="在职" prop="activeCount" width="70" align="right" />
         <el-table-column label="遗补" prop="survivorCount" width="70" align="right" />
-        <el-table-column label="应发" width="120" align="right">
-          <template #default="{ row }">{{ formatMoney(row.salaryTotal) }}</template>
+        <el-table-column label="退休" prop="retiredHousingCount" width="70" align="right" />
+        <el-table-column label="在职实发" width="120" align="right">
+          <template #default="{ row }">{{ formatMoney(row.activeActualPay) }}</template>
         </el-table-column>
-        <el-table-column label="代扣" width="110" align="right">
-          <template #default="{ row }">{{ formatMoney(row.withholdingTotal) }}</template>
+        <el-table-column label="遗补实发" width="120" align="right">
+          <template #default="{ row }">{{ formatMoney(row.survivorActualPay) }}</template>
         </el-table-column>
-        <el-table-column label="个税" width="100" align="right">
-          <template #default="{ row }">{{ formatMoney(row.taxTotal) }}</template>
+        <el-table-column label="退休房补实发" width="140" align="right">
+          <template #default="{ row }">{{ formatMoney(row.retiredHousingActualPay) }}</template>
         </el-table-column>
-        <el-table-column label="实发" width="120" align="right">
-          <template #default="{ row }">{{ formatMoney(row.actualPay) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
+        <el-table-column label="操作" width="430" fixed="right" align="right">
           <template #default="{ row }">
-            <el-button
-              size="small"
-              text
-              type="primary"
-              @click="viewHistoryReport(row)"
-            >查看</el-button>
-            <el-button
-              v-if="row.voucherImportPath"
-              size="small"
-              text
-              type="primary"
-              @click="openHistoryFile(row.voucherImportPath)"
-            >凭证</el-button>
-            <el-button
-              v-if="row.insuranceImportPath"
-              size="small"
-              text
-              type="primary"
-              @click="openHistoryFile(row.insuranceImportPath)"
-            >保险导入</el-button>
-            <el-button
-              v-if="row.payrollBackpayPath"
-              size="small"
-              text
-              type="primary"
-              @click="openHistoryFile(row.payrollBackpayPath)"
-            >补发工资</el-button>
-            <el-button
-              v-if="row.archiveDir"
-              size="small"
-              text
-              type="primary"
-              @click="openHistoryFile(row.archiveDir)"
-            >月结</el-button>
-            <el-button
-              v-else
-              size="small"
-              text
-              type="warning"
-              :loading="archivingId === row.id"
-              @click="archiveHistoryRun(row)"
-            >月结</el-button>
-            <el-button
-              v-if="!row.archivedAt"
-              size="small"
-              text
-              type="danger"
-              @click="deleteHistoryRun(row)"
-            >删除</el-button>
+            <div class="history-actions">
+              <el-button
+                v-if="row.voucherImportPath"
+                size="small"
+                text
+                type="primary"
+                @click="openHistoryFile(row.voucherImportPath)"
+              >凭证</el-button>
+              <el-button
+                v-if="row.insuranceImportPath"
+                size="small"
+                text
+                type="primary"
+                @click="openHistoryFile(row.insuranceImportPath)"
+              >保险导入</el-button>
+              <el-button
+                v-if="row.payrollBackpayPath"
+                size="small"
+                text
+                type="primary"
+                @click="openHistoryFile(row.payrollBackpayPath)"
+              >补发工资</el-button>
+              <el-button
+                v-if="row.archiveDir"
+                size="small"
+                text
+                type="primary"
+                @click="openHistoryFile(row.archiveDir)"
+              >月结</el-button>
+              <el-button
+                v-else
+                size="small"
+                text
+                type="warning"
+                :loading="archivingId === row.id"
+                @click="archiveHistoryRun(row)"
+              >月结</el-button>
+              <el-button
+                size="small"
+                text
+                type="primary"
+                @click="viewHistoryReport(row)"
+              >查看</el-button>
+              <el-button
+                v-if="!row.archivedAt"
+                size="small"
+                text
+                type="danger"
+                @click="deleteHistoryRun(row)"
+              >删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -1014,6 +1259,43 @@ function isCustomStyledSheet(name: string): boolean {
               </el-select>
             </label>
           </div>
+          <div v-if="activeSheet?.name === '报销凭证'" class="voucher-offset-controls">
+            <label>
+              <span>横向偏移 mm</span>
+              <el-input-number
+                v-model="printSettings.voucherOffsetX"
+                size="small"
+                :min="-30"
+                :max="30"
+                :step="0.5"
+                :precision="1"
+                controls-position="right"
+                @change="savePrintSettings"
+              />
+            </label>
+            <label>
+              <span>纵向偏移 mm</span>
+              <el-input-number
+                v-model="printSettings.voucherOffsetY"
+                size="small"
+                :min="-30"
+                :max="30"
+                :step="0.5"
+                :precision="1"
+                controls-position="right"
+                @change="savePrintSettings"
+              />
+            </label>
+          </div>
+          <label class="print-page-range">
+            <span>打印页码</span>
+            <el-input
+              v-model="printPageRangeText"
+              size="small"
+              clearable
+              placeholder="全部，例如 1 或 1-2"
+            />
+          </label>
           <div class="print-button-row">
             <el-button
               :icon="FolderOpened"
@@ -1077,15 +1359,8 @@ function isCustomStyledSheet(name: string): boolean {
           :key="index"
           class="voucher-page"
           :class="{ 'salary-voucher': isSalaryVoucher(row) }"
+          :style="voucherPageStyle"
         >
-          <span class="voucher-item voucher-label pay-method-label">支付方式</span>
-          <span class="voucher-item voucher-label pay-amount-label">支付金额</span>
-          <span class="voucher-item voucher-label pay-order-label">支付令</span>
-          <span class="voucher-item voucher-label transfer-label">转账支票</span>
-          <span class="voucher-item pay-order-top">{{ row[5] }}</span>
-          <span class="voucher-item pay-amount-top">{{ voucherAmount(row[4]) }}</span>
-          <span class="voucher-item transfer-top">{{ row[6] }}</span>
-
           <span class="voucher-item unit-name">{{ row[1] }}</span>
           <span class="voucher-item voucher-year">{{ row[10] }}</span>
           <span class="voucher-item voucher-month">{{ row[11] }}</span>
@@ -1102,6 +1377,12 @@ function isCustomStyledSheet(name: string): boolean {
           <span class="voucher-item amount-upper transfer-upper">{{ Number(row[6] || 0) ? voucherUpperAmount(row, 6) : '' }}</span>
           <span class="voucher-item amount-number transfer-number">{{ voucherAmount(row[6]) }}</span>
 
+          <span
+            v-if="voucherPrintTotalPages !== null && !voucherPrintTotalPagesLoading"
+            class="voucher-item voucher-total-pages"
+          >
+            {{ voucherPrintTotalPages }}
+          </span>
           <span class="voucher-item voucher-usage-print">{{ voucherUsagePrintText(row) }}</span>
         </article>
       </div>
@@ -1193,7 +1474,7 @@ function isCustomStyledSheet(name: string): boolean {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  max-width: 1200px;
+  max-width: none;
   margin-top: 16px;
 }
 
@@ -1271,9 +1552,10 @@ function isCustomStyledSheet(name: string): boolean {
   font-size: 12px;
 }
 
+.process-mode-panel,
 .rule-note,
 .result-panel {
-  max-width: 1200px;
+  max-width: none;
   margin-top: 16px;
   padding: 14px;
   border: 1px solid var(--border);
@@ -1281,6 +1563,14 @@ function isCustomStyledSheet(name: string): boolean {
   background: var(--surface);
 }
 
+.process-mode-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.process-mode-panel strong,
 .rule-note strong {
   color: var(--text);
   font-size: 14px;
@@ -1353,7 +1643,7 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .report-view {
-  max-width: 1200px;
+  max-width: none;
   margin-top: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1361,7 +1651,7 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .history-panel {
-  max-width: 1200px;
+  max-width: none;
   margin-top: 16px;
   padding: 14px;
   border: 1px solid var(--border);
@@ -1382,6 +1672,18 @@ function isCustomStyledSheet(name: string): boolean {
   gap: 6px;
   color: var(--text);
   font-size: 14px;
+}
+
+.history-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.history-actions .el-button {
+  margin-left: 0;
 }
 
 .report-toolbar {
@@ -1415,17 +1717,36 @@ function isCustomStyledSheet(name: string): boolean {
   width: 100%;
 }
 
-.printer-selects label {
+.voucher-offset-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.print-page-range {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+
+.printer-selects label,
+.voucher-offset-controls label,
+.print-page-range {
   display: grid;
   gap: 4px;
 }
 
-.printer-selects span {
+.printer-selects span,
+.voucher-offset-controls span,
+.print-page-range span {
   color: var(--text-3);
   font-size: 12px;
 }
 
-.printer-selects .el-select {
+.printer-selects .el-select,
+.voucher-offset-controls .el-input-number,
+.print-page-range .el-input {
   width: 100%;
 }
 
@@ -1525,10 +1846,10 @@ function isCustomStyledSheet(name: string): boolean {
   border: 0;
 }
 
-/* 工退遗汇总 — rows 1-2 (title + unit) borderless; rows 3-6 (three-tier header + data row) borders;
-   row 7 (summary narrative "本月应发…实发…") borderless. */
+/* 工退遗汇总 — title/unit/blank/footer borderless; sections are rendered as two stacked bands. */
 .sheet-summary .report-table tr:nth-child(-n+2) td,
-.sheet-summary .report-table tr:nth-child(7) td {
+.sheet-summary .report-table tr:nth-child(6) td,
+.sheet-summary .report-table tr:nth-child(10) td {
   border: 0;
 }
 
@@ -1608,8 +1929,10 @@ function isCustomStyledSheet(name: string): boolean {
   text-align: center;
 }
 
-/* 工退遗汇总 — wide cross-tab, 27 narrow columns, three-tier header */
+/* 工退遗汇总 — portrait A4 summary table */
 .sheet-summary {
+  width: 210mm;
+  min-height: 297mm;
   padding-top: 14mm;
 }
 
@@ -1620,14 +1943,14 @@ function isCustomStyledSheet(name: string): boolean {
 
 .sheet-summary .report-table {
   table-layout: fixed;
-  font-size: 7pt;
+  font-size: 8pt;
 }
 
 .sheet-summary .report-table td {
-  padding: 1px 1px;
+  padding: 2px 2px;
   text-align: center;
   word-break: break-all;
-  line-height: 1.05;
+  line-height: 1.12;
   vertical-align: middle;
   white-space: pre-line;
 }
@@ -1642,10 +1965,34 @@ function isCustomStyledSheet(name: string): boolean {
   font-size: 9pt;
 }
 
+.sheet-summary .report-table tr:nth-child(3) td,
 .sheet-summary .report-table tr:nth-child(7) td {
+  font-size: 11pt;
+  font-weight: 600;
+  text-align: center;
+  word-break: keep-all;
+  white-space: nowrap;
+}
+
+.sheet-summary .report-table tr:nth-child(10) td {
   font-size: 9pt;
   word-break: keep-all;
   white-space: nowrap;
+}
+
+.sheet-summary .report-table tr:nth-child(4) td,
+.sheet-summary .report-table tr:nth-child(8) td {
+  font-size: 7.6pt;
+  line-height: 1.08;
+}
+
+.sheet-summary .report-table tr:nth-child(5) td,
+.sheet-summary .report-table tr:nth-child(9) td {
+  padding: 2px 1px;
+  font-size: 7.6pt;
+  overflow: visible;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 /* 退休房补 — 6-column simple list: title + header + data + total */
@@ -1732,12 +2079,14 @@ function isCustomStyledSheet(name: string): boolean {
   width: 230mm;
   height: 132mm;
   margin: 0 auto;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
   color: #000;
   font-family: SimSun, 'Songti SC', serif;
   font-size: 15pt;
   page-break-after: always;
+  --voucher-offset-x: 0mm;
+  --voucher-offset-y: 0mm;
 }
 
 .voucher-item {
@@ -1745,10 +2094,11 @@ function isCustomStyledSheet(name: string): boolean {
   display: block;
   color: #000;
   font-family: SimSun, 'Songti SC', serif;
-  font-size: 11pt;
+  font-size: 12pt;
   line-height: 1.1;
   white-space: nowrap;
   overflow: visible;
+  transform: translate(var(--voucher-offset-x), var(--voucher-offset-y));
 }
 
 .voucher-label {
@@ -1779,7 +2129,7 @@ function isCustomStyledSheet(name: string): boolean {
   left: 164.84mm;
   top: 10.32mm;
   width: 22.49mm;
-  font-size: 10pt;
+  font-size: 12pt;
 }
 
 .pay-amount-top {
@@ -1798,25 +2148,25 @@ function isCustomStyledSheet(name: string): boolean {
 
 .unit-name {
   left: 42.33mm;
-  top: 40.22mm;
+  top: 35.22mm;
   width: 37.04mm;
 }
 
 .voucher-year {
-  left: 109.80mm;
-  top: 40.22mm;
+  left: 119.80mm;
+  top: 35.22mm;
   width: 9.26mm;
 }
 
 .voucher-month {
-  left: 127.53mm;
-  top: 40.22mm;
+  left: 137.53mm;
+  top: 35.22mm;
   width: 9.26mm;
 }
 
 .voucher-day {
-  left: 140.23mm;
-  top: 40.22mm;
+  left: 150.23mm;
+  top: 35.22mm;
   width: 9.26mm;
 }
 
@@ -1826,7 +2176,7 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .amount-number {
-  left: 129.65mm;
+  left: 144.65mm;
   width: 26.46mm;
 }
 
@@ -1837,17 +2187,17 @@ function isCustomStyledSheet(name: string): boolean {
 
 .unpaid-upper,
 .unpaid-number {
-  top: 80.96mm;
+  top: 83.96mm;
 }
 
 .actual-upper,
 .actual-number {
-  top: 88.90mm;
+  top: 93.90mm;
 }
 
 .order-upper,
 .order-number {
-  top: 97.90mm;
+  top: 107.90mm;
 }
 
 .transfer-upper,
@@ -1856,24 +2206,34 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .voucher-usage-print {
-  left: 160.34mm;
-  top: 65.35mm;
-  width: 64.03mm;
+  left: 180.34mm;
+  top: 70.35mm;
+  width: 88mm;
   height: 59.53mm;
   font-family: FangSong, STFangsong, SimSun, serif;
-  font-size: 11pt;
+  font-size: 10.5pt;
   line-height: 1.08;
   white-space: pre-line;
+  overflow: visible;
+}
+
+.voucher-total-pages {
+  left: 200.34mm;
+  top: 62.35mm;
+  width: 45mm;
+  font-size: 10.5pt;
+  font-family: FangSong, STFangsong, SimSun, serif;
+  line-height: 1;
 }
 
 .salary-voucher .amount-upper {
   width: 62mm;
-  font-size: 9.5pt;
+  font-size: 12pt;
   line-height: 1;
 }
 
 .salary-voucher .amount-number {
-  font-size: 10.5pt;
+  font-size: 12pt;
 }
 
 .salary-voucher .voucher-usage-print {
@@ -1900,6 +2260,7 @@ function isCustomStyledSheet(name: string): boolean {
   :global(.md-sidebar),
   .monthly-header,
   .monthly-grid,
+  .process-mode-panel,
   .rule-note,
   .result-panel,
   .report-toolbar,

@@ -96,6 +96,9 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
 
   const messages: string[] = []
   const warnings: string[] = []
+  const activeMissingIntegrated: string[] = []
+  const retiredMissingIntegrated: string[] = []
+  const otherMissingIntegrated: string[] = []
   let lookupFailureCount = 0
   const counts = {
     activeUpdated: 0,
@@ -166,6 +169,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
         continue
       }
 
+      activeMissingIntegrated.push(personLabel(activeTarget, row, idCard))
       await updateTargetStatus(activeTarget, row, '调出人员', '一体化在职和一体化退休均未找到')
       counts.activeTransferredOut += 1
     }
@@ -222,6 +226,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
         await updateTargetFieldsAndStatus(retiredTarget, row, values, '正常', '一体化退休匹配')
         counts.retiredUpdated += 1
       } else {
+        retiredMissingIntegrated.push(personLabel(retiredTarget, row, idCard))
         await updateTargetStatus(retiredTarget, row, '去世', '一体化退休未找到')
         counts.retiredDeceased += 1
       }
@@ -268,6 +273,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
         await updateTargetFieldsAndStatus(otherTarget, row, values, '正常', '一体化其他匹配')
         counts.otherUpdated += 1
       } else {
+        otherMissingIntegrated.push(personLabel(otherTarget, row, idCard))
         await updateTargetStatus(otherTarget, row, '去世', '一体化其他未找到')
         counts.otherDeceased += 1
       }
@@ -302,6 +308,29 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
   if (activeSourceRows.length === 0) warnings.push('一体化在职没有可用于更新预算的数据')
   if (retiredSourceRows.length === 0) warnings.push('一体化退休没有可用于更新预算的数据')
   if (otherSourceRows.length === 0) warnings.push('一体化其他没有可用于更新预算的数据')
+  warnings.push(
+    ...buildMissingLookupWarnings('一体化在职', activeSourceRows, activeSource, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingLookupWarnings('一体化退休', retiredSourceRows, retiredSource, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingLookupWarnings('一体化其他', otherSourceRows, otherSource, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingLookupWarnings('一体化在职', activeSourceRows, activeSource, lookups.educationByIdCard, '教职工学历'),
+    ...buildMissingLookupWarnings('一体化退休', retiredSourceRows, retiredSource, lookups.educationByIdCard, '教职工学历'),
+    ...buildMissingLookupWarnings('一体化其他', otherSourceRows, otherSource, lookups.educationByIdCard, '教职工学历')
+  )
+  if (activeMissingIntegrated.length > 0) {
+    warnings.push(
+      `预算在职有 ${activeMissingIntegrated.length} 人按身份证在一体化在职/一体化退休中均未找到，已标记为调出人员。${formatExamples(activeMissingIntegrated)}`
+    )
+  }
+  if (retiredMissingIntegrated.length > 0) {
+    warnings.push(
+      `预算退休有 ${retiredMissingIntegrated.length} 人按身份证在一体化退休中未找到，已标记为去世。${formatExamples(retiredMissingIntegrated)}`
+    )
+  }
+  if (otherMissingIntegrated.length > 0) {
+    warnings.push(
+      `预算其他有 ${otherMissingIntegrated.length} 人按身份证在一体化其他中未找到，已标记为去世。${formatExamples(otherMissingIntegrated)}`
+    )
+  }
   if (lookupFailureCount > 0) warnings.push(`查询失败 ${lookupFailureCount} 条，已写入查询失败日志`)
 
   messages.push(
@@ -1048,6 +1077,39 @@ function rowsByIdCard(source: SheetCtx, rows: Row[]): Map<string, Row> {
     if (idCard) result.set(idCard, row)
   }
   return result
+}
+
+function buildMissingLookupWarnings(
+  sourceName: string,
+  rows: Row[],
+  source: SheetCtx,
+  lookup: Map<string, Row>,
+  lookupName: string
+): string[] {
+  const idCardColumn = findIdCardColumn(source)
+  const missing = rows
+    .map((row) => ({
+      idCard: normalizeIdCard(row[idCardColumn]),
+      label: personLabel(source, row, normalizeIdCard(row[idCardColumn]))
+    }))
+    .filter((item) => item.idCard && !lookup.has(item.idCard))
+
+  if (missing.length === 0) return []
+  return [
+    `${sourceName}有 ${missing.length} 人按身份证在${lookupName}中未找到，相关字段已留空或沿用原值。${formatExamples(missing.map((item) => item.label))}`
+  ]
+}
+
+function personLabel(source: SheetCtx, row: Row, idCard: string): string {
+  const name = text(readSourceValue(source, row, '姓名')) || text(readSourceValue(source, row, '姓名*'))
+  return name ? `${name}(${idCard})` : idCard
+}
+
+function formatExamples(items: string[]): string {
+  const examples = items.filter(Boolean).slice(0, 8)
+  if (examples.length === 0) return ''
+  const suffix = items.length > examples.length ? `等 ${items.length} 人` : ''
+  return `示例：${examples.join('、')}${suffix ? `，${suffix}` : ''}`
 }
 
 function findIdCardColumn(source: SheetCtx): string {
