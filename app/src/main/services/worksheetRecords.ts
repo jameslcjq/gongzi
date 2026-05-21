@@ -190,7 +190,6 @@ export async function wipeAllWorksheetData(): Promise<{ tables: number; rows: nu
     await run(database, `DELETE FROM import_batches`)
     await run(database, `DELETE FROM import_logs`)
     await run(database, `DELETE FROM workflow_runs`)
-    await run(database, `DELETE FROM operation_logs`)
     await run(database, `DELETE FROM personnel_status_index`)
     await run(database, 'COMMIT')
   } catch (error) {

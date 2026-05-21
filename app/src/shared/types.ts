@@ -69,19 +69,6 @@ export type WorkflowRunResult = RuleResult & {
   workflowName: string
 }
 
-export type PersonnelArchiveEntry = {
-  id: number
-  archiveType: string
-  sourceWorksheet: string
-  idCard: string
-  name: string
-  unitCode: string
-  unitName: string
-  reason: string
-  archivedAt: string
-  originalData: Record<string, unknown>
-}
-
 export type LookupFailureEntry = {
   id: number
   workflow: string

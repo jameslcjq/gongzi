@@ -24,7 +24,6 @@ import type {
   TownshipMasterSyncApplyResult,
   TownshipMasterSyncPreview,
   LookupFailureEntry,
-  PersonnelArchiveEntry,
   PersonnelExpensePlanPrefillResult,
   PivotConfig,
   PivotResult,
@@ -64,14 +63,6 @@ type PivotConfigSummary = {
   primaryWorksheetName: string
   createdAt: string
   updatedAt: string
-}
-
-type ArchiveQuery = {
-  archiveType?: string
-  sourceWorksheet?: string
-  search?: string
-  limit?: number
-  offset?: number
 }
 
 type LookupFailureQuery = {
@@ -340,10 +331,6 @@ const salaryApi = {
   detectIdCardField: (worksheetId: string): Promise<string | undefined> =>
     ipcRenderer.invoke('pivot:detect-id-card', worksheetId),
 
-  listPersonnelArchive: (
-    query?: ArchiveQuery
-  ): Promise<{ total: number; rows: PersonnelArchiveEntry[] }> =>
-    ipcRenderer.invoke('archive:list-personnel', query ?? {}),
   listLookupFailures: (
     query?: LookupFailureQuery
   ): Promise<{ total: number; rows: LookupFailureEntry[] }> =>

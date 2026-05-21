@@ -1,5 +1,4 @@
 import { app } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import sqlite3 from 'sqlite3'
@@ -31,7 +30,6 @@ export async function getDatabase(): Promise<sqlite3.Database> {
 
   databasePath = join(app.getPath('userData'), 'salary-system.sqlite')
   await mkdir(dirname(databasePath), { recursive: true })
-  backupDatabaseBeforeStartupMigrations(databasePath)
 
   db = await openDatabase(databasePath)
   await exec(db, `
@@ -41,177 +39,16 @@ export async function getDatabase(): Promise<sqlite3.Database> {
     PRAGMA foreign_keys = ON;
     PRAGMA temp_store = MEMORY;
   `)
-  await migrateTeacherDetailSchema(db)
-  await migrateBudgetOtherWorksheetName(db)
-  await migrateUnitFullNameColumns(db)
   await exec(db, readRetainedSchemaSql())
   await ensureSystemTables(db)
-  await migrateBudgetOtherWorksheetReferences(db)
-  await dropDeprecatedHrWorksheets(db)
   await syncWorksheetColumns(db)
   await backfillHrBankFieldsFromBudget(db)
-  await pruneHrInfoColumns(db)
-  await migrateNewHousingSubsidyColumns(db)
-  await pruneDeprecatedTownshipAllowanceColumns(db)
   await ensureBudgetStatusColumns(db)
   await refreshAllPersonnelStatuses(db)
   await ensurePerformanceIndexes(db)
   await ensureIdentityUniqueIndexes(db)
 
   return db
-}
-
-function backupDatabaseBeforeStartupMigrations(sourcePath: string): void {
-  if (!existsSync(sourcePath)) return
-  try {
-    const stat = statSync(sourcePath)
-    if (stat.size === 0) return
-
-    const folder = join(dirname(sourcePath), 'backups', 'pre-migration')
-    mkdirSync(folder, { recursive: true })
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const targetPath = join(folder, `salary-system-pre-migration-${stamp}.sqlite`)
-    copyFileSync(sourcePath, targetPath)
-
-    for (const suffix of ['-wal', '-shm']) {
-      const sidecar = `${sourcePath}${suffix}`
-      if (existsSync(sidecar)) copyFileSync(sidecar, `${targetPath}${suffix}`)
-    }
-  } catch (error) {
-    console.warn('[db] 迁移前自动备份失败，已继续启动：', error)
-  }
-}
-
-async function migrateTeacherDetailSchema(database: sqlite3.Database): Promise<void> {
-  // 把"在编教职工基本信息"重构为主表，多行字段拆出 4 张子表。
-  // 检测到旧字段就直接重建为空白结构（用户已确认空白 schema）。
-  const tableName = '在编教职工基本信息'
-  const deprecated = ['全日制学历及专业', '最高学历及专业', '教师资格证学段', '教师资格证学科', '教师资格证证书号码', '教师资格证定期注册有效期', '任教班级学科节数', '工作履历']
-  const existing = await all<{ name: string }>(
-    database,
-    `PRAGMA table_info(${quoteIdentifier(tableName)})`
-  )
-  if (existing.length === 0) return
-  const existingNames = new Set(existing.map((column) => column.name))
-  const hasDeprecated = deprecated.some((name) => existingNames.has(name))
-  if (!hasDeprecated) return
-
-  await run(database, 'BEGIN TRANSACTION')
-  try {
-    await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`)
-    // 子表如果之前不存在直接靠 readRetainedSchemaSql 重建即可；如果存在旧数据也清空
-    for (const sub of ['教职工学历', '教职工教师资格', '教职工任教信息', '教职工工作履历']) {
-      await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(sub)}`)
-    }
-    await run(database, 'COMMIT')
-  } catch (error) {
-    await run(database, 'ROLLBACK')
-    throw error
-  }
-}
-
-async function dropDeprecatedHrWorksheets(database: sqlite3.Database): Promise<void> {
-  const deprecated = [
-    { name: '人事在职', worksheetId: 'local-hr-active' },
-    { name: '人事退休', worksheetId: 'local-hr-retired' },
-    { name: '人事其他', worksheetId: 'local-hr-other' },
-    { name: '教职工信息管理系统', worksheetId: 'local-teacher-mis' }
-  ]
-  const names = deprecated.map((item) => item.name)
-  const worksheetIds = deprecated.map((item) => item.worksheetId)
-  const namePlaceholders = names.map(() => '?').join(', ')
-  const idPlaceholders = worksheetIds.map(() => '?').join(', ')
-
-  await run(database, 'BEGIN TRANSACTION')
-  try {
-    for (const table of names) {
-      await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(table)}`)
-    }
-    await run(
-      database,
-      `DELETE FROM import_batch_rows WHERE worksheet_name IN (${namePlaceholders})`,
-      names
-    )
-    await run(
-      database,
-      `DELETE FROM import_logs WHERE worksheet_name IN (${namePlaceholders})`,
-      names
-    )
-    await run(
-      database,
-      `DELETE FROM field_mappings WHERE worksheet_name IN (${namePlaceholders}) OR worksheet_id IN (${idPlaceholders})`,
-      [...names, ...worksheetIds]
-    )
-    await run(
-      database,
-      `DELETE FROM import_batches WHERE worksheet_name IN (${namePlaceholders}) OR worksheet_id IN (${idPlaceholders})`,
-      [...names, ...worksheetIds]
-    )
-    await run(database, 'COMMIT')
-  } catch (error) {
-    await run(database, 'ROLLBACK')
-    throw error
-  }
-}
-
-async function migrateBudgetOtherWorksheetName(database: sqlite3.Database): Promise<void> {
-  const oldName = '其他人员'
-  const newName = '预算其他'
-  const oldTableExists = await hasTable(database, oldName)
-  if (!oldTableExists) return
-
-  const newTableExists = await hasTable(database, newName)
-  if (newTableExists) {
-    const [{ count }] = await all<{ count: number }>(
-      database,
-      `SELECT COUNT(*) AS count FROM ${quoteIdentifier(newName)}`
-    )
-    if (count > 0) return
-    await exec(database, `DROP TABLE ${quoteIdentifier(newName)}`)
-  }
-
-  await exec(
-    database,
-    `ALTER TABLE ${quoteIdentifier(oldName)} RENAME TO ${quoteIdentifier(newName)}`
-  )
-}
-
-async function migrateBudgetOtherWorksheetReferences(database: sqlite3.Database): Promise<void> {
-  const oldName = '其他人员'
-  const newName = '预算其他'
-  for (const tableName of ['import_batch_rows', 'import_logs', 'field_mappings', 'import_batches']) {
-    if (!(await hasTable(database, tableName))) continue
-    await run(database, `UPDATE ${tableName} SET worksheet_name = ? WHERE worksheet_name = ?`, [
-      newName,
-      oldName
-    ])
-  }
-}
-
-async function migrateUnitFullNameColumns(database: sqlite3.Database): Promise<void> {
-  for (const tableName of ['在编教职工基本信息', '人事信息']) {
-    const existing = await all<{ name: string }>(
-      database,
-      `PRAGMA table_info(${quoteIdentifier(tableName)})`
-    )
-    if (existing.length === 0) continue
-    const existingNames = new Set(existing.map((column) => column.name))
-    if (!existingNames.has('单位全称') || existingNames.has('单位名称')) continue
-    await exec(
-      database,
-      `ALTER TABLE ${quoteIdentifier(tableName)}
-       RENAME COLUMN ${quoteIdentifier('单位全称')} TO ${quoteIdentifier('单位名称')}`
-    )
-  }
-}
-
-async function hasTable(database: sqlite3.Database, tableName: string): Promise<boolean> {
-  const rows = await all<{ name: string }>(
-    database,
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
-    [tableName]
-  )
-  return rows.length > 0
 }
 
 async function ensureBudgetStatusColumns(database: sqlite3.Database): Promise<void> {
@@ -357,92 +194,6 @@ async function hasColumns(
   return columnNames.every((columnName) => existingNames.has(columnName))
 }
 
-async function migrateNewHousingSubsidyColumns(database: sqlite3.Database): Promise<void> {
-  const tableName = '新房补'
-  const existingColumns = await all<{ name: string }>(
-    database,
-    `PRAGMA table_info(${quoteIdentifier(tableName)})`
-  )
-  if (existingColumns.length === 0) return
-
-  const existingNames = new Set(existingColumns.map((column) => column.name))
-  if (existingNames.has('退休金标准') && !existingNames.has('退休提租补贴')) {
-    await exec(
-      database,
-      `ALTER TABLE ${quoteIdentifier(tableName)}
-       RENAME COLUMN ${quoteIdentifier('退休金标准')} TO ${quoteIdentifier('退休提租补贴')}`
-    )
-  }
-}
-
-async function pruneHrInfoColumns(database: sqlite3.Database): Promise<void> {
-  await pruneWorksheetColumnsToMetadata(database, '人事信息')
-}
-
-async function pruneDeprecatedTownshipAllowanceColumns(database: sqlite3.Database): Promise<void> {
-  await pruneWorksheetColumnsToMetadata(database, '\u4e61\u9547\u8865\u8d34')
-}
-
-async function pruneWorksheetColumnsToMetadata(
-  database: sqlite3.Database,
-  tableName: string
-): Promise<void> {
-  const worksheet = readWorksheetMetadata().find((item) => item.name === tableName)
-  if (!worksheet) return
-
-  const expectedColumns = [
-    { name: 'id', definition: 'INTEGER PRIMARY KEY AUTOINCREMENT' },
-    { name: 'md_row_id', definition: 'TEXT UNIQUE' },
-    { name: 'md_created_at', definition: 'TEXT' },
-    { name: 'md_updated_at', definition: 'TEXT' },
-    ...getWorksheetLocalColumns(worksheet).map((column) => ({
-      name: column.columnName,
-      definition: getSqlType(column.field)
-    }))
-  ]
-  const columns = await all<{ name: string }>(
-    database,
-    `PRAGMA table_info(${quoteIdentifier(tableName)})`
-  )
-  const existingNames = new Set(columns.map((column) => column.name))
-  const expectedNames = new Set(expectedColumns.map((column) => column.name))
-  const hasDeprecatedColumns = columns.some((column) => !expectedNames.has(column.name))
-  if (!hasDeprecatedColumns) return
-
-  const tempTableName = `${tableName}__pruned`
-  const definitions = expectedColumns.map((column) => {
-    return `${quoteIdentifier(column.name)} ${column.definition}`
-  })
-  const retainedColumns = expectedColumns
-    .map((column) => column.name)
-    .filter((name) => existingNames.has(name))
-  const retainedColumnList = retainedColumns.map(quoteIdentifier).join(', ')
-
-  await run(database, 'BEGIN TRANSACTION')
-  try {
-    await exec(database, `DROP TABLE IF EXISTS ${quoteIdentifier(tempTableName)}`)
-    await exec(
-      database,
-      `CREATE TABLE ${quoteIdentifier(tempTableName)} (${definitions.join(', ')})`
-    )
-    if (retainedColumns.length > 0) {
-      await exec(
-        database,
-        `INSERT INTO ${quoteIdentifier(tempTableName)} (${retainedColumnList})
-         SELECT ${retainedColumnList} FROM ${quoteIdentifier(tableName)}`
-      )
-    }
-    await exec(database, `DROP TABLE ${quoteIdentifier(tableName)}`)
-    await exec(
-      database,
-      `ALTER TABLE ${quoteIdentifier(tempTableName)} RENAME TO ${quoteIdentifier(tableName)}`
-    )
-    await run(database, 'COMMIT')
-  } catch (error) {
-    await run(database, 'ROLLBACK')
-    throw error
-  }
-}
 
 export function getDatabasePath(): string {
   return databasePath
@@ -526,14 +277,6 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       key TEXT PRIMARY KEY,
       value TEXT,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS operation_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action TEXT NOT NULL,
-      target TEXT,
-      detail TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS import_batches (
@@ -635,22 +378,6 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_lookup_failures_workflow ON lookup_failures (workflow);
     CREATE INDEX IF NOT EXISTS idx_lookup_failures_idcard ON lookup_failures (id_card);
-
-    CREATE TABLE IF NOT EXISTS personnel_archive (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      archive_type TEXT NOT NULL,
-      source_worksheet TEXT NOT NULL,
-      id_card TEXT,
-      name TEXT,
-      unit_code TEXT,
-      unit_name TEXT,
-      original_data TEXT NOT NULL,
-      reason TEXT,
-      archived_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_personnel_archive_idcard ON personnel_archive (id_card);
-    CREATE INDEX IF NOT EXISTS idx_personnel_archive_type ON personnel_archive (archive_type);
 
     CREATE TABLE IF NOT EXISTS personnel_status_index (
       id_card TEXT PRIMARY KEY,

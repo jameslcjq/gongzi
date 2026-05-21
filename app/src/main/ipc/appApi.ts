@@ -31,8 +31,6 @@ import { exportPivotToExcel } from '../services/pivotExport'
 import {
   clearLookupFailures,
   listLookupFailures,
-  listPersonnelArchive,
-  type ArchiveQuery,
   type LookupFailureQuery
 } from '../services/budget/archiveQueries'
 import { listWorkflows, runWorkflow } from '../services/workflowRegistry'
@@ -137,7 +135,6 @@ import type {
   WorksheetRecordsResult,
   WorksheetField,
   LookupFailureEntry,
-  PersonnelArchiveEntry,
   MonthlyPayrollRun,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
@@ -865,14 +862,6 @@ export function registerAppIpc(): void {
       if (!worksheet) return undefined
       return detectIdCardField(worksheet)
     }
-  )
-
-  ipcMain.handle(
-    'archive:list-personnel',
-    (_event, query: ArchiveQuery = {}): Promise<{
-      total: number
-      rows: PersonnelArchiveEntry[]
-    }> => listPersonnelArchive(query)
   )
 
   ipcMain.handle(

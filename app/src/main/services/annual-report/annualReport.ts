@@ -1,5 +1,5 @@
 import type { AnnualReportWorkflowInput, RuleResult, WorkflowRunPayload } from '../../../shared/types'
-import { failRule, notImplementedRule, okRule } from '../ruleResult'
+import { failRule, okRule } from '../ruleResult'
 import { generateAnnualReportFromIntegrated } from './generateFromIntegrated'
 
 export async function generateAnnualSalaryReport(payload?: WorkflowRunPayload): Promise<RuleResult> {
@@ -25,18 +25,4 @@ function normalizeAnnualReportInput(input: AnnualReportWorkflowInput): AnnualRep
     totalHeadTeacher: Number(input.totalHeadTeacher) || 0,
     totalOvertime: Number(input.totalOvertime) || 0
   }
-}
-
-export async function updateAnnualReportPerformanceSalary(): Promise<RuleResult> {
-  return notImplementedRule(
-    '更新绩效工资',
-    '需要补充身份证 → 绩效工资的同步规则（待人工补充）'
-  )
-}
-
-export async function updateTownshipYearsForAnnualReport(): Promise<RuleResult> {
-  return notImplementedRule(
-    '改乡镇工作年限',
-    '需要补充工资年报和乡镇补贴的乡镇工作年限同步规则（待人工补充）'
-  )
 }

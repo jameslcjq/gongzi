@@ -1,23 +1,5 @@
 import type { RuleResult } from '../../shared/types'
 
-export function notImplementedRule(name: string, hint?: string): RuleResult {
-  return {
-    ok: false,
-    affectedRows: 0,
-    messages: [],
-    warnings: [hint ? `${name}：${hint}` : `${name} 需要补充字段映射和业务规则后启用`]
-  }
-}
-
-export function blockedBySourceRule(name: string, reason: string): RuleResult {
-  return {
-    ok: false,
-    affectedRows: 0,
-    messages: [],
-    warnings: [`${name} 暂未开放：${reason}`]
-  }
-}
-
 export function okRule(
   name: string,
   affectedRows: number,

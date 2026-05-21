@@ -1,7 +1,7 @@
 import { all, getDatabase, run } from '../../db/connection'
 import { quoteIdentifier } from '../../db/schema'
 import type { RuleResult } from '../../../shared/types'
-import { failRule, notImplementedRule, okRule } from '../ruleResult'
+import { failRule, okRule } from '../ruleResult'
 import {
   findColumnByName,
   getWorksheetByName,
@@ -9,13 +9,6 @@ import {
   tryFindColumnByName
 } from '../worksheetTable'
 import { normalizeSalaryGradeForCompare } from '../salaryLevelNormalize'
-
-export async function onBudgetActiveCreated(): Promise<RuleResult> {
-  return notImplementedRule(
-    '更新在职信息',
-    '需要补充新增预算在职后的下游字段更新规则（待人工补充）'
-  )
-}
 
 export async function updateSalaryGrade(): Promise<RuleResult> {
   try {
