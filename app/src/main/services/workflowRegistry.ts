@@ -4,7 +4,7 @@ import type {
   WorkflowRunPayload,
   WorkflowRunResult
 } from '../../shared/types'
-import { all, getDatabase, run } from '../db/connection'
+import { all, getDatabase, listIdentityDuplicateIssues, run } from '../db/connection'
 import {
   generateAnnualSalaryReport
 } from './annual-report/annualReport'
@@ -15,9 +15,6 @@ import {
 } from './budget/budgetActive'
 import {
   syncAllBudgetFromIntegrated,
-  syncBudgetActiveFromIntegrated,
-  syncBudgetOtherFromIntegrated,
-  syncBudgetRetiredFromIntegrated
 } from './budget/integratedBudgetSync'
 import {
   prepareNewHousingSubsidy,
@@ -27,15 +24,12 @@ import {
   generateMonthlyPayrollReports,
   preprocessMonthlyPayroll
 } from './monthly-payroll/monthlyPayroll'
-import { updatePerformanceSalaryIdCard } from './performance/performanceSalary'
 
 type WorkflowExecutor = (payload?: WorkflowRunPayload) => Promise<RuleResult>
 
 type WorkflowRegistryItem = WorkflowDefinition & {
   run: WorkflowExecutor
 }
-
-const blockedBySource = '原流程依赖已删除的"局工资表"，请先补充新的取数来源后再启用'
 
 const workflows: WorkflowRegistryItem[] = [
   {
@@ -74,13 +68,6 @@ const workflows: WorkflowRegistryItem[] = [
     run: calculateBudgetActiveBaseSalary
   },
   {
-    key: 'performance.update-id-card',
-    name: '更新身份证',
-    module: '绩效工资',
-    status: 'needs-rule',
-    run: updatePerformanceSalaryIdCard
-  },
-  {
     key: 'housing-subsidy.prepare-new',
     name: '核算新房补',
     module: '退休房补',
@@ -98,14 +85,14 @@ const workflows: WorkflowRegistryItem[] = [
     key: 'monthly-payroll.preprocess',
     name: '月度工资报账预处理',
     module: '工资报账',
-    status: 'needs-rule',
+    status: 'ready',
     run: preprocessMonthlyPayroll
   },
   {
     key: 'monthly-payroll.generate',
     name: '月度工资报账汇总生成',
     module: '工资报账',
-    status: 'needs-rule',
+    status: 'ready',
     run: generateMonthlyPayrollReports
   }
 ]
@@ -126,8 +113,12 @@ export async function runWorkflow(
 ): Promise<WorkflowRunResult> {
   const workflow = workflows.find((item) => item.key === workflowKey)
   if (!workflow) throw new Error(`未找到工作流：${workflowKey}`)
+  if (workflow.status !== 'ready') {
+    throw new Error(workflow.blockedReason || `${workflow.name} 规则未完成，暂不允许执行`)
+  }
 
   await clearWorkflowLookupFailures(workflow.name)
+  await assertNoIdentityDuplicatesBeforeWorkflow(workflow.name)
   const result = await workflow.run(payload)
   await ensureWorkflowFailureDetails(workflow.name, result)
   return {
@@ -135,6 +126,16 @@ export async function runWorkflow(
     workflowName: workflow.name,
     ...result
   }
+}
+
+async function assertNoIdentityDuplicatesBeforeWorkflow(workflowName: string): Promise<void> {
+  const issues = await listIdentityDuplicateIssues()
+  if (issues.length === 0) return
+  const examples = issues
+    .slice(0, 5)
+    .map((issue) => `${issue.worksheetName}.${issue.identityFieldName} ${issue.idCard}(${issue.count})`)
+    .join('；')
+  throw new Error(`已暂停执行「${workflowName}」：检测到身份证/唯一键重复数据，请先清理后再运行关键流程。示例：${examples}`)
 }
 
 async function clearWorkflowLookupFailures(workflowName: string): Promise<void> {

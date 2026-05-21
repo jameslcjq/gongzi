@@ -26,6 +26,7 @@ import {
   normalizeRankResumeImportedRows,
   type RankResumeImportAdjustment
 } from './rankResumeImport'
+import { readUnitSettings } from './unitSettings'
 import {
   getIdentityColumnName,
   getPersonnelStatusColumnName,
@@ -36,10 +37,28 @@ import {
 import type {
   ImportBatchSummary,
   ImportPreview,
+  ImportPreviewChange,
+  ImportPreviewDiff,
   ImportPreviewRow,
   WorksheetMeta,
   WorksheetRecordValue
 } from '../../shared/types'
+
+type CommitExcelImportOptions = {
+  confirmUpdates?: boolean
+}
+
+type ImportRowPlan = {
+  row: Record<string, WorksheetRecordValue>
+  rowNumber?: number
+  uniqueKey?: string
+  partitionKey?: string
+  action: 'insert' | 'update' | 'unchanged'
+  recordId?: number
+  previousValues?: Record<string, WorksheetRecordValue>
+  changedValues?: Record<string, WorksheetRecordValue>
+  changes: ImportPreviewChange[]
+}
 
 const budgetWorkbookWorksheetNames = new Set([
   '\u9884\u7b97\u5728\u804c',
@@ -135,6 +154,23 @@ const worksheetUniqueFieldNames = new Map<string, string>([
 
 const worksheetsWithoutIdentityDedupe = new Set(['\u804c\u7ea7\u7b80\u5386'])
 
+const unitNameHeaderNames = new Set([
+  '单位名称',
+  '单位名称*',
+  '单位全称',
+  '预算单位名称',
+  '预算单位全称'
+])
+
+const unitCodeHeaderNames = new Set([
+  '单位代码',
+  '单位代码*',
+  '单位编码',
+  '单位预算编码',
+  '预算单位编码',
+  '预算单位代码'
+])
+
 // \u540c\u4e00\u8868\u5185\uff0c\u9664\u552f\u4e00\u5217\u5916\u8fd8\u9700\u4f5c\u4e3a\u53bb\u91cd\u7ef4\u5ea6\u7684\u5b57\u6bb5\u3002
 // \u4f8b\uff1a\u4e00\u4f53\u5316\u5728\u804c \u540c\u4e00\u4eba\u4f1a\u540c\u65f6\u5b58\u5728 \u5de5\u8d44\u6279\u6b21 001/002 \u4e24\u7b14\u8bb0\u5f55\uff0c\u53bb\u91cd\u5fc5\u987b\u6309 (\u8bc1\u4ef6\u53f7\u7801, \u5de5\u8d44\u6279\u6b21) \u800c\u975e\u4ec5 \u8bc1\u4ef6\u53f7\u7801\u3002
 const worksheetPartitionFieldNames = new Map<string, string[]>([
@@ -173,16 +209,19 @@ export async function previewExcelFile(
   const rawRows = await readWorkbookRows(filePath, worksheet, { allowUnknownHeaders: true })
   const columns = getWorksheetLocalColumns(worksheet)
   const headerMap = new Map<string, { columnName: string; fieldName: string }>()
+  const columnHeaderMap = new Map<string, string>()
 
   for (const column of columns) {
     headerMap.set(normalizeHeader(column.field.name), {
       columnName: column.columnName,
       fieldName: column.field.name
     })
+    columnHeaderMap.set(normalizeHeader(column.field.name), column.columnName)
     headerMap.set(normalizeHeader(column.columnName), {
       columnName: column.columnName,
       fieldName: column.field.name
     })
+    columnHeaderMap.set(normalizeHeader(column.columnName), column.columnName)
   }
 
   const aliases = getHeaderAliases(worksheet.name)
@@ -193,6 +232,7 @@ export async function previewExcelFile(
       columnName: target.columnName,
       fieldName: target.field.name
     })
+    columnHeaderMap.set(normalizeHeader(aliasHeader), target.columnName)
   }
 
   const matchedHeaders: ImportPreview['matchedHeaders'] = []
@@ -228,13 +268,25 @@ export async function previewExcelFile(
     return { rowNumber: index + 2, values, warnings }
   })
 
+  const database = await getDatabase()
+  await validateImportedUnitIdentity(basename(filePath), worksheet, rawRows, columns, columnHeaderMap)
+  const uniqueColumnName = findUniqueColumnName(worksheet.name, columns)
+  const partitionColumnNames = findPartitionColumnNames(worksheet.name, columns)
+  const sanitizedRows = dedupeRowsByUniqueKey(rawRows, columnHeaderMap, uniqueColumnName, partitionColumnNames)
+  applyHrDetailDerivedFields(worksheet, columns, sanitizedRows)
+  await applyTownshipUnitFullNames(database, worksheet, columns, sanitizedRows)
+  sanitizeBudgetDraftRows(worksheet, columns, sanitizedRows)
+  await applyPersonnelStatusToRows(database, worksheet, sanitizedRows)
+  const diff = await buildImportDiff(database, worksheet, columns, sanitizedRows, uniqueColumnName, partitionColumnNames)
+
   return {
     worksheetId: worksheet.worksheetId,
     worksheetName: worksheet.name,
     matchedHeaders,
     unknownHeaders: Array.from(unknownHeaderSet),
     rows: previewRows,
-    totalRows: rawRows.length
+    totalRows: rawRows.length,
+    diff
   }
 }
 
@@ -242,11 +294,12 @@ let importQueue: Promise<unknown> = Promise.resolve()
 
 export function commitExcelImport(
   filePath: string,
-  worksheetId: string
+  worksheetId: string,
+  options: CommitExcelImportOptions = {}
 ): Promise<ImportBatchSummary> {
   const next = importQueue.then(
-    () => commitExcelImportWithLog(filePath, worksheetId),
-    () => commitExcelImportWithLog(filePath, worksheetId)
+    () => commitExcelImportWithLog(filePath, worksheetId, options),
+    () => commitExcelImportWithLog(filePath, worksheetId, options)
   )
   importQueue = next.catch(() => undefined)
   return next
@@ -254,10 +307,11 @@ export function commitExcelImport(
 
 async function commitExcelImportWithLog(
   filePath: string,
-  worksheetId: string
+  worksheetId: string,
+  options: CommitExcelImportOptions = {}
 ): Promise<ImportBatchSummary> {
   try {
-    return await commitExcelImportInternal(filePath, worksheetId)
+    return await commitExcelImportInternal(filePath, worksheetId, options)
   } catch (error) {
     // 将失败记录写入 import_logs，使通知区域能显示本次失败
     const sourceName = basename(filePath)
@@ -280,7 +334,8 @@ async function commitExcelImportWithLog(
 
 async function commitExcelImportInternal(
   filePath: string,
-  worksheetId: string
+  worksheetId: string,
+  options: CommitExcelImportOptions = {}
 ): Promise<ImportBatchSummary> {
   const worksheets = readWorksheetMetadata()
   const worksheet = worksheets.find((item) => item.worksheetId === worksheetId)
@@ -292,7 +347,7 @@ async function commitExcelImportInternal(
   if (budgetWorkbookImports.length > 1) {
     const summaries: ImportBatchSummary[] = []
     for (const item of budgetWorkbookImports) {
-      summaries.push(await insertRowsAsBatch(sourceName, item.worksheet, item.rows))
+      summaries.push(await insertRowsAsBatch(sourceName, item.worksheet, item.rows, options))
     }
     const database = await getDatabase()
     await refreshAllPersonnelStatuses(database)
@@ -311,7 +366,7 @@ async function commitExcelImportInternal(
   const splitConfig = getSplitConfig(worksheet.name)
 
   if (!splitConfig) {
-    const summary = await insertRowsAsBatch(sourceName, worksheet, rows)
+    const summary = await insertRowsAsBatch(sourceName, worksheet, rows, options)
     if (worksheet.worksheetId === 'local-hr-detail') {
       try {
         await extractAndInsertHrDetailChildRows(filePath, worksheet, summary.id)
@@ -336,7 +391,7 @@ async function commitExcelImportInternal(
   for (const [targetName, targetRows] of groups) {
     const targetWorksheet = worksheets.find((item) => item.name === targetName)
     if (!targetWorksheet || targetRows.length === 0) continue
-    const summary = await insertRowsAsBatch(sourceName, targetWorksheet, targetRows)
+    const summary = await insertRowsAsBatch(sourceName, targetWorksheet, targetRows, options)
     summaries.push(summary)
   }
 
@@ -370,10 +425,112 @@ function pickSplitTarget(
   return undefined
 }
 
+async function validateImportedUnitIdentity(
+  sourceName: string,
+  worksheet: WorksheetMeta,
+  rows: Array<Record<string, unknown>>,
+  columns: Array<{ field: WorksheetMeta['fields'][number]; columnName: string }>,
+  headerMap: Map<string, string>
+): Promise<void> {
+  if (rows.length === 0) return
+
+  const unitNameValues = new Map<string, { label: string; rows: number[] }>()
+  const unitCodeValues = new Map<string, { label: string; rows: number[] }>()
+  const fieldNameByColumn = new Map(columns.map((column) => [column.columnName, column.field.name]))
+
+  rows.forEach((row, rowIndex) => {
+    for (const [sourceHeader, rawValue] of Object.entries(row)) {
+      const value = cleanText(rawValue)
+      if (!value) continue
+
+      const matchedColumn = headerMap.get(normalizeHeader(sourceHeader))
+      const semanticName = matchedColumn ? fieldNameByColumn.get(matchedColumn) : undefined
+      const headerKind = resolveUnitIdentityHeaderKind(sourceHeader) ?? resolveUnitIdentityHeaderKind(semanticName)
+      if (!headerKind) continue
+
+      const targetMap = headerKind === 'name' ? unitNameValues : unitCodeValues
+      const normalized = headerKind === 'name' ? normalizeUnitName(value) : normalizeUnitCode(value)
+      if (!normalized) continue
+      const entry = targetMap.get(normalized) ?? { label: value, rows: [] }
+      if (entry.rows.length < 5) entry.rows.push(rowIndex + 1)
+      targetMap.set(normalized, entry)
+    }
+  })
+
+  if (unitNameValues.size === 0 && unitCodeValues.size === 0) return
+
+  const settings = await readUnitSettings()
+  const expectedName = normalizeUnitName(settings.unitFullName)
+  const expectedCode = normalizeUnitCode(settings.unitImportCode)
+  const errors: string[] = []
+
+  if (unitNameValues.size > 0 && !expectedName) {
+    errors.push('系统设置中未填写单位全称')
+  } else {
+    for (const [value, entry] of unitNameValues) {
+      if (value === expectedName) continue
+      errors.push(`单位名称为"${entry.label}"，系统设置为"${settings.unitFullName || '未填写'}"`)
+    }
+  }
+
+  if (unitCodeValues.size > 0 && !expectedCode) {
+    errors.push('系统设置中未填写预算单位编码')
+  } else {
+    for (const [value, entry] of unitCodeValues) {
+      if (value === expectedCode) continue
+      errors.push(`单位预算编码为"${entry.label}"，系统设置为"${settings.unitImportCode || '未填写'}"`)
+    }
+  }
+
+  if (errors.length === 0) return
+
+  const shownErrors = errors.slice(0, 6)
+  const rest = errors.length > shownErrors.length ? `等 ${errors.length} 项` : ''
+  throw new Error(
+    [
+      `导入已暂停：${sourceName} 的单位信息与系统设置不一致，不能导入 ${worksheet.name}。`,
+      ...shownErrors.map((item) => `- ${item}`),
+      rest,
+      '请确认文件单位和「系统设置 → 单位信息」一致后再导入。'
+    ].filter(Boolean).join('\n')
+  )
+}
+
+function resolveUnitIdentityHeaderKind(value: string | undefined): 'name' | 'code' | undefined {
+  const normalized = normalizeUnitIdentityHeader(value)
+  if (!normalized) return undefined
+  if (unitNameHeaderNames.has(normalized)) return 'name'
+  if (unitCodeHeaderNames.has(normalized)) return 'code'
+  if (normalized.includes('单位') && normalized.includes('名称')) return 'name'
+  if (normalized.includes('单位') && normalized.includes('全称')) return 'name'
+  if (normalized.includes('单位') && normalized.includes('编码')) return 'code'
+  if (normalized.includes('单位') && normalized.includes('代码')) return 'code'
+  return undefined
+}
+
+function normalizeUnitIdentityHeader(value: string | undefined): string {
+  return String(value ?? '').trim().replace(/\s+/g, '')
+}
+
+function normalizeUnitName(value: unknown): string {
+  return cleanText(value).replace(/\s+/g, '')
+}
+
+function normalizeUnitCode(value: unknown): string {
+  const raw = cleanText(value).replace(/[,\s]+/g, '')
+  if (!raw) return ''
+  if (/^\d+(\.0+)?$/.test(raw)) {
+    const digits = raw.replace(/\.0+$/, '')
+    return digits.length < 6 ? digits.padStart(6, '0') : digits
+  }
+  return raw.toUpperCase()
+}
+
 async function insertRowsAsBatch(
   sourceName: string,
   worksheet: ReturnType<typeof readWorksheetMetadata>[number],
-  rows: Array<Record<string, unknown>>
+  rows: Array<Record<string, unknown>>,
+  options: CommitExcelImportOptions = {}
 ): Promise<ImportBatchSummary> {
   const columns = getWorksheetLocalColumns(worksheet)
   const headerMap = new Map<string, string>()
@@ -386,6 +543,7 @@ async function insertRowsAsBatch(
     const target = columns.find((column) => column.field.name === targetFieldName)
     if (target) headerMap.set(normalizeHeader(aliasHeader), target.columnName)
   }
+  await validateImportedUnitIdentity(sourceName, worksheet, rows, columns, headerMap)
   const uniqueColumnName = findUniqueColumnName(worksheet.name, columns)
   const partitionColumnNames = findPartitionColumnNames(worksheet.name, columns)
   const rankResumeAdjustment =
@@ -397,10 +555,29 @@ async function insertRowsAsBatch(
   let sanitizedRows = dedupeRowsByUniqueKey(rows, headerMap, uniqueColumnName, partitionColumnNames)
   applyHrDetailDerivedFields(worksheet, columns, sanitizedRows)
   await applyTownshipUnitFullNames(database, worksheet, columns, sanitizedRows)
-  await backfillHrBankFieldsFromImportedBudgetRows(database, worksheet, columns, sanitizedRows)
   const budgetDraftCleanup = sanitizeBudgetDraftRows(worksheet, columns, sanitizedRows)
   const budgetAlignmentMessages = await buildBudgetAlignmentMessages(database, worksheet, sanitizedRows)
   await applyPersonnelStatusToRows(database, worksheet, sanitizedRows)
+  const importPlan = await buildImportPlan(database, worksheet, columns, sanitizedRows, uniqueColumnName, partitionColumnNames)
+  const diff = summarizeImportPlan(worksheet, columns, uniqueColumnName, importPlan)
+  if (diff.missingKeyRows > 0 && uniqueColumnName) {
+    const fieldName = columns.find((column) => column.columnName === uniqueColumnName)?.field.name ?? uniqueColumnName
+    throw new Error(`导入已暂停：${worksheet.name} 有 ${diff.missingKeyRows} 行缺少 ${fieldName}，无法按身份证/唯一键判断是否更新。`)
+  }
+  if (diff.updatedRows > 0 && !options.confirmUpdates) {
+    const examples = diff.examples
+      .filter((item) => item.action === 'update')
+      .slice(0, 5)
+      .map((item) => `${item.key}：${item.changes.map((change) => `${change.fieldName} ${formatValueForMessage(change.currentValue)} → ${formatValueForMessage(change.nextValue)}`).join('，')}`)
+      .join('\n')
+    throw new Error(
+      [
+        `导入已暂停：${worksheet.name} 有 ${diff.updatedRows} 行存在字段变化，需要人工确认后才能更新。`,
+        examples ? `示例：\n${examples}` : '',
+        '请在导入预览中确认差异后重新执行导入。'
+      ].filter(Boolean).join('\n')
+    )
+  }
 
   const { lastId: batchId } = await runWithLastId(
     database,
@@ -409,28 +586,19 @@ async function insertRowsAsBatch(
   )
 
   await run(database, 'BEGIN TRANSACTION')
-  let importedRows = 0
-  let replacedRows = 0
+  let insertedRows = 0
+  let updatedRows = 0
+  const unchangedRows = diff.unchangedRows
   let townshipAdjustment:
     | Awaited<ReturnType<typeof normalizeTownshipAllowanceImportedRows>>
     | undefined
   try {
-    if (uniqueColumnName) {
-      replacedRows = await removeExistingRowsByUniqueKey(
-        database,
-        tableName,
-        worksheet.name,
-        uniqueColumnName,
-        sanitizedRows,
-        partitionColumnNames
-      )
-    }
-
     // 批量 INSERT：每批最多 200 行
     const BATCH_SIZE = 200
     const now = new Date().toISOString()
-    for (let batchStart = 0; batchStart < sanitizedRows.length; batchStart += BATCH_SIZE) {
-      const batch = sanitizedRows.slice(batchStart, batchStart + BATCH_SIZE)
+    const rowsToInsert = importPlan.filter((item) => item.action === 'insert').map((item) => item.row)
+    for (let batchStart = 0; batchStart < rowsToInsert.length; batchStart += BATCH_SIZE) {
+      const batch = rowsToInsert.slice(batchStart, batchStart + BATCH_SIZE)
 
       // 收集本批次所有列名的超集
       const allColumnNamesSet = new Set<string>()
@@ -458,20 +626,44 @@ async function insertRowsAsBatch(
       const firstId = lastId - batch.length + 1
       // 批量插入 import_batch_rows
       if (batch.length > 0) {
-        const batchRowPlaceholders = batch.map(() => '(?, ?, ?)').join(', ')
+        const batchRowPlaceholders = batch.map(() => '(?, ?, ?, ?, ?)').join(', ')
         const batchRowParams: unknown[] = []
         for (let i = 0; i < batch.length; i++) {
-          batchRowParams.push(batchId, worksheet.name, firstId + i)
+          batchRowParams.push(batchId, worksheet.name, firstId + i, 'insert', null)
         }
         await run(
           database,
-          `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id) VALUES ${batchRowPlaceholders}`,
+          `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id, action, previous_values) VALUES ${batchRowPlaceholders}`,
           batchRowParams
         )
       }
-      importedRows += batch.length
+      insertedRows += batch.length
     }
 
+    for (const item of importPlan.filter((row) => row.action === 'update')) {
+      if (!item.recordId || !item.changedValues || Object.keys(item.changedValues).length === 0) continue
+      const changedColumns = Object.keys(item.changedValues)
+      const assignments = changedColumns
+        .map((column) => `${quoteIdentifier(column)} = ?`)
+        .concat('"md_updated_at" = ?')
+        .join(', ')
+      const params = [
+        ...changedColumns.map((column) => item.changedValues?.[column] ?? null),
+        now,
+        item.recordId
+      ]
+      await run(database, `UPDATE ${tableName} SET ${assignments} WHERE "id" = ?`, params)
+      await run(
+        database,
+        `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id, action, previous_values) VALUES (?, ?, ?, 'update', ?)`,
+        [batchId, worksheet.name, item.recordId, JSON.stringify(item.previousValues ?? {})]
+      )
+      updatedRows += 1
+    }
+
+    if (insertedRows > 0 || updatedRows > 0) {
+      await backfillHrBankFieldsFromImportedBudgetRows(database, worksheet, columns, sanitizedRows)
+    }
     if (worksheet.name === '\u4e61\u9547\u8865\u8d34') {
       townshipAdjustment = await normalizeTownshipAllowanceImportedRows(batchId)
     }
@@ -492,19 +684,21 @@ async function insertRowsAsBatch(
 
   const message = buildImportMessage(
     worksheet.name,
-    importedRows,
+    insertedRows + updatedRows,
     townshipAdjustment,
     rankResumeAdjustment,
     budgetDraftCleanup,
     budgetAlignmentMessages
   )
-  const finalMessage =
-    replacedRows > 0 ? `${message}\uff0c\u6309\u552f\u4e00\u952e\u8986\u76d6 ${replacedRows} \u884c` : message
+  const finalMessage = [
+    message,
+    `新增 ${insertedRows} 行，更新 ${updatedRows} 行，未变化跳过 ${unchangedRows} 行`
+  ].filter(Boolean).join('\uff1b')
 
   await run(
     database,
     `UPDATE import_batches SET status = 'imported', row_count = ?, message = ? WHERE id = ?`,
-    [importedRows, finalMessage, batchId]
+    [insertedRows + updatedRows, finalMessage, batchId]
   )
   await run(
     database,
@@ -512,7 +706,7 @@ async function insertRowsAsBatch(
     [
       sourceName,
       worksheet.name,
-      importedRows,
+      insertedRows + updatedRows,
       finalMessage,
       batchId
     ]
@@ -526,7 +720,10 @@ async function insertRowsAsBatch(
     worksheetName: worksheet.name,
     worksheetId: worksheet.worksheetId,
     status: 'imported',
-    rowCount: importedRows,
+    rowCount: insertedRows + updatedRows,
+    insertedRows,
+    updatedRows,
+    unchangedRows,
     message: finalMessage,
     createdAt: new Date().toISOString()
   }
@@ -1062,18 +1259,36 @@ export async function rollbackImportBatch(batchId: number): Promise<ImportBatchS
   await run(database, 'BEGIN TRANSACTION')
   let removed = 0
   try {
-    const rows = await all<{ worksheet_name: string; record_id: number }>(
+    const rows = await all<{ worksheet_name: string; record_id: number; action: string | null; previous_values: string | null }>(
       database,
-      `SELECT worksheet_name, record_id FROM import_batch_rows WHERE batch_id = ?`,
+      `SELECT worksheet_name, record_id, action, previous_values FROM import_batch_rows WHERE batch_id = ?`,
       [batchId]
     )
 
-    // 批量 DELETE 替代逐行删除
+    // 新增行仍然删除；更新行按导入时保存的旧值还原，避免回滚时删掉原有人。
     const idsByWorksheet = new Map<string, number[]>()
     for (const row of rows) {
+      if ((row.action ?? 'insert') === 'update') continue
       const ids = idsByWorksheet.get(row.worksheet_name) ?? []
       ids.push(row.record_id)
       idsByWorksheet.set(row.worksheet_name, ids)
+    }
+
+    for (const row of rows.filter((item) => (item.action ?? 'insert') === 'update')) {
+      const previousValues = parsePreviousImportValues(row.previous_values)
+      const columnNames = Object.keys(previousValues)
+      if (columnNames.length === 0) continue
+      const tableName = quoteIdentifier(row.worksheet_name)
+      const assignments = columnNames
+        .map((column) => `${quoteIdentifier(column)} = ?`)
+        .concat('"md_updated_at" = ?')
+        .join(', ')
+      await run(
+        database,
+        `UPDATE ${tableName} SET ${assignments} WHERE "id" = ?`,
+        [...columnNames.map((column) => previousValues[column]), new Date().toISOString(), row.record_id]
+      )
+      removed += 1
     }
 
     for (const [worksheetName, ids] of idsByWorksheet) {
@@ -1088,7 +1303,7 @@ export async function rollbackImportBatch(batchId: number): Promise<ImportBatchS
     await run(
       database,
       `UPDATE import_batches SET status = 'rolled-back', message = ? WHERE id = ?`,
-      [`已回滚 ${removed} 行`, batchId]
+      [`已回滚 ${removed} 行（新增行删除，更新行还原）`, batchId]
     )
     await run(database, 'COMMIT')
   } catch (error) {
@@ -1103,8 +1318,18 @@ export async function rollbackImportBatch(batchId: number): Promise<ImportBatchS
     worksheetName: batch.worksheet_name ?? undefined,
     status: 'rolled-back',
     rowCount: removed,
-    message: `已回滚 ${removed} 行`,
+    message: `已回滚 ${removed} 行（新增行删除，更新行还原）`,
     createdAt: batch.created_at
+  }
+}
+
+function parsePreviousImportValues(value: string | null): Record<string, WorksheetRecordValue> {
+  if (!value) return {}
+  try {
+    const parsed = JSON.parse(value) as Record<string, WorksheetRecordValue>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
   }
 }
 
@@ -1460,30 +1685,85 @@ function dedupeRowsByUniqueKey(
   return [...rowsWithoutUniqueKey, ...keyedRows.values()]
 }
 
-async function removeExistingRowsByUniqueKey(
+async function buildImportDiff(
   database: Awaited<ReturnType<typeof getDatabase>>,
-  tableName: string,
-  worksheetName: string,
-  uniqueColumnName: string,
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number],
+  columns: Array<{ field: WorksheetMeta['fields'][number]; columnName: string }>,
   rows: Array<Record<string, WorksheetRecordValue>>,
+  uniqueColumnName?: string,
   partitionColumnNames: string[] = []
-): Promise<number> {
-  type Combo = { uniqueKey: string; partitionValues: WorksheetRecordValue[] }
-  const seen = new Set<string>()
-  const combos: Combo[] = []
+): Promise<ImportPreviewDiff> {
+  const plan = await buildImportPlan(database, worksheet, columns, rows, uniqueColumnName, partitionColumnNames)
+  return summarizeImportPlan(worksheet, columns, uniqueColumnName, plan)
+}
+
+async function buildImportPlan(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number],
+  columns: Array<{ field: WorksheetMeta['fields'][number]; columnName: string }>,
+  rows: Array<Record<string, WorksheetRecordValue>>,
+  uniqueColumnName?: string,
+  partitionColumnNames: string[] = []
+): Promise<ImportRowPlan[]> {
+  if (!uniqueColumnName) {
+    return rows.map((row) => ({ row, action: 'insert', changes: [] }))
+  }
+
+  const tableName = quoteIdentifier(worksheet.name)
+  const plan: ImportRowPlan[] = []
   for (const row of rows) {
     const uniqueKey = normalizeUniqueValue(row[uniqueColumnName])
-    if (!uniqueKey) continue
-    const partitionValues = partitionColumnNames.map((column) => row[column] ?? null)
-    const dedupeKey = `${uniqueKey}||${partitionValues
-      .map((value) => normalizeUniqueValue(value))
-      .join('|')}`
-    if (seen.has(dedupeKey)) continue
-    seen.add(dedupeKey)
-    combos.push({ uniqueKey, partitionValues })
-  }
-  if (combos.length === 0) return 0
+    const partitionKey = buildPartitionKey(row, partitionColumnNames)
+    if (!uniqueKey) {
+      plan.push({ row, action: 'insert', changes: [], partitionKey })
+      continue
+    }
 
+    const existing = await findExistingImportRow(database, tableName, uniqueColumnName, uniqueKey, row, partitionColumnNames)
+    if (!existing) {
+      plan.push({ row, uniqueKey, partitionKey, action: 'insert', changes: [] })
+      continue
+    }
+
+    const changes: ImportPreviewChange[] = []
+    const changedValues: Record<string, WorksheetRecordValue> = {}
+    const previousValues: Record<string, WorksheetRecordValue> = {}
+    for (const columnName of Object.keys(row)) {
+      const currentValue = coerceValue(existing[columnName])
+      const nextValue = coerceValue(row[columnName])
+      if (sameImportValue(currentValue, nextValue)) continue
+      const fieldName = columns.find((column) => column.columnName === columnName)?.field.name ?? columnName
+      changes.push({ fieldName, columnName, currentValue, nextValue })
+      changedValues[columnName] = nextValue
+      previousValues[columnName] = currentValue
+    }
+
+    if (changes.length === 0) {
+      plan.push({ row, uniqueKey, partitionKey, action: 'unchanged', recordId: Number(existing.id), changes: [] })
+    } else {
+      plan.push({
+        row,
+        uniqueKey,
+        partitionKey,
+        action: 'update',
+        recordId: Number(existing.id),
+        previousValues,
+        changedValues,
+        changes
+      })
+    }
+  }
+  return plan
+}
+
+async function findExistingImportRow(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  tableName: string,
+  uniqueColumnName: string,
+  uniqueKey: string,
+  row: Record<string, WorksheetRecordValue>,
+  partitionColumnNames: string[]
+): Promise<Record<string, unknown> | undefined> {
   const normalizedUniqueExpr = `UPPER(REPLACE(REPLACE(TRIM(CAST(${quoteIdentifier(uniqueColumnName)} AS TEXT)), ' ', ''), ',', ''))`
   const partitionPredicates = partitionColumnNames
     .map((column) => `COALESCE(CAST(${quoteIdentifier(column)} AS TEXT), '') = COALESCE(CAST(? AS TEXT), '')`)
@@ -1491,29 +1771,72 @@ async function removeExistingRowsByUniqueKey(
   const whereClause = partitionPredicates
     ? `${normalizedUniqueExpr} = ? AND ${partitionPredicates}`
     : `${normalizedUniqueExpr} = ?`
+  const params: unknown[] = [uniqueKey, ...partitionColumnNames.map((column) => row[column] ?? null)]
+  return get<Record<string, unknown>>(
+    database,
+    `SELECT * FROM ${tableName} WHERE ${whereClause} ORDER BY "id" DESC LIMIT 1`,
+    params
+  )
+}
 
-  let removed = 0
-  for (const combo of combos) {
-    const params: unknown[] = [combo.uniqueKey, ...combo.partitionValues]
-    const existing = await all<{ id: number }>(
-      database,
-      `SELECT "id" FROM ${tableName} WHERE ${whereClause}`,
-      params
-    )
-    if (existing.length === 0) continue
-
-    const ids = existing.map((row) => row.id)
-    const idPlaceholders = ids.map(() => '?').join(', ')
-    await run(
-      database,
-      `DELETE FROM import_batch_rows WHERE worksheet_name = ? AND record_id IN (${idPlaceholders})`,
-      [worksheetName, ...ids]
-    )
-    await run(database, `DELETE FROM ${tableName} WHERE "id" IN (${idPlaceholders})`, ids)
-    removed += ids.length
+function summarizeImportPlan(
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number],
+  columns: Array<{ field: WorksheetMeta['fields'][number]; columnName: string }>,
+  uniqueColumnName: string | undefined,
+  plan: ImportRowPlan[]
+): ImportPreviewDiff {
+  const uniqueFieldName = uniqueColumnName
+    ? columns.find((column) => column.columnName === uniqueColumnName)?.field.name ?? uniqueColumnName
+    : undefined
+  const insertedRows = plan.filter((item) => item.action === 'insert' && Boolean(item.uniqueKey || !uniqueColumnName)).length
+  const missingKeyRows = uniqueColumnName
+    ? plan.filter((item) => item.action === 'insert' && !item.uniqueKey).length
+    : 0
+  const updatedRows = plan.filter((item) => item.action === 'update').length
+  const unchangedRows = plan.filter((item) => item.action === 'unchanged').length
+  const changedCells = plan.reduce((total, item) => total + item.changes.length, 0)
+  const examples = plan
+    .filter((item) => item.action === 'insert' || item.action === 'update')
+    .slice(0, 10)
+    .map((item) => ({
+      key: item.uniqueKey || '缺少唯一键',
+      action: item.action as 'insert' | 'update',
+      changes: item.changes.slice(0, 8)
+    }))
+  return {
+    uniqueFieldName,
+    insertedRows,
+    updatedRows,
+    unchangedRows,
+    missingKeyRows,
+    changedCells,
+    requiresConfirmation: updatedRows > 0,
+    examples
   }
+}
 
-  return removed
+function buildPartitionKey(
+  row: Record<string, WorksheetRecordValue>,
+  partitionColumnNames: string[]
+): string | undefined {
+  if (partitionColumnNames.length === 0) return undefined
+  return partitionColumnNames.map((column) => normalizeUniqueValue(row[column])).join('|')
+}
+
+function sameImportValue(left: WorksheetRecordValue, right: WorksheetRecordValue): boolean {
+  if (left === null || left === '') return right === null || right === ''
+  if (right === null || right === '') return false
+  const leftNumber = typeof left === 'number' ? left : Number(String(left).replace(/,/g, ''))
+  const rightNumber = typeof right === 'number' ? right : Number(String(right).replace(/,/g, ''))
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return Math.abs(leftNumber - rightNumber) < 0.000001
+  }
+  return String(left).trim() === String(right).trim()
+}
+
+function formatValueForMessage(value: WorksheetRecordValue): string {
+  if (value === null || value === '') return '空'
+  return String(value)
 }
 
 function findPartitionColumnNames(
@@ -1576,6 +1899,12 @@ type HrChildRow = {
   certYouxiaoqi?: string// col 19
   renjiaoRaw?: string   // col 26
   lvliRaw?: string      // col 34
+}
+
+type HrChildWriteStats = {
+  insertedRows: number
+  updatedRows: number
+  unchangedRows: number
 }
 
 function parseEducationCell(raw: string): Record<string, string> {
@@ -1708,7 +2037,6 @@ async function extractAndInsertHrDetailChildRows(
 
   const database = await getDatabase()
   const now = new Date().toISOString()
-  const idCards = childRows.map(r => r.idCard)
   const { activeIds, retiredIds, otherIds } = await loadPersonnelStatusIdentitySets(database)
   const statusColumnsByTable = new Map(
     readWorksheetMetadata()
@@ -1716,84 +2044,137 @@ async function extractAndInsertHrDetailChildRows(
       .map((item) => [item.name, getPersonnelStatusColumnName(item)])
       .filter((item): item is [string, string] => Boolean(item[1]))
   )
+  const stats: HrChildWriteStats = { insertedRows: 0, updatedRows: 0, unchangedRows: 0 }
 
   await run(database, 'BEGIN TRANSACTION')
   try {
-    // 先删除这批身份证号对应的旧子表数据
-    const subTables = ['教职工学历', '教职工教师资格', '教职工任教信息', '教职工工作履历']
-    for (const sub of subTables) {
-      for (const chunk of chunkArray(idCards, 400)) {
-        const ph = chunk.map(() => '?').join(', ')
-        await run(database, `DELETE FROM ${quoteIdentifier(sub)} WHERE "教职工身份证号" IN (${ph})`, chunk)
-      }
-    }
-
-    const ins = async (tbl: string, vals: Record<string, unknown>): Promise<void> => {
+    const upsertChild = async (tbl: string, vals: Record<string, unknown>, keyFields: string[]): Promise<void> => {
       const statusColumn = statusColumnsByTable.get(tbl)
       if (statusColumn && vals['教职工身份证号'] && !vals[statusColumn]) {
         vals[statusColumn] = resolvePersonnelStatus(vals['教职工身份证号'], activeIds, retiredIds, otherIds)
       }
       const cols = Object.keys(vals).filter(k => vals[k] != null && vals[k] !== '')
       if (!cols.includes('教职工身份证号')) return
-      const sql = `INSERT INTO ${quoteIdentifier(tbl)} (${cols.map(quoteIdentifier).join(', ')}, "md_created_at", "md_updated_at") VALUES (${cols.map(() => '?').join(', ')}, ?, ?)`
-      const params = [...cols.map(k => vals[k]), now, now]
-      const { lastId } = await runWithLastId(database, sql, params)
-      await run(database, `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id) VALUES (?, ?, ?)`, [batchId, tbl, lastId])
+      const keyColumns = keyFields.filter((field) => vals[field] != null && vals[field] !== '')
+      if (!keyColumns.includes('教职工身份证号')) keyColumns.unshift('教职工身份证号')
+      const existing = await findExistingHrChildRow(database, tbl, vals, keyColumns)
+      if (!existing) {
+        const sql = `INSERT INTO ${quoteIdentifier(tbl)} (${cols.map(quoteIdentifier).join(', ')}, "md_created_at", "md_updated_at") VALUES (${cols.map(() => '?').join(', ')}, ?, ?)`
+        const params = [...cols.map(k => vals[k]), now, now]
+        const { lastId } = await runWithLastId(database, sql, params)
+        await run(
+          database,
+          `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id, action, previous_values) VALUES (?, ?, ?, 'insert', NULL)`,
+          [batchId, tbl, lastId]
+        )
+        stats.insertedRows += 1
+        return
+      }
+
+      const changedValues: Record<string, WorksheetRecordValue> = {}
+      const previousValues: Record<string, WorksheetRecordValue> = {}
+      for (const col of cols) {
+        const currentValue = coerceValue(existing[col])
+        const nextValue = coerceValue(vals[col])
+        if (sameImportValue(currentValue, nextValue)) continue
+        changedValues[col] = nextValue
+        previousValues[col] = currentValue
+      }
+      const changedColumns = Object.keys(changedValues)
+      if (changedColumns.length === 0) {
+        stats.unchangedRows += 1
+        return
+      }
+      const assignments = changedColumns
+        .map((column) => `${quoteIdentifier(column)} = ?`)
+        .concat('"md_updated_at" = ?')
+        .join(', ')
+      await run(
+        database,
+        `UPDATE ${quoteIdentifier(tbl)} SET ${assignments} WHERE "id" = ?`,
+        [...changedColumns.map((column) => changedValues[column]), now, existing.id]
+      )
+      await run(
+        database,
+        `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id, action, previous_values) VALUES (?, ?, ?, 'update', ?)`,
+        [batchId, tbl, existing.id, JSON.stringify(previousValues)]
+      )
+      stats.updatedRows += 1
     }
 
     for (const row of childRows) {
       // 教职工学历
       if (row.eduQuan) {
-        await ins('教职工学历', {
+        await upsertChild('教职工学历', {
           '教职工身份证号': row.idCard,
           '姓名': row.name,
           '学历类别': '全日制',
           ...parseEducationCell(row.eduQuan)
-        })
+        }, ['教职工身份证号', '学历类别'])
       }
       if (row.eduMax) {
-        await ins('教职工学历', {
+        await upsertChild('教职工学历', {
           '教职工身份证号': row.idCard,
           '姓名': row.name,
           '学历类别': '最高',
           ...parseEducationCell(row.eduMax)
-        })
+        }, ['教职工身份证号', '学历类别'])
       }
 
       // 教职工教师资格
       if (row.certXueduan || row.certXueke || row.certZhengshu || row.certYouxiaoqi) {
-        await ins('教职工教师资格', {
+        await upsertChild('教职工教师资格', {
           '教职工身份证号': row.idCard,
           '姓名': row.name,
           '学段': row.certXueduan   ?? null,
           '学科': row.certXueke     ?? null,
           '证书号码': row.certZhengshu ?? null,
           '定期注册有效期': row.certYouxiaoqi ?? null,
-        })
+        }, row.certZhengshu ? ['教职工身份证号', '证书号码'] : ['教职工身份证号', '学段', '学科'])
       }
 
       // 教职工任教信息（按换行/分号拆分）
       if (row.renjiaoRaw) {
         for (const line of row.renjiaoRaw.split(/[\n；;]/).map(s => s.trim()).filter(Boolean)) {
-          await ins('教职工任教信息', { '教职工身份证号': row.idCard, '姓名': row.name, '任教班级': line })
+          await upsertChild('教职工任教信息', { '教职工身份证号': row.idCard, '姓名': row.name, '任教班级': line }, ['教职工身份证号', '任教班级'])
         }
       }
 
       // 教职工工作履历（按换行/分号拆分，尝试提取年份范围）
       if (row.lvliRaw) {
         for (const line of row.lvliRaw.split(/[\n；;]/).map(s => s.trim()).filter(Boolean)) {
-          await ins('教职工工作履历', {
+          const parsed = parseWorkHistoryLine(line)
+          await upsertChild('教职工工作履历', {
             '教职工身份证号': row.idCard,
             '姓名': row.name,
-            ...parseWorkHistoryLine(line)
-          })
+            ...parsed
+          }, ['教职工身份证号', '开始时间', '结束时间', '工作单位', '职务岗位', '说明'])
         }
       }
     }
 
     await run(database, 'COMMIT')
+    if (stats.insertedRows + stats.updatedRows + stats.unchangedRows > 0) {
+      console.info(
+        `[hr-detail child import] 子表增量写入：新增 ${stats.insertedRows}，更新 ${stats.updatedRows}，未变化 ${stats.unchangedRows}`
+      )
+    }
   } catch (err) {
     await run(database, 'ROLLBACK')
     throw err
   }
+}
+
+async function findExistingHrChildRow(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  tableName: string,
+  values: Record<string, unknown>,
+  keyFields: string[]
+): Promise<Record<string, unknown> | undefined> {
+  const predicates = keyFields.map((field) => `COALESCE(CAST(${quoteIdentifier(field)} AS TEXT), '') = COALESCE(CAST(? AS TEXT), '')`)
+  return get<Record<string, unknown>>(
+    database,
+    `SELECT * FROM ${quoteIdentifier(tableName)} WHERE ${predicates.join(' AND ')} ORDER BY "id" DESC LIMIT 1`,
+    keyFields.map((field) => values[field] ?? null)
+  )
 }

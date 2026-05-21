@@ -7,6 +7,7 @@ export type WorksheetField = {
   options?: string[]
   hidden?: boolean
   displayOrder?: number
+  custom?: boolean
 }
 
 export type WorksheetMeta = {
@@ -224,11 +225,33 @@ export type AnnualAdjustmentDetectedFiles = {
   socialBaseTemplateWorkbookName?: string
 }
 
+export type PersonnelExpensePlanPrefillRow = {
+  budgetCode?: string
+  unitName: string
+  amounts: Record<string, number>
+}
+
+export type PersonnelExpensePlanPrefillResult = {
+  ok: boolean
+  filePath?: string
+  fileName?: string
+  rows: PersonnelExpensePlanPrefillRow[]
+  message?: string
+}
+
 export type SalaryExportTarget = {
   saltype_id: string
   saltype_name: string
   salbatch_id: string
   salbatch_name: string
+}
+
+/** v4 之后只需配置类别，批次在运行时通过 getBatchAgency 自动发现 */
+export type SalaryExportSaltype = {
+  saltype_id: string
+  saltype_name: string
+  /** 是否只导首批次（退休类用 true，因为它通常没有"数币"等二级批次） */
+  onlyFirstBatch?: boolean
 }
 
 export type UnitSettings = {
@@ -246,8 +269,19 @@ export type UnitSettings = {
   housingPayeeName: string
   housingPayeeBank: string
   housingPayeeAccount: string
-  /** 一键导出工资时要遍历的"类别+批次"组合；为空则用内置默认值 */
+  /** @deprecated v4 起改用 salaryExportSaltypes；保留仅为旧数据兼容 */
   salaryExportTargets?: SalaryExportTarget[]
+  /** 一键导出工资时要遍历的"工资类别"列表（批次自动发现） */
+  salaryExportSaltypes?: SalaryExportSaltype[]
+}
+
+export type UnitSettingsLockState = {
+  locked: boolean
+  rowCount: number
+  tables: Array<{
+    name: string
+    rows: number
+  }>
 }
 
 export type MonthlyPayrollReportSheet = {
@@ -451,8 +485,36 @@ export type ImportBatchSummary = {
   worksheetId?: string
   status: 'imported' | 'failed' | 'rolled-back'
   rowCount: number
+  insertedRows?: number
+  updatedRows?: number
+  unchangedRows?: number
   message?: string
   createdAt: string
+}
+
+export type ImportPreviewChange = {
+  fieldName: string
+  columnName: string
+  currentValue: WorksheetRecordValue
+  nextValue: WorksheetRecordValue
+}
+
+export type ImportPreviewDiffExample = {
+  rowNumber?: number
+  key: string
+  action: 'insert' | 'update'
+  changes: ImportPreviewChange[]
+}
+
+export type ImportPreviewDiff = {
+  uniqueFieldName?: string
+  insertedRows: number
+  updatedRows: number
+  unchangedRows: number
+  missingKeyRows: number
+  changedCells: number
+  requiresConfirmation: boolean
+  examples: ImportPreviewDiffExample[]
 }
 
 export type ImportPreviewRow = {
@@ -468,6 +530,7 @@ export type ImportPreview = {
   unknownHeaders: string[]
   rows: ImportPreviewRow[]
   totalRows: number
+  diff?: ImportPreviewDiff
 }
 
 export type WorksheetMutationResult = {

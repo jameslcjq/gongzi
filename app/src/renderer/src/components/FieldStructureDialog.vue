@@ -16,7 +16,9 @@ const emit = defineEmits<{
 }>()
 
 const draftFields = ref<WorksheetField[]>([])
-const originalFieldIds = computed(() => new Set(props.fields.map((field) => field.fieldId)))
+const systemFieldIds = computed(() =>
+  new Set(props.fields.filter((field) => !field.custom).map((field) => field.fieldId))
+)
 
 const fieldTypes = [
   { label: '文本', type: '文本框', controlType: 2, desc: 'String text' },
@@ -50,7 +52,8 @@ function addField() {
     name: '',
     type: option.type,
     controlType: option.controlType,
-    desc: option.desc
+    desc: option.desc,
+    custom: true
   })
 }
 
@@ -99,6 +102,14 @@ function save() {
       </el-button>
     </div>
 
+    <el-alert
+      type="info"
+      show-icon
+      :closable="false"
+      title="系统字段只允许调整显示和顺序；自定义字段用于 Excel 导入、手工维护和导出，不参与预算同步、工资报账等固定业务规则。"
+      style="margin-bottom: 12px"
+    />
+
     <el-table :data="draftFields" border stripe size="small" height="calc(100vh - 170px)">
       <el-table-column label="#" width="54" align="center">
         <template #default="{ $index }">{{ $index + 1 }}</template>
@@ -109,8 +120,15 @@ function save() {
             v-model="row.name"
             size="small"
             placeholder="与 Excel 表头一致"
-            :disabled="originalFieldIds.has(row.fieldId)"
+            :disabled="systemFieldIds.has(row.fieldId)"
           />
+        </template>
+      </el-table-column>
+      <el-table-column label="来源" width="86" align="center">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.custom ? 'warning' : 'info'" effect="plain">
+            {{ row.custom ? '自定义' : '系统' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="显示" width="86" align="center">
@@ -129,6 +147,7 @@ function save() {
           <el-select
             :model-value="row.controlType"
             size="small"
+            :disabled="systemFieldIds.has(row.fieldId)"
             @change="(value: number) => changeType(row, value)"
           >
             <el-option

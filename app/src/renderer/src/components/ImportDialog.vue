@@ -27,6 +27,7 @@ const batchesLoading = ref(false)
 
 const previewableHeaderColumns = computed(() => preview.value?.matchedHeaders.map((m) => m.columnName) ?? [])
 const hasUnknownHeaders = computed(() => Boolean(preview.value?.unknownHeaders.length))
+const hasMissingUniqueKeys = computed(() => Boolean(preview.value?.diff?.missingKeyRows))
 
 watch(
   () => props.modelValue,
@@ -67,9 +68,38 @@ async function loadPreview() {
 async function commit() {
   const current = preview.value
   if (!filePath.value || !current) return
+  let confirmUpdates = false
+  const diff = current.diff
+  if (diff?.requiresConfirmation) {
+    const examples = diff.examples
+      .filter((item) => item.action === 'update')
+      .slice(0, 5)
+      .map((item) => {
+        const fields = item.changes
+          .slice(0, 4)
+          .map((change) => `${change.fieldName}: ${formatPreviewValue(change.currentValue)} → ${formatPreviewValue(change.nextValue)}`)
+          .join('；')
+        return `${item.key}：${fields}`
+      })
+      .join('\n')
+    try {
+      await ElMessageBox.confirm(
+        [
+          `按${diff.uniqueFieldName ?? '唯一键'}比对，发现 ${diff.updatedRows} 行已有数据发生变化。`,
+          `系统将只更新变化字段；${diff.unchangedRows} 行无变化会跳过，${diff.insertedRows} 行为新增。`,
+          examples ? `\n示例：\n${examples}` : ''
+        ].join('\n'),
+        '确认更新已有数据',
+        { type: 'warning', confirmButtonText: '确认更新字段', cancelButtonText: '取消' }
+      )
+      confirmUpdates = true
+    } catch {
+      return
+    }
+  }
   committing.value = true
   try {
-    const summary = await window.salaryApi.commitImport(filePath.value, current.worksheetId)
+    const summary = await window.salaryApi.commitImport(filePath.value, current.worksheetId, { confirmUpdates })
     ElMessage.success(`导入完成：${summary.rowCount} 行（批次 #${summary.id}）`)
     emit('imported', summary)
     await refreshBatches()
@@ -81,6 +111,11 @@ async function commit() {
   } finally {
     committing.value = false
   }
+}
+
+function formatPreviewValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '空'
+  return String(value)
 }
 
 async function refreshBatches() {
@@ -166,6 +201,22 @@ const statusTag = (status: ImportBatchSummary['status']) => {
         共 {{ preview.totalRows }} 行，已匹配 {{ preview.matchedHeaders.length }} 列
       </div>
 
+      <el-alert
+        v-if="preview?.diff"
+        :type="preview.diff.missingKeyRows || preview.diff.updatedRows > 0 ? 'warning' : 'success'"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 12px"
+      >
+        <template #title>
+          按{{ preview.diff.uniqueFieldName || '唯一键' }}比对：
+          新增 {{ preview.diff.insertedRows }} 行，
+          更新 {{ preview.diff.updatedRows }} 行，
+          无变化跳过 {{ preview.diff.unchangedRows }} 行
+          <span v-if="preview.diff.missingKeyRows">，缺少唯一键 {{ preview.diff.missingKeyRows }} 行</span>
+        </template>
+      </el-alert>
+
       <el-table
         v-if="preview && preview.rows.length"
         v-loading="previewLoading"
@@ -200,7 +251,7 @@ const statusTag = (status: ImportBatchSummary['status']) => {
       </div>
 
       <div class="import-actions">
-        <el-button :disabled="!preview || hasUnknownHeaders || committing" type="primary" :loading="committing" @click="commit">
+        <el-button :disabled="!preview || hasUnknownHeaders || hasMissingUniqueKeys || committing" type="primary" :loading="committing" @click="commit">
           确认导入
         </el-button>
         <span class="muted-text">导入后可在下方批次列表里回滚</span>

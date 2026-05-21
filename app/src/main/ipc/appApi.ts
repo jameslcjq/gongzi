@@ -55,7 +55,8 @@ import {
   generatePersonalTaxImportWorkbook,
   previewAnnualAdjustment
 } from '../services/annualAdjustment'
-import { readUnitSettings, writeUnitSettings } from '../services/unitSettings'
+import { getUnitSettingsLockState, readUnitSettings, writeUnitSettings } from '../services/unitSettings'
+import { resolveSchoolUnitSettings } from '../services/schoolLookup'
 import {
   readMonthlyPayrollPrintSettings,
   writeMonthlyPayrollPrintSettings
@@ -71,6 +72,7 @@ import {
   applyBudgetActiveMasterSync,
   previewBudgetActiveMasterSync
 } from '../services/budgetActiveHrSync'
+import { readPersonnelExpensePlanPrefill } from '../services/budget/personnelExpensePlanPrefill'
 import {
   applyTeacherDetailMasterSync,
   previewTeacherDetailMasterSync
@@ -150,6 +152,7 @@ import type {
   AnnualAdjustmentPreviewInput,
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
+  PersonnelExpensePlanPrefillResult,
   SocialInsuranceBaseExportInput,
   SocialInsuranceBaseExportResult
 } from '../../shared/types'
@@ -221,6 +224,14 @@ export function registerAppIpc(): void {
   })
 
   ipcMain.handle(
+    'personnel-expense-plan:prefill',
+    async (): Promise<PersonnelExpensePlanPrefillResult> => {
+      const status = await getImportWatcherStatus()
+      return readPersonnelExpensePlanPrefill(status.folderPath)
+    }
+  )
+
+  ipcMain.handle(
     'app:run-workflow',
     async (_event, workflowKey: string, payload?: WorkflowRunPayload): Promise<WorkflowRunResult> => {
       const database = await getDatabase()
@@ -255,6 +266,142 @@ export function registerAppIpc(): void {
   ipcMain.handle('integration:open-external', async (_event, url: string): Promise<void> => {
     await shell.openExternal(url)
   })
+
+  ipcMain.handle(
+    'integration:get-portal-userinfo',
+    async (
+      _event,
+      payload: { webContentsId: number }
+    ): Promise<
+      | { ok: true; belongOrgId: string; unitName: string; raw: Record<string, unknown> }
+      | { ok: false; reason: string }
+    > => {
+      try {
+        const { webContents } = await import('electron')
+        const wc = webContents.fromId(payload.webContentsId)
+        if (!wc) return { ok: false, reason: '找不到 webContents' }
+        const session = wc.session
+        // 不限定 url，扫整个 session 的全部 cookie，再按名字 / 值内容找 belongOrgId
+        const cookies = await session.cookies.get({})
+        const tryParse = (val: string): Record<string, unknown> | null => {
+          try {
+            return JSON.parse(decodeURIComponent(val)) as Record<string, unknown>
+          } catch {
+            try {
+              return JSON.parse(val) as Record<string, unknown>
+            } catch {
+              return null
+            }
+          }
+        }
+        // 1) 名字命中 userInfo / userinfo
+        let parsed: Record<string, unknown> | null = null
+        for (const c of cookies) {
+          if (/^userinfo$/i.test(c.name) && c.value) {
+            const p = tryParse(c.value)
+            if (p && (p.belongOrgId || p.org_id)) {
+              parsed = p
+              break
+            }
+          }
+        }
+        // 2) 名字没中：扫所有 cookie 值里含 "belongOrgId" 的 JSON
+        if (!parsed) {
+          for (const c of cookies) {
+            if (!c.value || !/belongOrgId|belong_org_id/i.test(c.value)) continue
+            const p = tryParse(c.value)
+            if (p && (p.belongOrgId || p.org_id)) {
+              parsed = p
+              break
+            }
+          }
+        }
+
+        if (!parsed) {
+          const allNames = cookies.map((c) => `${c.domain || '-'}/${c.path || '/'}/${c.name}`)
+          return {
+            ok: false,
+            reason:
+              '未找到 belongOrgId（共 ' +
+              cookies.length +
+              ' 条 cookie）。请确认已登录一体化系统。前 20 个 cookie 名：\n' +
+              allNames.slice(0, 20).join('\n')
+          }
+        }
+        const belongOrgId = String(parsed.belongOrgId || parsed.org_id || '')
+        if (!belongOrgId) {
+          return { ok: false, reason: '找到 cookie 但 belongOrgId 字段为空' }
+        }
+        const unitName = String(
+          parsed.mof_div_name || parsed.admDivName || parsed.userName || ''
+        )
+        return { ok: true, belongOrgId, unitName, raw: parsed }
+      } catch (error) {
+        return {
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:drain-all-frames',
+    async (
+      _event,
+      payload: { webContentsId: number; code: string }
+    ): Promise<{
+      ok: true
+      results: Array<{ frameUrl: string; value: unknown }>
+    } | { ok: false; reason: string }> => {
+      try {
+        const { webContents } = await import('electron')
+        const wc = webContents.fromId(payload.webContentsId)
+        if (!wc) return { ok: false, reason: '找不到 webContents' }
+        const frames = wc.mainFrame.framesInSubtree
+        const results: Array<{ frameUrl: string; value: unknown }> = []
+        await Promise.all(
+          frames.map(async (frame) => {
+            try {
+              const v = await frame.executeJavaScript(payload.code, false)
+              results.push({ frameUrl: frame.url, value: v })
+            } catch (error) {
+              results.push({ frameUrl: frame.url, value: { __error: String(error) } })
+            }
+          })
+        )
+        return { ok: true, results }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:save-recording',
+    async (
+      _event,
+      payload: { json: string; defaultFileName?: string }
+    ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> => {
+      try {
+        const { dialog } = await import('electron')
+        const { writeFileSync } = await import('node:fs')
+        const def = payload.defaultFileName || `一体化录制_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`
+        const res = await dialog.showSaveDialog({
+          title: '保存录制文件',
+          defaultPath: def,
+          filters: [{ name: 'JSON', extensions: ['json'] }]
+        })
+        if (res.canceled || !res.filePath) {
+          return { ok: false, reason: '用户取消', canceled: true }
+        }
+        writeFileSync(res.filePath, payload.json, 'utf-8')
+        return { ok: true, path: res.filePath }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
 
   ipcMain.handle(
     'integration:exec-in-all-frames',
@@ -470,6 +617,18 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('unit-settings:get', (): Promise<UnitSettings> => readUnitSettings())
 
+  ipcMain.handle('unit-settings:lock-state', () => getUnitSettingsLockState())
+
+  ipcMain.handle(
+    'unit-settings:resolve-school',
+    async (_event, budgetUnitCode: string): Promise<Partial<UnitSettings> | null> => {
+      const database = await getDatabase()
+      const lockState = await getUnitSettingsLockState()
+      if (lockState.locked) throw new Error('系统已有业务数据，不能重新填写单位信息')
+      return resolveSchoolUnitSettings(database, budgetUnitCode)
+    }
+  )
+
   ipcMain.handle(
     'unit-settings:set',
     (_event, settings: UnitSettings): Promise<UnitSettings> => writeUnitSettings(settings)
@@ -595,8 +754,8 @@ export function registerAppIpc(): void {
 
   ipcMain.handle(
     'import:commit',
-    (_event, filePath: string, worksheetId: string): Promise<ImportBatchSummary> => {
-      return commitExcelImport(filePath, worksheetId)
+    (_event, filePath: string, worksheetId: string, options?: { confirmUpdates?: boolean }): Promise<ImportBatchSummary> => {
+      return commitExcelImport(filePath, worksheetId, options)
     }
   )
 

@@ -169,7 +169,7 @@ export async function clearWorksheet(
 export async function wipeAllWorksheetData(): Promise<{ tables: number; rows: number }> {
   const database = await getDatabase()
   const worksheets = readWorksheetMetadata()
-  const retainedBaseTables = new Set(['岗位工资对照', '薪级工资对照', '乡镇工作年限对照'])
+  const retainedBaseTables = new Set(['岗位工资对照', '薪级工资对照', '乡镇工作年限对照', '学校对照表'])
 
   let totalRows = 0
   let clearedTables = 0

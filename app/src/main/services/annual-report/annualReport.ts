@@ -1,5 +1,5 @@
 import type { AnnualReportWorkflowInput, RuleResult, WorkflowRunPayload } from '../../../shared/types'
-import { blockedBySourceRule, failRule, notImplementedRule, okRule } from '../ruleResult'
+import { failRule, notImplementedRule, okRule } from '../ruleResult'
 import { generateAnnualReportFromIntegrated } from './generateFromIntegrated'
 
 export async function generateAnnualSalaryReport(payload?: WorkflowRunPayload): Promise<RuleResult> {
@@ -25,13 +25,6 @@ function normalizeAnnualReportInput(input: AnnualReportWorkflowInput): AnnualRep
     totalHeadTeacher: Number(input.totalHeadTeacher) || 0,
     totalOvertime: Number(input.totalOvertime) || 0
   }
-}
-
-export async function updateAnnualReportInfo(): Promise<RuleResult> {
-  return blockedBySourceRule(
-    '更新信息',
-    '原流程依赖已删除的"局工资表"，请先确认新的取数来源后再启用'
-  )
 }
 
 export async function updateAnnualReportPerformanceSalary(): Promise<RuleResult> {

@@ -14,6 +14,16 @@ ${pdfLibBundle}
   const AUTO_START = ${autoStart ? 'true' : 'false'}
   const SCRIPT_VERSION = '20260520-registered-tab-voucher-page'
 
+  // 诊断日志：让宿主能在 webview devtools 里看到注入到了哪个 frame
+  try {
+    console.log(
+      '[voucher] script reached frame:',
+      location.href,
+      '| existing version:',
+      window.__salaryVoucherMerge && window.__salaryVoucherMerge.version
+    )
+  } catch (e) {}
+
   if (window.__salaryVoucherMerge && window.__salaryVoucherMerge.version === SCRIPT_VERSION) {
     window.__salaryVoucherMerge.injectButton()
     if (AUTO_START) return window.__salaryVoucherMerge.startBatchProcess()
@@ -99,7 +109,7 @@ ${pdfLibBundle}
     const currentMaxRetries = isRetryPhase ? CONFIG.retryMaxRound2 : CONFIG.retryMax
 
     try {
-      const oldViewer = findPdfViewerWindow(window.top)
+      const oldViewer = (findPdfViewerWindow(window) || findPdfViewerWindow(window.top))
       if (oldViewer && oldViewer.PDFViewerApplication) oldViewer.PDFViewerApplication.url = null
 
       const cell = row.querySelector('td[field="index"]')
@@ -113,7 +123,7 @@ ${pdfLibBundle}
 
       let foundUrl = null
       for (let attempt = 0; attempt <= currentMaxRetries; attempt++) {
-        const viewerWindow = findPdfViewerWindow(window.top)
+        const viewerWindow = (findPdfViewerWindow(window) || findPdfViewerWindow(window.top))
         if (viewerWindow && viewerWindow.PDFViewerApplication && viewerWindow.PDFViewerApplication.url) {
           foundUrl = viewerWindow.PDFViewerApplication.url
           break
@@ -155,7 +165,8 @@ ${pdfLibBundle}
         return { ok: false, message: 'pdf-lib missing' }
       }
 
-      const targetRows = findRowsRecursively(window.top)
+      const targetRows =
+        findRowsRecursively(window) || findRowsRecursively(window.top)
       if (!targetRows || targetRows.length === 0) {
         alert('未找到凭证数据行。请先进入凭证列表页面，再点击“自动合并”。')
         return { ok: false, message: 'rows missing' }
@@ -306,7 +317,9 @@ ${pdfLibBundle}
   }
 
   function injectButton() {
-    const mount = findButtonMount(window.top)
+    // 脚本会被注入到每一个 frame；从当前 frame 自己的 window 开始扫，
+    // 跨域 frame 不会互相打扰（油猴脚本就是这个行为）。
+    const mount = findButtonMount(window) || findButtonMount(window.top)
     if (!mount || mount.existing || !mount.doc || !mount.targetElement) return
 
     const btn = mount.doc.createElement('span')

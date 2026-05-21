@@ -8929,6 +8929,65 @@
     ]
   },
   {
+    "name": "学校对照表",
+    "worksheetId": "local-school-lookup",
+    "fieldCount": 5,
+    "fields": [
+      {
+        "fieldId": "local-school-lookup-budget-code",
+        "name": "单位预算编码",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 0
+      },
+      {
+        "fieldId": "local-school-lookup-unit-name",
+        "name": "单位名称",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 1
+      },
+      {
+        "fieldId": "local-school-lookup-stage",
+        "name": "学段",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 2
+      },
+      {
+        "fieldId": "local-school-lookup-agreement-no",
+        "name": "协议号",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 3
+      },
+      {
+        "fieldId": "local-school-lookup-function-code",
+        "name": "功能科目",
+        "type": "文本框",
+        "controlType": 2,
+        "desc": "String 文本",
+        "hidden": false,
+        "displayOrder": 4
+      }
+    ],
+    "views": [
+      {
+        "viewId": "local-school-lookup-all",
+        "name": "全部",
+        "type": "表格"
+      }
+    ]
+  },
+  {
     "name": "人员明细导出",
     "worksheetId": "68d1363b4b3cd60c8a8cc89a",
     "fieldCount": 8,

@@ -339,7 +339,7 @@ async function confirmMonthlyPayrollWriteBack(
 
 async function runPreprocess(): Promise<void> {
   if (isCurrentMonthArchived.value) {
-    ElMessage.warning('本月工资已月结，不能再次开始预处理')
+    ElMessage.warning('本月工资已月结，不能再次进行工资报账')
     return
   }
   if (!detected.value?.salaryWorkbookPath && !detected.value?.socialSecurityWorkbookPath) {
@@ -606,7 +606,7 @@ async function archiveHistoryRun(row: MonthlyPayrollRun | null): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-      `${row.year}年${row.month}月结后，本月不能再次开始预处理或重新生成报表；工资、社保、个税源文件会移入同一个年月月结目录，文件名会带上年月日，仍可在历史报表中查看。`,
+      `${row.year}年${row.month}月结后，本月不能再次进行工资报账或重新生成报表；工资、社保、个税源文件会移入同一个年月月结目录，文件名会带上年月日，仍可在历史报表中查看。`,
       '工资月结',
       { type: 'warning', confirmButtonText: '确认月结', cancelButtonText: '取消' }
     )
@@ -1018,7 +1018,7 @@ function isCustomStyledSheet(name: string): boolean {
           :disabled="!canRun"
           @click="runPreprocess"
         >
-          {{ isCurrentMonthArchived ? '已月结' : '开始预处理' }}
+          {{ isCurrentMonthArchived ? '已月结' : '工资报账' }}
         </el-button>
       </div>
     </header>

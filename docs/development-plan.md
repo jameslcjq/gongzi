@@ -131,22 +131,16 @@ app/
 
 | 明道云流程 | 独立版函数 |
 |---|---|
-| 更新工资信息 | `syncIntegratedActiveSalary()`，原流程依赖已删除的“局工资表”，需要改写数据来源 |
 | 生成工资年报 | `generateAnnualSalaryReport()` |
 | 核对预算人员 | `verifyBudgetActiveEmployee()` |
 | 更新在职信息 | `onBudgetActiveCreated()` |
 | 更新薪级 | `updateSalaryGrade()` |
 | 增加薪级 | `increaseSalaryGrade()` |
 | 计算基础性绩效工资 | `calculateBudgetActiveBaseSalary()` |
-| 更新退休信息 | `onBudgetRetiredCreated()` |
-| 更新预算养老金和房补 | `updateRetiredPensionAndHousingSubsidy()` |
-| 核对其他人员 | `verifyOtherPeople()` |
-| 更新信息 | `updateAnnualReportInfo()`，原流程依赖已删除的“局工资表”，需要改写数据来源 |
 | 更新绩效工资 | `updateAnnualReportPerformanceSalary()` |
 | 改乡镇工作年限 | `updateTownshipYearsForAnnualReport()` |
 | 调整乡镇补贴 | `onTownshipAllowanceChanged()` |
 | 增加1年 | `increaseTownshipYears()` |
-| 更新身份证 | `updatePerformanceSalaryIdCard()` |
 
 每个函数统一返回：
 
@@ -174,7 +168,7 @@ type RuleResult = {
 - 乡镇补贴各年限段金额
 - 工资年报新增时 28 个字段的完整映射
 - 原 JavaScript 节点源码或等价规则
-- 原来依赖“局工资表 / 职称信息表 / 姓名”的逻辑是否保留，以及改查哪张表
+- 原来依赖“职称信息表”的逻辑是否保留，以及改查哪张表
 
 ## 页面设计
 
@@ -206,14 +200,8 @@ type RuleResult = {
 - 增加薪级
 - 更新绩效工资
 - 改乡镇工作年限
-- 更新预算养老金和房补
 - 调整乡镇补贴
 - 增加工龄乡镇
-
-待确认后再开放的按钮：
-
-- 更新工资信息：旧流程依赖已删除的“局工资表”
-- 更新信息：工资年报旧流程依赖已删除的“局工资表”
 
 ## 开发阶段
 

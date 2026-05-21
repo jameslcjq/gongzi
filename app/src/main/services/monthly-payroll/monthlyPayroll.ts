@@ -1,4 +1,4 @@
-import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, readdir, readFile, rename, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { app } from 'electron'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -1159,12 +1159,15 @@ export async function cancelMonthlyPayrollMonthClose(id: number): Promise<Monthl
      WHERE year = ? AND month = ? AND archived_at IS NOT NULL`,
     [targetRun.year, targetRun.month]
   )
-  await restoreMonthlyPayrollSourceFiles(monthRows.map(mapRunRow))
+  const monthRunList = monthRows.map(mapRunRow)
+  await restoreMonthlyPayrollSourceFiles(monthRunList)
+  await cleanupMonthlyPayrollGeneratedFiles(monthRunList)
 
   await run(
     database,
     `UPDATE monthly_payroll_runs
-       SET archived_at = NULL, archive_dir = NULL, archive_manifest = NULL
+       SET archived_at = NULL, archive_dir = NULL, archive_manifest = NULL,
+           insurance_import_path = NULL, payroll_backpay_path = NULL, voucher_import_path = NULL
      WHERE year = ? AND month = ?`,
     [targetRun.year, targetRun.month]
   )
@@ -1375,6 +1378,44 @@ async function moveArchiveFile(
 
 function archiveFileName(label: string, archiveDate: string, sourcePath: string): string {
   return `${label}_${archiveDate}_${basename(sourcePath)}`
+}
+
+async function cleanupMonthlyPayrollGeneratedFiles(runs: MonthlyPayrollRun[]): Promise<void> {
+  const removedDirs = new Set<string>()
+  for (const run of runs) {
+    // 1. 删除原 outputDir 中生成的 保险导入 / 补发工资 / 凭证（撤销月结代表数据有误，需重生成）
+    for (const filePath of [run.insuranceImportPath, run.payrollBackpayPath, run.voucherImportPath]) {
+      if (!filePath) continue
+      if (existsSync(filePath)) {
+        try {
+          await unlink(filePath)
+        } catch (error) {
+          console.warn(`删除生成文件失败：${filePath}`, error)
+        }
+      }
+    }
+    // 2. 删除归档目录里的副本（依据 archiveManifest，但已恢复的源文件不在归档目录里了，跳过）
+    for (const archivedPath of run.archiveManifest) {
+      if (!archivedPath || !existsSync(archivedPath)) continue
+      try {
+        await unlink(archivedPath)
+      } catch (error) {
+        console.warn(`删除归档副本失败：${archivedPath}`, error)
+      }
+    }
+    // 3. 如果归档目录已空，清掉空目录
+    if (run.archiveDir && existsSync(run.archiveDir) && !removedDirs.has(run.archiveDir)) {
+      removedDirs.add(run.archiveDir)
+      try {
+        const remaining = await readdir(run.archiveDir)
+        if (remaining.length === 0) {
+          await rmdir(run.archiveDir)
+        }
+      } catch (error) {
+        console.warn(`清理归档目录失败：${run.archiveDir}`, error)
+      }
+    }
+  }
 }
 
 async function restoreMonthlyPayrollSourceFiles(runs: MonthlyPayrollRun[]): Promise<void> {
@@ -2943,7 +2984,8 @@ async function loadIntegratedActiveAggregates(): Promise<IntegratedActiveAggrega
       应发工资: roundMoney(
         integratedActivePayableFields.reduce((sum, name) => sum + sumField(name), 0)
       ),
-      个税: roundMoney(sumField('当月个人所得税')),
+      // 当月个税写在"补扣工资"列；fallback 到"当月个人所得税"以兼容上游已填充的场景
+      个税: roundMoney(sumField('补扣工资') || sumField('当月个人所得税')),
       实发合计: roundMoney(sumField('实发合计')),
       养老保险: roundMoney(sumField('养老保险缴费')),
       职业年金: roundMoney(sumField('职业年金缴费')),
@@ -2978,8 +3020,14 @@ async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<string | n
     const year = new Date().getFullYear()
     const month = new Date().getMonth() + 1
     return rows
-      .filter((row) => num(row.values['补发工资']) !== 0 || num(row.values['当月个人所得税']) !== 0)
+      .filter((row) => {
+        const backpay = num(row.values['补发工资'])
+        // 一体化在职 实际上把当月个税写入"补扣工资"列；当月个人所得税列由上游维护
+        const tax = num(row.values['补扣工资']) || num(row.values['当月个人所得税'])
+        return backpay !== 0 || tax !== 0
+      })
       .map((row) => {
+        const tax = num(row.values['补扣工资']) || num(row.values['当月个人所得税'])
         const out: Array<string | number> = [
           row.idCard,
           month,
@@ -2990,7 +3038,7 @@ async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<string | n
           roundMoney(num(row.values['补发工资'])), // 补发工资
           0, // 补扣工资
           '', '', '',
-          roundMoney(num(row.values['当月个人所得税'])), // 当月个人所得税
+          roundMoney(tax), // 当月个人所得税
           ''
         ]
         return out

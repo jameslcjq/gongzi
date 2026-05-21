@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types'
 import { commitExcelImport } from './excelImport'
 import { inferWorksheet } from './worksheetInference'
+import { isPersonnelExpensePlanWorkbook } from './budget/personnelExpensePlanPrefill'
 
 const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
@@ -45,7 +46,7 @@ export async function startExcelImportWatcher(customFolderPath?: string): Promis
 
   watcher = chokidar.watch(folderPath, {
     depth: 0,
-    ignoreInitial: false,
+    ignoreInitial: true,
     awaitWriteFinish: {
       stabilityThreshold: 1200,
       pollInterval: 250
@@ -159,7 +160,11 @@ async function importExcelFile(filePath: string): Promise<void> {
   if (isReservedWorkflowFile(filePath)) {
     pushMemoryLog({
       fileName: basename(filePath),
-      worksheetName: isAnnualAdjustmentFile(filePath) ? '社保个税' : '工资报账',
+      worksheetName: isPersonnelExpensePlanWorkbook(filePath)
+        ? '人员经费核对'
+        : isAnnualAdjustmentFile(filePath)
+          ? '社保个税'
+          : '工资报账',
       ok: true,
       importedRows: 0,
       message: '已识别为专项处理文件，保留在监控文件夹供业务模块使用',
@@ -379,7 +384,8 @@ function isReservedWorkflowFile(filePath: string): boolean {
     isSalaryWorkbook(filePath) ||
     isSocialSecurityWorkbook(filePath) ||
     isTaxWorkbook(filePath) ||
-    isAnnualAdjustmentFile(filePath)
+    isAnnualAdjustmentFile(filePath) ||
+    isPersonnelExpensePlanWorkbook(filePath)
   )
 }
 

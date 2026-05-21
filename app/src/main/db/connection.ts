@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import sqlite3 from 'sqlite3'
@@ -30,6 +31,7 @@ export async function getDatabase(): Promise<sqlite3.Database> {
 
   databasePath = join(app.getPath('userData'), 'salary-system.sqlite')
   await mkdir(dirname(databasePath), { recursive: true })
+  backupDatabaseBeforeStartupMigrations(databasePath)
 
   db = await openDatabase(databasePath)
   await exec(db, `
@@ -57,6 +59,27 @@ export async function getDatabase(): Promise<sqlite3.Database> {
   await ensureIdentityUniqueIndexes(db)
 
   return db
+}
+
+function backupDatabaseBeforeStartupMigrations(sourcePath: string): void {
+  if (!existsSync(sourcePath)) return
+  try {
+    const stat = statSync(sourcePath)
+    if (stat.size === 0) return
+
+    const folder = join(dirname(sourcePath), 'backups', 'pre-migration')
+    mkdirSync(folder, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const targetPath = join(folder, `salary-system-pre-migration-${stamp}.sqlite`)
+    copyFileSync(sourcePath, targetPath)
+
+    for (const suffix of ['-wal', '-shm']) {
+      const sidecar = `${sourcePath}${suffix}`
+      if (existsSync(sidecar)) copyFileSync(sidecar, `${targetPath}${suffix}`)
+    }
+  } catch (error) {
+    console.warn('[db] 迁移前自动备份失败，已继续启动：', error)
+  }
 }
 
 async function migrateTeacherDetailSchema(database: sqlite3.Database): Promise<void> {
@@ -658,6 +681,10 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'row_count', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'message', definition: 'TEXT' }
   ])
+  await ensureColumns(database, 'import_batch_rows', [
+    { name: 'action', definition: 'TEXT NOT NULL DEFAULT \'insert\'' },
+    { name: 'previous_values', definition: 'TEXT' }
+  ])
   await ensureColumns(database, 'import_logs', [{ name: 'batch_id', definition: 'INTEGER' }])
   await ensureColumns(database, 'monthly_payroll_runs', [
     { name: 'retired_housing_count', definition: 'INTEGER NOT NULL DEFAULT 0' },
@@ -770,6 +797,13 @@ const identityCompositeFieldNames = new Map<string, string[]>([
   ['\u4e00\u4f53\u5316\u5728\u804c', ['\u5de5\u8d44\u6279\u6b21']]
 ])
 
+export type IdentityDuplicateIssue = {
+  worksheetName: string
+  identityFieldName: string
+  idCard: string
+  count: number
+}
+
 async function ensureIdentityUniqueIndexes(database: sqlite3.Database): Promise<void> {
   const worksheets = readWorksheetMetadata()
   for (const worksheet of worksheets) {
@@ -834,6 +868,51 @@ async function ensureIdentityUniqueIndexes(database: sqlite3.Database): Promise<
       )
     }
   }
+}
+
+export async function listIdentityDuplicateIssues(): Promise<IdentityDuplicateIssue[]> {
+  const database = await getDatabase()
+  const issues: IdentityDuplicateIssue[] = []
+  const worksheets = readWorksheetMetadata()
+  for (const worksheet of worksheets) {
+    if (identityNonUniqueWorksheetIds.has(worksheet.worksheetId)) continue
+    const columns = getWorksheetLocalColumns(worksheet)
+    const idColumn = columns.find((column) => identityUniqueFieldNames.has(column.field.name))
+    if (!idColumn) continue
+
+    const existingCols = await all<{ name: string }>(
+      database,
+      `PRAGMA table_info(${quoteIdentifier(worksheet.name)})`
+    )
+    if (!existingCols.some((col) => col.name === idColumn.columnName)) continue
+
+    const extraFieldNames = identityCompositeFieldNames.get(worksheet.name) ?? []
+    const extraColumns = extraFieldNames
+      .map((fieldName) => columns.find((column) => column.field.name === fieldName))
+      .filter((column): column is NonNullable<typeof column> => Boolean(column))
+      .filter((column) => existingCols.some((col) => col.name === column.columnName))
+    const allColumns = [idColumn, ...extraColumns]
+    const groupColumns = allColumns.map((column) => quoteIdentifier(column.columnName)).join(', ')
+    const rows = await all<{ id_card: string; cnt: number }>(
+      database,
+      `SELECT ${quoteIdentifier(idColumn.columnName)} AS id_card, COUNT(*) AS cnt
+       FROM ${quoteIdentifier(worksheet.name)}
+       WHERE ${quoteIdentifier(idColumn.columnName)} IS NOT NULL
+         AND ${quoteIdentifier(idColumn.columnName)} != ''
+       GROUP BY ${groupColumns}
+       HAVING cnt > 1
+       LIMIT 20`
+    )
+    for (const row of rows) {
+      issues.push({
+        worksheetName: worksheet.name,
+        identityFieldName: idColumn.field.name,
+        idCard: row.id_card,
+        count: row.cnt
+      })
+    }
+  }
+  return issues
 }
 
 export async function loadPersonnelStatusIdentitySets(

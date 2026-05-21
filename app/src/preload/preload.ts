@@ -25,6 +25,7 @@ import type {
   TownshipMasterSyncPreview,
   LookupFailureEntry,
   PersonnelArchiveEntry,
+  PersonnelExpensePlanPrefillResult,
   PivotConfig,
   PivotResult,
   WorkflowDefinition,
@@ -43,6 +44,7 @@ import type {
   PrintRequest,
   PrinterSummary,
   UnitSettings,
+  UnitSettingsLockState,
   AnnualAdjustmentApplyInput,
   AnnualAdjustmentApplyResult,
   AnnualAdjustmentChooseFilesRequest,
@@ -101,6 +103,8 @@ const salaryApi = {
     ipcRenderer.invoke('import-watcher:open-folder'),
   clearImportWatcherLogs: (): Promise<ImportWatcherStatus> =>
     ipcRenderer.invoke('import-watcher:clear-logs'),
+  getPersonnelExpensePlanPrefill: (): Promise<PersonnelExpensePlanPrefillResult> =>
+    ipcRenderer.invoke('personnel-expense-plan:prefill'),
 
   listWorkflows: (): Promise<WorkflowDefinition[]> => ipcRenderer.invoke('app:list-workflows'),
   runWorkflow: (workflowKey: string, payload?: WorkflowRunPayload): Promise<WorkflowRunResult> =>
@@ -116,12 +120,66 @@ const salaryApi = {
     code: string
   ): Promise<{ ok: true; count: number } | { ok: false; reason: string }> =>
     ipcRenderer.invoke('integration:exec-in-all-frames', { webContentsId, code }),
+  getPortalUserInfo: (
+    webContentsId: number
+  ): Promise<
+    | { ok: true; belongOrgId: string; unitName: string; raw: Record<string, unknown> }
+    | { ok: false; reason: string }
+  > => ipcRenderer.invoke('integration:get-portal-userinfo', { webContentsId }),
+  drainAllPortalFrames: (
+    webContentsId: number,
+    code: string
+  ): Promise<
+    | { ok: true; results: Array<{ frameUrl: string; value: unknown }> }
+    | { ok: false; reason: string }
+  > => ipcRenderer.invoke('integration:drain-all-frames', { webContentsId, code }),
+  savePortalRecording: (
+    json: string,
+    defaultFileName?: string
+  ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('integration:save-recording', { json, defaultFileName }),
+  onWebviewDownloadDone: (
+    handler: (payload: {
+      ok: boolean
+      state: string
+      originalName: string
+      savedPath: string
+      url: string
+    }) => void
+  ): (() => void) => {
+    const listener = (
+      _event: unknown,
+      payload: {
+        ok: boolean
+        state: string
+        originalName: string
+        savedPath: string
+        url: string
+      }
+    ): void => handler(payload)
+    ipcRenderer.on('integration:webview-download-done', listener)
+    return () => ipcRenderer.removeListener('integration:webview-download-done', listener)
+  },
+  onWebviewOpenTabRequest: (
+    handler: (payload: { sourceWebContentsId: number; url: string; disposition?: string }) => void
+  ): (() => void) => {
+    const listener = (
+      _event: unknown,
+      payload: { sourceWebContentsId: number; url: string; disposition?: string }
+    ): void => handler(payload)
+    ipcRenderer.on('integration:webview-open-tab', listener)
+    return () => ipcRenderer.removeListener('integration:webview-open-tab', listener)
+  },
   saveSalaryExportXls: (
     filename: string,
     base64: string
   ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
     ipcRenderer.invoke('salary-export:save-xls', { filename, base64 }),
   getUnitSettings: (): Promise<UnitSettings> => ipcRenderer.invoke('unit-settings:get'),
+  getUnitSettingsLockState: (): Promise<UnitSettingsLockState> =>
+    ipcRenderer.invoke('unit-settings:lock-state'),
+  resolveSchoolUnitSettings: (budgetUnitCode: string): Promise<Partial<UnitSettings> | null> =>
+    ipcRenderer.invoke('unit-settings:resolve-school', budgetUnitCode),
   setUnitSettings: (settings: UnitSettings): Promise<UnitSettings> =>
     ipcRenderer.invoke('unit-settings:set', settings),
   listMonthlyPayrollRuns: (): Promise<MonthlyPayrollRun[]> =>
@@ -222,8 +280,12 @@ const salaryApi = {
     ipcRenderer.invoke('import:choose-file'),
   previewImport: (filePath: string, worksheetId?: string): Promise<ImportPreview> =>
     ipcRenderer.invoke('import:preview', filePath, worksheetId),
-  commitImport: (filePath: string, worksheetId: string): Promise<ImportBatchSummary> =>
-    ipcRenderer.invoke('import:commit', filePath, worksheetId),
+  commitImport: (
+    filePath: string,
+    worksheetId: string,
+    options?: { confirmUpdates?: boolean }
+  ): Promise<ImportBatchSummary> =>
+    ipcRenderer.invoke('import:commit', filePath, worksheetId, options),
   listImportBatches: (limit?: number): Promise<ImportBatchSummary[]> =>
     ipcRenderer.invoke('import:list-batches', limit),
   previewHrMasterSyncFromIntegrated: (): Promise<HrMasterSyncPreview> =>

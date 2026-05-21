@@ -1,28 +1,47 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Close, Download, Link, Plus, Refresh } from '@element-plus/icons-vue'
+import {
+  Close,
+  Download,
+  Link,
+  Money,
+  Plus,
+  Refresh,
+  Upload,
+  VideoCamera,
+  VideoPause
+} from '@element-plus/icons-vue'
 import { buildVoucherMergeScript } from '../integration/voucherMergeScript'
 import {
   buildSalaryExportScript,
   buildSalaryExportFeedbackScript
 } from '../integration/salaryExportScript'
 import {
+  buildRecorderDrainScript,
+  buildRecorderInstallScript,
+  buildRecorderStopScript
+} from '../integration/recorderScript'
+import {
   buildOpenSalaryPlanInputScript,
   buildSalaryPlanInputScript
 } from '../integration/salaryPlanInputScript'
+import { buildBudgetExportScript } from '../integration/budgetExportScript'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
+const voucherImportUrl =
+  'http://172.24.147.202/gld-web/gl/html/common/Import.html?modelType=29&mode=0&menuid=227b6262406c4afb836d98abe98d4f85'
 
 type SalaryExportFile = {
   filename: string
   base64: string
   size: number
+  agency: string
   saltype: string
   salbatch: string
 }
-type SalaryExportSkip = { saltype: string; salbatch: string; reason: string }
-type SalaryExportFail = { saltype: string; salbatch: string; reason: string }
+type SalaryExportSkip = { agency: string; saltype: string; salbatch: string; reason: string }
+type SalaryExportFail = { agency: string; saltype: string; salbatch: string; reason: string }
 type SalaryExportScriptResult =
   | {
       ok: true
@@ -80,6 +99,165 @@ const tabs = ref<Tab[]>([
 ])
 const activeTabId = ref<string>(tabs.value[0].id)
 const salaryExporting = ref(false)
+const budgetExporting = ref(false)
+
+// ---------------------------------------------------------------------------
+// 预算导出（模拟点击 → 文件由 will-download 拦截器接住自动入库）
+// ---------------------------------------------------------------------------
+async function exportBudget(): Promise<void> {
+  const wv = activeWebview()
+  if (!wv) {
+    ElMessage.warning('一体化页面尚未就绪')
+    return
+  }
+  if (budgetExporting.value) return
+  budgetExporting.value = true
+  try {
+    const result = (await wv.executeJavaScript(buildBudgetExportScript())) as {
+      ok: boolean
+      message: string
+    }
+    if (result?.ok) {
+      ElMessage.success(
+        result.message + '；下载完成后会自动入库（监听 D:\\laojiu\\Import）'
+      )
+    } else {
+      ElMessage.warning(result?.message || '预算导出未触发')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '预算导出脚本执行失败')
+  } finally {
+    budgetExporting.value = false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 录制模式
+// ---------------------------------------------------------------------------
+type RecordingEvent = {
+  t: number
+  frameUrl: string
+  kind: 'fetch' | 'xhr' | 'click' | 'navigation'
+  [key: string]: unknown
+}
+const recording = ref(false)
+const recordingEvents = ref<RecordingEvent[]>([])
+const recordingStart = ref<number>(0)
+let recordingPollTimer: number | null = null
+
+async function startRecording(): Promise<void> {
+  if (recording.value) return
+  const wv = activeWebview()
+  if (!wv) {
+    ElMessage.warning('一体化页面尚未就绪')
+    return
+  }
+  let wcId: number
+  try {
+    wcId = wv.getWebContentsId()
+  } catch (error) {
+    ElMessage.error('获取 webContentsId 失败')
+    return
+  }
+  const installRes = await window.salaryApi.execInAllPortalFrames(
+    wcId,
+    buildRecorderInstallScript()
+  )
+  if (!installRes.ok) {
+    ElMessage.error('录制安装失败：' + installRes.reason)
+    return
+  }
+  recording.value = true
+  recordingEvents.value = []
+  recordingStart.value = Date.now()
+  ElMessage.success(`🔴 已开始录制（已注入 ${installRes.count} 个 frame）`)
+
+  const drainCode = buildRecorderDrainScript()
+  const installCode = buildRecorderInstallScript()
+  recordingPollTimer = window.setInterval(async () => {
+    if (!recording.value) return
+    const cur = activeWebview()
+    if (!cur) return
+    let cid: number
+    try {
+      cid = cur.getWebContentsId()
+    } catch {
+      return
+    }
+    // 持续 install —— 新打开的 frame 也覆盖到
+    try {
+      await window.salaryApi.execInAllPortalFrames(cid, installCode)
+    } catch {}
+    // drain
+    try {
+      const res = await window.salaryApi.drainAllPortalFrames(cid, drainCode)
+      if (res.ok) {
+        for (const r of res.results) {
+          const v = r.value as { events?: RecordingEvent[] } | undefined
+          if (v && Array.isArray(v.events) && v.events.length) {
+            recordingEvents.value.push(...v.events)
+          }
+        }
+      }
+    } catch {}
+  }, 1500)
+}
+
+async function stopRecording(): Promise<void> {
+  if (!recording.value) return
+  recording.value = false
+  if (recordingPollTimer !== null) {
+    window.clearInterval(recordingPollTimer)
+    recordingPollTimer = null
+  }
+
+  // 最后再 drain 一次，吃干净缓冲
+  const wv = activeWebview()
+  if (wv) {
+    try {
+      const cid = wv.getWebContentsId()
+      const res = await window.salaryApi.drainAllPortalFrames(cid, buildRecorderDrainScript())
+      if (res.ok) {
+        for (const r of res.results) {
+          const v = r.value as { events?: RecordingEvent[] } | undefined
+          if (v && Array.isArray(v.events) && v.events.length) {
+            recordingEvents.value.push(...v.events)
+          }
+        }
+      }
+      // 清空缓冲（但保留 hook，下次录制不用再装）
+      await window.salaryApi.execInAllPortalFrames(cid, buildRecorderStopScript())
+    } catch {}
+  }
+
+  if (!recordingEvents.value.length) {
+    ElMessage.warning('录制已停止，但没有捕获到事件')
+    return
+  }
+
+  // 按时间排序
+  recordingEvents.value.sort((a, b) => (a.t as number) - (b.t as number))
+  const summary = {
+    startedAt: new Date(recordingStart.value).toISOString(),
+    durationMs: Date.now() - recordingStart.value,
+    totalEvents: recordingEvents.value.length,
+    byKind: recordingEvents.value.reduce(
+      (acc, e) => {
+        acc[e.kind] = (acc[e.kind] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>
+    ),
+    events: recordingEvents.value
+  }
+  const json = JSON.stringify(summary, null, 2)
+  const save = await window.salaryApi.savePortalRecording(json)
+  if (save.ok) {
+    ElMessage.success(`录制已保存：${save.path}（${summary.totalEvents} 条事件）`)
+  } else if (!save.canceled) {
+    ElMessage.error('保存失败：' + save.reason)
+  }
+}
 
 const activeTab = computed<Tab | undefined>(() =>
   tabs.value.find((t) => t.id === activeTabId.value)
@@ -127,15 +305,68 @@ function openHomeTab(): void {
 // ---------------------------------------------------------------------------
 // webview 事件
 // ---------------------------------------------------------------------------
+// 注：webview 标签的 @new-window 在带 allowpopups 时只是通知用，无法真正阻止默认弹窗。
+// 我们改在主进程 setWindowOpenHandler 拦截、通过 IPC 推给宿主开新标签 —— 见 onMounted。
+
+// 兼容：万一某些版本/路径还是触发了 @new-window，也把它接住
 function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
-  // 阻止 Electron 默认弹外部窗口，把新页面放进新标签
   event.preventDefault?.()
   if (event.url && event.url !== 'about:blank') {
     openNewTab(event.url)
   }
-  // 静默吞掉 about:blank 等空地址
   void tabId
 }
+
+// 主进程通过 IPC 通知"webview 内有弹窗请求"
+let stopOpenTabListener: (() => void) | null = null
+let stopDownloadDoneListener: (() => void) | null = null
+onMounted(() => {
+  stopDownloadDoneListener = window.salaryApi.onWebviewDownloadDone((payload: {
+    ok: boolean
+    state: string
+    originalName: string
+    savedPath: string
+    url: string
+  }) => {
+    if (payload.ok) {
+      ElMessage.success(
+        `已自动入库：${payload.originalName} → ${payload.savedPath}（watcher 会自动导入）`
+      )
+    } else {
+      ElMessage.warning(`一体化下载未完成（${payload.state}）：${payload.originalName}`)
+    }
+  })
+
+  stopOpenTabListener = window.salaryApi.onWebviewOpenTabRequest((payload: { sourceWebContentsId: number; url: string; disposition?: string }) => {
+    if (!payload?.url || payload.url === 'about:blank') return
+    // 找出请求来源的 tab（仅用于调试日志，开新标签时本身和来源无关）
+    let sourceTabTitle = ''
+    for (const [id, wv] of webviewMap.entries()) {
+      try {
+        if (wv.getWebContentsId() === payload.sourceWebContentsId) {
+          sourceTabTitle = findTabById(id)?.title || ''
+          break
+        }
+      } catch {}
+    }
+    console.log(
+      '[portal] 拦截弹窗，转新标签 ←',
+      sourceTabTitle || payload.sourceWebContentsId,
+      payload.url
+    )
+    openNewTab(payload.url)
+  })
+})
+onBeforeUnmount(() => {
+  if (stopOpenTabListener) {
+    stopOpenTabListener()
+    stopOpenTabListener = null
+  }
+  if (stopDownloadDoneListener) {
+    stopDownloadDoneListener()
+    stopDownloadDoneListener = null
+  }
+})
 
 function onDomReady(tabId: string): void {
   const t = findTabById(tabId)
@@ -199,6 +430,10 @@ function reload(): void {
   activeWebview()?.reload()
 }
 
+function openVoucherImport(): void {
+  openNewTab(voucherImportUrl)
+}
+
 async function openExternal(): Promise<void> {
   const url = activeTab.value?.url || portalUrl
   try {
@@ -217,9 +452,21 @@ async function openSalaryPlanInput(): Promise<void> {
 
   await installPortalAutomationScripts(activeTabId.value)
 
+  let prefill
+  try {
+    prefill = await window.salaryApi.getPersonnelExpensePlanPrefill()
+  } catch (error) {
+    console.warn('读取人员经费核对表失败', error)
+    prefill = {
+      ok: false,
+      rows: [],
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+
   try {
     const result = (await wv.executeJavaScript(
-      buildOpenSalaryPlanInputScript()
+      buildOpenSalaryPlanInputScript(prefill)
     )) as SalaryPlanInputOpenResult
     if (!result?.ok) {
       ElMessage.warning(result?.message || '请先进入“一般用款计划录入”的待录入列表页')
@@ -280,26 +527,33 @@ async function exportSalary(): Promise<void> {
   if (salaryExporting.value) return
   salaryExporting.value = true
 
-  // 读单位设置里的导出组合
-  let targets
+  // 读单位设置里的工资类别 + 单位名（用于过滤多单位场景）
+  type SaltypeInput = { saltype_id: string; saltype_name: string; onlyFirstBatch?: boolean }
+  let saltypes: SaltypeInput[] = []
+  let filterUnitName = ''
   try {
     const unit = await window.salaryApi.getUnitSettings()
-    targets = unit.salaryExportTargets
+    saltypes = ((unit.salaryExportSaltypes || []) as SaltypeInput[]).filter(
+      (s) => s.saltype_id && s.saltype_name
+    )
+    filterUnitName = (unit.unitFullName || '').trim()
   } catch (error) {
     salaryExporting.value = false
     ElMessage.error(`读取单位设置失败：${error instanceof Error ? error.message : String(error)}`)
     return
   }
-  if (!targets || !targets.length) {
+  if (!saltypes.length) {
     salaryExporting.value = false
-    ElMessage.warning('未配置任何"类别+批次"组合，请到系统设置 → 单位信息里维护')
+    ElMessage.warning('未配置任何工资类别，请到系统设置 → 单位信息 → 一体化工资导出维护')
     return
   }
 
+  // v5：不再用 cookie 读 belongOrgId（某些账号 belongOrgId=0 不可信）
+  // 脚本内部走 getAllAgencyHN 自动发现单位，多单位天然支持；同时按 unitFullName 过滤
   let result: SalaryExportScriptResult | null = null
   try {
     result = (await wv.executeJavaScript(
-      buildSalaryExportScript({ targets })
+      buildSalaryExportScript({ saltypes, filterUnitName })
     )) as SalaryExportScriptResult
   } catch (error) {
     salaryExporting.value = false
@@ -314,14 +568,19 @@ async function exportSalary(): Promise<void> {
     return
   }
 
+  const fmtCombo = (x: {
+    agency?: string
+    saltype?: string
+    salbatch?: string
+  }): string => `${x.agency || ''} / ${x.saltype || ''} / ${x.salbatch || ''}`
+
   if (!result.files.length) {
-    const skipNote = result.skipped.length
-      ? result.skipped
-          .map((s) => `${s.saltype} / ${s.salbatch}：${s.reason}`)
-          .join('\n')
-      : '没有可导出的组合'
-    ElMessage.warning(skipNote)
-    await wv.executeJavaScript(buildSalaryExportFeedbackScript(false, `⊘ ${skipNote}`))
+    const note =
+      result.skipped.length || result.failed.length
+        ? `本次没有可导出的工资数据（尝试了 ${result.skipped.length + result.failed.length} 个组合）`
+        : '没有可导出的组合'
+    ElMessage.warning(note)
+    await wv.executeJavaScript(buildSalaryExportFeedbackScript(false, `⊘ ${note}`))
     salaryExporting.value = false
     return
   }
@@ -331,39 +590,31 @@ async function exportSalary(): Promise<void> {
   for (const file of result.files) {
     try {
       const saveRes = await window.salaryApi.saveSalaryExportXls(file.filename, file.base64)
-      const label = `${file.saltype} / ${file.salbatch}`
+      const label = fmtCombo(file)
       if (saveRes.ok) savedPaths.push(`${label}：${saveRes.path}`)
       else savedErrors.push(`${label}：${saveRes.reason}`)
     } catch (error) {
       savedErrors.push(
-        `${file.saltype} / ${file.salbatch}：${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `${fmtCombo(file)}：${error instanceof Error ? error.message : String(error)}`
       )
     }
   }
 
   const summaryLines: string[] = []
+  const realFailed = result.failed.length + savedErrors.length
   summaryLines.push(
-    `✅ 落盘 ${savedPaths.length} 个 / 跳过 ${result.skipped.length} / 失败 ${
-      result.failed.length + savedErrors.length
-    }`
+    `✅ 落盘 ${savedPaths.length} 个` +
+      (result.skipped.length ? `（已自动跳过 ${result.skipped.length} 个无数据组合）` : '') +
+      (realFailed ? ` / ❗ 失败 ${realFailed}` : '')
   )
   if (savedPaths.length) {
     summaryLines.push('已入库：')
     savedPaths.forEach((p) => summaryLines.push('  • ' + p))
   }
-  if (result.skipped.length) {
-    summaryLines.push('跳过：')
-    result.skipped.forEach((s) =>
-      summaryLines.push(`  ⊘ ${s.saltype} / ${s.salbatch}：${s.reason}`)
-    )
-  }
+  // 不再展开跳过细节 —— "没数据自动跳"是预期行为，不打扰
   if (result.failed.length) {
     summaryLines.push('失败：')
-    result.failed.forEach((f) =>
-      summaryLines.push(`  ✗ ${f.saltype} / ${f.salbatch}：${f.reason}`)
-    )
+    result.failed.forEach((f) => summaryLines.push(`  ✗ ${fmtCombo(f)}：${f.reason}`))
   }
   if (savedErrors.length) {
     summaryLines.push('落盘失败：')
@@ -393,12 +644,30 @@ void nextTick(() => {
       <div class="portal-actions">
         <el-button :icon="Refresh" @click="reload">刷新</el-button>
         <el-button type="primary" @click="openSalaryPlanInput">人员经费录入</el-button>
+        <el-button :icon="Upload" @click="openVoucherImport">凭证导入</el-button>
         <el-button
           :icon="Download"
           :loading="salaryExporting"
           @click="exportSalary"
           >导出工资</el-button
         >
+        <el-button
+          :icon="Money"
+          :loading="budgetExporting"
+          @click="exportBudget"
+          >预算导出</el-button
+        >
+        <el-button
+          v-if="!recording"
+          :icon="VideoCamera"
+          type="danger"
+          plain
+          @click="startRecording"
+          >开始录制</el-button
+        >
+        <el-button v-else :icon="VideoPause" type="danger" @click="stopRecording">
+          停止录制（{{ recordingEvents.length }} 条）
+        </el-button>
         <el-button :icon="Link" @click="openExternal">外部浏览器</el-button>
       </div>
     </header>

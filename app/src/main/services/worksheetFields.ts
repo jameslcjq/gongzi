@@ -32,23 +32,27 @@ function normalizeFields(fields: WorksheetField[], worksheet: WorksheetMeta): Wo
 
   const retainedFields = worksheet.fields.map((existing, index) => {
     const incoming = incomingById.get(existing.fieldId)
-    const controlType = Number(incoming?.controlType || existing.controlType || 2)
+    const isCustom = Boolean(existing.custom)
+    const controlType = isCustom
+      ? Number(incoming?.controlType || existing.controlType || 2)
+      : Number(existing.controlType || 2)
     return {
       ...existing,
-      type: incoming?.type || existing.type || typeNameOf(controlType),
+      name: isCustom ? normalizeFieldName(incoming?.name || existing.name) : existing.name,
+      type: isCustom ? (incoming?.type || existing.type || typeNameOf(controlType)) : existing.type,
       controlType,
-      desc: incoming?.desc || existing.desc || descOf(controlType),
-      options: normalizeOptions(incoming?.options ?? existing.options),
+      desc: isCustom ? (incoming?.desc || existing.desc || descOf(controlType)) : existing.desc,
+      options: isCustom ? normalizeOptions(incoming?.options ?? existing.options) : existing.options,
       hidden: Boolean(incoming?.hidden),
       displayOrder: Number.isFinite(Number(incoming?.displayOrder))
         ? Number(incoming?.displayOrder)
-        : (existing.displayOrder ?? index)
+        : (existing.displayOrder ?? index),
+      custom: isCustom || undefined
     }
   })
 
   const appendedFields = newFields.map((field, index) => {
-    const name = field.name.trim()
-    if (!name) throw new Error('字段名称不能为空')
+    const name = normalizeFieldName(field.name)
 
     const existing = existingById.get(field.fieldId)
     const controlType = Number(field.controlType || existing?.controlType || 2)
@@ -56,7 +60,7 @@ function normalizeFields(fields: WorksheetField[], worksheet: WorksheetMeta): Wo
       fieldId:
         field.fieldId ||
         existing?.fieldId ||
-        `${worksheet.worksheetId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}_${Date.now()}_${index}`,
+        `custom_${worksheet.worksheetId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}_${Date.now()}_${index}`,
       name,
       type: field.type || existing?.type || typeNameOf(controlType),
       controlType,
@@ -65,11 +69,33 @@ function normalizeFields(fields: WorksheetField[], worksheet: WorksheetMeta): Wo
       hidden: Boolean(field.hidden),
       displayOrder: Number.isFinite(Number(field.displayOrder))
         ? Number(field.displayOrder)
-        : worksheet.fields.length + index
+        : worksheet.fields.length + index,
+      custom: true
     }
   })
 
-  return [...retainedFields, ...appendedFields]
+  const normalized = [...retainedFields, ...appendedFields]
+  assertFieldNamesAreSafe(normalized)
+  return normalized
+}
+
+function normalizeFieldName(name: string | undefined): string {
+  const normalized = String(name ?? '').trim()
+  if (!normalized) throw new Error('字段名称不能为空')
+  return normalized
+}
+
+function assertFieldNamesAreSafe(fields: WorksheetField[]): void {
+  const seen = new Set<string>()
+  for (const field of fields) {
+    const name = normalizeFieldName(field.name)
+    const key = name.replace(/\s+/g, '').toLowerCase()
+    if (seen.has(key)) throw new Error(`字段名称重复：${name}`)
+    seen.add(key)
+    if (/^(id|md_|rowid$)/i.test(name)) {
+      throw new Error(`字段名称 ${name} 与系统字段保留字冲突，请换一个名称`)
+    }
+  }
 }
 
 function normalizeOptions(options: string[] | undefined): string[] | undefined {

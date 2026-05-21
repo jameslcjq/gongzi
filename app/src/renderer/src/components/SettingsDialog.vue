@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsistencyAuditPage from './ConsistencyAuditPage.vue'
 import type {
   BackupSummary,
   ImportWatcherStatus,
   MonthlyPayrollRun,
-  SalaryExportTarget,
-  UnitSettings
+  SalaryExportSaltype,
+  UnitSettings,
+  UnitSettingsLockState
 } from '@shared/types'
 
 const props = defineProps<{
@@ -31,10 +32,10 @@ const monthCloseLoading = ref(false)
 const cancelingMonthCloseId = ref<number | null>(null)
 const activeTab = ref('unit')
 
-const defaultSalaryExportTargets: SalaryExportTarget[] = [
-  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '1', salbatch_name: '批次001' },
-  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '2', salbatch_name: '批次002' },
-  { saltype_id: '6', saltype_name: '006事业退休', salbatch_id: '1', salbatch_name: '批次001' }
+const defaultSalaryExportSaltypes: SalaryExportSaltype[] = [
+  { saltype_id: '2', saltype_name: '002事业' },
+  // 内网下拉 "006事业退休" 的真实 saltypeid 实测为 5
+  { saltype_id: '5', saltype_name: '事业退休' }
 ]
 
 const unitForm = reactive<UnitSettings>({
@@ -52,27 +53,35 @@ const unitForm = reactive<UnitSettings>({
   housingPayeeName: '',
   housingPayeeBank: '',
   housingPayeeAccount: '',
-  salaryExportTargets: defaultSalaryExportTargets.map((t) => ({ ...t }))
+  salaryExportSaltypes: defaultSalaryExportSaltypes.map((t) => ({ ...t }))
 })
 const unitSaving = ref(false)
+const schoolLookupLoading = ref(false)
+const unitSettingsLock = ref<UnitSettingsLockState>({
+  locked: false,
+  rowCount: 0,
+  tables: []
+})
 
-function addSalaryExportTarget(): void {
-  if (!unitForm.salaryExportTargets) unitForm.salaryExportTargets = []
-  unitForm.salaryExportTargets.push({
-    saltype_id: '',
-    saltype_name: '',
-    salbatch_id: '',
-    salbatch_name: ''
-  })
+const unitLockMessage = computed(() => {
+  if (!unitSettingsLock.value.locked) return ''
+  const tableNames = unitSettingsLock.value.tables.slice(0, 3).map((item) => item.name).join('、')
+  const suffix = unitSettingsLock.value.tables.length > 3 ? '等' : ''
+  return `系统已有业务数据（${tableNames}${suffix}，共 ${unitSettingsLock.value.rowCount} 行），单位信息已锁定。清空业务数据后才可重新填写。`
+})
+
+function addSalaryExportSaltype(): void {
+  if (!unitForm.salaryExportSaltypes) unitForm.salaryExportSaltypes = []
+  unitForm.salaryExportSaltypes.push({ saltype_id: '', saltype_name: '' })
 }
 
-function removeSalaryExportTarget(index: number): void {
-  if (!unitForm.salaryExportTargets) return
-  unitForm.salaryExportTargets.splice(index, 1)
+function removeSalaryExportSaltype(index: number): void {
+  if (!unitForm.salaryExportSaltypes) return
+  unitForm.salaryExportSaltypes.splice(index, 1)
 }
 
-function resetSalaryExportTargets(): void {
-  unitForm.salaryExportTargets = defaultSalaryExportTargets.map((t) => ({ ...t }))
+function resetSalaryExportSaltypes(): void {
+  unitForm.salaryExportSaltypes = defaultSalaryExportSaltypes.map((t) => ({ ...t }))
 }
 
 watch(
@@ -87,23 +96,78 @@ watch(
 )
 
 async function loadUnitSettings() {
-  const settings = await window.salaryApi.getUnitSettings()
+  const [settings, lockState] = await Promise.all([
+    window.salaryApi.getUnitSettings(),
+    window.salaryApi.getUnitSettingsLockState()
+  ])
+  unitSettingsLock.value = lockState
   Object.assign(unitForm, settings)
-  if (!unitForm.salaryExportTargets || !unitForm.salaryExportTargets.length) {
-    unitForm.salaryExportTargets = defaultSalaryExportTargets.map((t) => ({ ...t }))
+  if (!unitForm.salaryExportSaltypes || !unitForm.salaryExportSaltypes.length) {
+    unitForm.salaryExportSaltypes = defaultSalaryExportSaltypes.map((t) => ({ ...t }))
   }
 }
 
 async function saveUnitSettings() {
+  if (unitSettingsLock.value.locked) {
+    ElMessage.warning('系统已有业务数据，不能重新填写单位信息')
+    return
+  }
   unitSaving.value = true
   try {
-    const next = await window.salaryApi.setUnitSettings({ ...unitForm })
+    const next = await window.salaryApi.setUnitSettings(buildUnitSettingsPayload())
     Object.assign(unitForm, next)
     ElMessage.success('单位设置已保存')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
   } finally {
     unitSaving.value = false
+  }
+}
+
+function buildUnitSettingsPayload(): UnitSettings {
+  return {
+    unitFullName: unitForm.unitFullName,
+    unitImportCode: unitForm.unitImportCode,
+    schoolLevel: unitForm.schoolLevel,
+    functionCode: unitForm.functionCode,
+    retiredFunctionCode: unitForm.retiredFunctionCode,
+    retiredFunctionName: unitForm.retiredFunctionName,
+    budgetActiveCode: unitForm.budgetActiveCode,
+    budgetRetiredCode: unitForm.budgetRetiredCode,
+    socialPayeeName: unitForm.socialPayeeName,
+    socialPayeeBank: unitForm.socialPayeeBank,
+    socialPayeeAccount: unitForm.socialPayeeAccount,
+    housingPayeeName: unitForm.housingPayeeName,
+    housingPayeeBank: unitForm.housingPayeeBank,
+    housingPayeeAccount: unitForm.housingPayeeAccount,
+    salaryExportSaltypes: (unitForm.salaryExportSaltypes ?? []).map((s) => ({
+      saltype_id: s.saltype_id,
+      saltype_name: s.saltype_name,
+      onlyFirstBatch: !!s.onlyFirstBatch
+    }))
+  }
+}
+
+async function applySchoolLookupByCode() {
+  if (unitSettingsLock.value.locked) {
+    ElMessage.warning('系统已有业务数据，不能重新填写单位信息')
+    return
+  }
+  const code = unitForm.unitImportCode.trim()
+  if (!code) return
+  schoolLookupLoading.value = true
+  try {
+    const matched = await window.salaryApi.resolveSchoolUnitSettings(code)
+    if (!matched) {
+      ElMessage.warning('学校对照表中未找到该预算单位编码')
+      return
+    }
+    Object.assign(unitForm, matched)
+    ElMessage.success(`已填入 ${matched.unitFullName ?? ''} 的单位信息`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '匹配学校对照表失败')
+  } finally {
+    schoolLookupLoading.value = false
   }
 }
 
@@ -201,7 +265,7 @@ async function chooseImportFolder() {
 async function wipeAll() {
   try {
     await ElMessageBox.confirm(
-      '将清空业务工作表数据 + 导入批次 + 操作日志，三张对照基础表会保留。无法恢复，建议先建一份备份。确定继续吗？',
+      '将清空业务工作表数据 + 导入批次 + 操作日志，四张对照基础表会保留。无法恢复，建议先建一份备份。确定继续吗？',
       '一键清空所有数据',
       {
         type: 'error',
@@ -236,7 +300,8 @@ async function wipeAll() {
   wiping.value = true
   try {
     const summary = await window.salaryApi.wipeAllData()
-    ElMessage.success(`已清空 ${summary.tables} 张业务表，共 ${summary.rows} 行，对照基础表已保留`)
+    ElMessage.success(`已清空 ${summary.tables} 张业务表，共 ${summary.rows} 行，基础对照表已保留`)
+    unitSettingsLock.value = await window.salaryApi.getUnitSettingsLockState()
     emit('changed')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '清空失败')
@@ -280,17 +345,26 @@ function formatMoney(value: number): string {
       <el-tab-pane label="单位信息" name="unit">
         <div class="settings-section">
           <h4>单位信息</h4>
-          <p>影响月度工资报账生成的单位名称、会计科目编码等。修改后下次生成报表立即生效。</p>
-          <el-form :model="unitForm" label-width="140px" label-position="right" size="small">
+          <p v-if="unitSettingsLock.locked" class="unit-lock-tip">{{ unitLockMessage }}</p>
+          <p v-else>影响月度工资报账生成的单位名称、会计科目编码等。修改后下次生成报表立即生效。</p>
+          <el-form :model="unitForm" label-width="140px" label-position="right" size="small" :disabled="unitSettingsLock.locked">
             <el-row :gutter="12">
-              <el-col :span="24">
-                <el-form-item label="单位全称">
-                  <el-input v-model="unitForm.unitFullName" placeholder="如：沭阳县扎下中心小学" />
+              <el-col :span="12">
+                <el-form-item label="预算单位编码">
+                  <el-input
+                    v-model="unitForm.unitImportCode"
+                    placeholder="如：019052"
+                    @change="applySchoolLookupByCode"
+                  >
+                    <template #append>
+                      <el-button :loading="schoolLookupLoading" @click="applySchoolLookupByCode">匹配</el-button>
+                    </template>
+                  </el-input>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="单位代码">
-                  <el-input v-model="unitForm.unitImportCode" placeholder="如：019052" />
+                <el-form-item label="单位全称">
+                  <el-input v-model="unitForm.unitFullName" placeholder="如：沭阳县扎下中心小学" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -361,34 +435,25 @@ function formatMoney(value: number): string {
               </el-col>
             </el-row>
 
-            <h4 style="margin-top: 24px">一体化工资导出组合</h4>
+            <h4 style="margin-top: 24px">一体化工资导出 - 工资类别</h4>
             <p>
-              在"一体化对接"里点"导出工资"时，会按照下面这张表逐条导出。每条 = 一个"工资类别 + 批次"，对应内网系统里的下拉值。
+              点"导出工资"时，对每个工资类别 × 当前单位真实批次（自动从一体化拉取）的组合都尝试导出，没数据/无配置的组合自动跳过。<br />
+              提示：saltype_id 是数据库 ID，不是下拉显示的 001/002 编号 —— 实测 002事业 = 2，006事业退休 = 5。
             </p>
             <el-table
-              :data="unitForm.salaryExportTargets || []"
+              :data="unitForm.salaryExportSaltypes || []"
               border
               size="small"
               style="margin-bottom: 12px"
             >
-              <el-table-column label="工资类别 ID" width="120">
+              <el-table-column label="saltype_id" width="140">
                 <template #default="{ row }">
                   <el-input v-model="row.saltype_id" placeholder="如：2" size="small" />
                 </template>
               </el-table-column>
-              <el-table-column label="工资类别名称（用于文件名）" min-width="200">
+              <el-table-column label="工资类别名称（用于文件名）" min-width="240">
                 <template #default="{ row }">
                   <el-input v-model="row.saltype_name" placeholder="如：002事业" size="small" />
-                </template>
-              </el-table-column>
-              <el-table-column label="批次 ID" width="120">
-                <template #default="{ row }">
-                  <el-input v-model="row.salbatch_id" placeholder="如：1" size="small" />
-                </template>
-              </el-table-column>
-              <el-table-column label="批次名称（用于文件名）" min-width="180">
-                <template #default="{ row }">
-                  <el-input v-model="row.salbatch_name" placeholder="如：批次001" size="small" />
                 </template>
               </el-table-column>
               <el-table-column label="操作" width="90" fixed="right">
@@ -397,22 +462,27 @@ function formatMoney(value: number): string {
                     type="danger"
                     size="small"
                     text
-                    @click="removeSalaryExportTarget($index)"
+                    @click="removeSalaryExportSaltype($index)"
                     >删除</el-button
                   >
                 </template>
               </el-table-column>
             </el-table>
             <div style="margin-bottom: 16px">
-              <el-button size="small" @click="addSalaryExportTarget">+ 新增一行</el-button>
-              <el-button size="small" @click="resetSalaryExportTargets">恢复默认</el-button>
+              <el-button size="small" @click="addSalaryExportSaltype">+ 新增一行</el-button>
+              <el-button size="small" @click="resetSalaryExportSaltypes">恢复默认</el-button>
               <span style="margin-left: 12px; color: var(--text-3); font-size: 12px">
-                提示：ID 是数字字符串，名称会出现在导出 xls 的文件名里。
+                批次列表运行时自动发现，不用配置。
               </span>
             </div>
 
             <div>
-              <el-button type="primary" :loading="unitSaving" @click="saveUnitSettings">保存单位信息</el-button>
+              <el-button
+                type="primary"
+                :loading="unitSaving"
+                :disabled="unitSettingsLock.locked"
+                @click="saveUnitSettings"
+              >保存单位信息</el-button>
             </div>
           </el-form>
         </div>
@@ -503,11 +573,12 @@ function formatMoney(value: number): string {
       <el-tab-pane label="基础对照表" name="lookups">
         <div class="settings-section">
           <h4>基础对照表</h4>
-          <p>岗位、薪级、乡镇工作年限对照属于基础数据，一键清空时会自动保留。</p>
+          <p>岗位、薪级、乡镇工作年限、学校对照属于基础数据，一键清空时会自动保留。</p>
           <div class="lookup-actions">
             <el-button @click="openLookupWorksheet('岗位工资对照')">岗位工资对照</el-button>
             <el-button @click="openLookupWorksheet('薪级工资对照')">薪级工资对照</el-button>
             <el-button @click="openLookupWorksheet('乡镇工作年限对照')">乡镇工作年限对照</el-button>
+            <el-button @click="openLookupWorksheet('学校对照表')">学校对照表</el-button>
           </div>
         </div>
       </el-tab-pane>
@@ -515,7 +586,7 @@ function formatMoney(value: number): string {
       <el-tab-pane label="危险操作" name="danger">
         <div class="settings-section danger-section">
           <h4>危险操作</h4>
-          <p>清空后不可恢复，先建一份备份再操作。三张基础对照表会保留。</p>
+          <p>清空后不可恢复，先建一份备份再操作。四张基础对照表会保留。</p>
           <div>
             <el-button type="danger" :loading="wiping" @click="wipeAll">一键清空所有数据</el-button>
           </div>
@@ -550,6 +621,10 @@ function formatMoney(value: number): string {
   color: var(--text-3);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.settings-section .unit-lock-tip {
+  color: var(--danger);
 }
 
 .lookup-actions {

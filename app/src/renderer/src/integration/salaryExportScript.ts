@@ -1,48 +1,47 @@
-export type SalaryExportTargetInput = {
+export type SalaryExportSaltypeInput = {
   saltype_id: string
   saltype_name: string
-  salbatch_id: string
-  salbatch_name: string
+  onlyFirstBatch?: boolean
 }
 
 type SalaryExportScriptOptions = {
-  /**
-   * 工资信息维护页的 menuid，固定值（来自抓包）。
-   */
+  /** 工资模块固定 menuid（来自抓包） */
   menuid?: string
-  /**
-   * 默认月份。若注入时调用方未传，则用页面下拉框的当前值，再 fallback 到当月。
-   */
+  /** 月份；为空则用当前月 */
   month?: string
-  /**
-   * 要遍历的"类别+批次"组合。必填（一般从 UnitSettings 取）。
-   */
-  targets: SalaryExportTargetInput[]
+  /** 要遍历的工资类别列表；单位 + 批次都在脚本运行时自动发现 */
+  saltypes: SalaryExportSaltypeInput[]
+  /** 单位过滤名：只导出 agency_name 包含这个字符串的单位；为空则全导 */
+  filterUnitName?: string
 }
 
 /**
- * 构造一段可在内网工资系统 webview.executeJavaScript 注入运行的脚本。
+ * 工资导出注入脚本（v5：三维自动发现 agency × saltype × batch）
  *
- * 脚本不再要求用户停在工资业务页 —— 只要 cookie 里有 belongOrgId（已登录）就能跑：
- *  1. 解析 cookie 拿 agency_id + 单位名
- *  2. 遍历调用方传入的 targets 列表，每个 (saltype_id, salbatch_id) 组合执行：
- *     loadSalaryCollection → expExcelPost → blob.arrayBuffer → base64
- *  3. 把每个非空文件收集成数组返回：
- *     { ok: true, files: [{filename, base64, size, saltype, salbatch}], skipped, failed }
+ * 服务端真实数据模型（来自完整录制分析）：
+ *   - 一个登录账号可以管理多个 agency（单位）—— 经 getAllAgencyHN 返回
+ *   - 一个 agency 有一组 batch（批次）—— 经 getBatchAgency 返回，body 必须带 agency_id
+ *   - saltype（工资类别）正交 batch
+ *
+ * 注意：cookie 里的 belongOrgId 在某些账号下是 "0"（聚合账号），完全不可信，所以这里不再依赖 cookie。
+ *
+ * 返回：{ ok, files: [{filename, base64, size, agency, saltype, salbatch}], skipped, failed }
  */
 export function buildSalaryExportScript(options: SalaryExportScriptOptions): string {
   const menuid = options.menuid ?? '1fb8071c09c44932a99439096316db28'
   const month = options.month ?? ''
-  const targets = options.targets
+  const saltypes = options.saltypes
+  const filterUnitName = options.filterUnitName ?? ''
 
   return `
 ;(async function runSalaryExport() {
   const MENUID = ${JSON.stringify(menuid)}
   const FORCE_MONTH = ${JSON.stringify(month)}
-  const TARGETS = ${JSON.stringify(targets)}
+  const SALTYPES = ${JSON.stringify(saltypes)}
+  const FILTER_UNIT_NAME = ${JSON.stringify(filterUnitName)}
 
   const EMPTY_XLS_THRESHOLD = 4096
-  const STEP_DELAY = 400
+  const STEP_DELAY = 350
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
 
@@ -52,7 +51,7 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     el = document.createElement('div')
     el.id = 'salary-export-status'
     el.style.cssText = [
-      'position:fixed','top:130px','right:24px','min-width:320px','max-width:560px',
+      'position:fixed','top:130px','right:24px','min-width:360px','max-width:620px',
       'padding:14px 18px','background:rgba(33,33,33,0.92)','color:#fff',
       'border-radius:8px','font-size:13px','line-height:1.65',
       'box-shadow:0 6px 20px rgba(0,0,0,0.35)','z-index:2147483647','white-space:pre-wrap'
@@ -70,33 +69,6 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     console.log('[salary-export]', text)
   }
 
-  function parseUserInfo() {
-    try {
-      const m = document.cookie.match(/(?:^|;\\s*)userInfo=([^;]+)/i) ||
-                document.cookie.match(/(?:^|;\\s*)userinfo=([^;]+)/i)
-      if (!m) return null
-      return JSON.parse(decodeURIComponent(m[1]))
-    } catch (error) { return null }
-  }
-  function readComboValue(id) {
-    try {
-      if (window.jQuery) {
-        const \$el = window.jQuery('#' + id)
-        if (\$el.length && \$el.combobox) {
-          try {
-            const v = \$el.combobox('getValue')
-            if (v !== undefined && v !== null && v !== '') return String(v)
-          } catch (error) {}
-        }
-        const v2 = \$el.val()
-        if (v2) return String(v2)
-      }
-      const dom = document.getElementById(id)
-      if (dom && dom.value) return String(dom.value)
-    } catch (error) {}
-    return ''
-  }
-
   function bytesToBase64(bytes) {
     let binary = ''
     const chunk = 0x8000
@@ -106,7 +78,93 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     return btoa(binary)
   }
 
-  async function loadItemIds(ctx, saltype_id, salbatch_id) {
+  // -------------------------------------------------------------------------
+  // 静默预热：没进过工资模块时服务端不会绑菜单上下文，先 GET 一下工资页 HTML 让它挂上
+  // -------------------------------------------------------------------------
+  async function preheatSalaryContext() {
+    try {
+      await fetch(
+        '/salary-pro-web/grp/salaryNanJ/html/message/salary/salSalaryMain.html?menuid=' +
+          MENUID + '&moduleid=' + MENUID + '&myMenuid=2020120628491',
+        { credentials: 'include' }
+      )
+    } catch (e) {}
+    try {
+      await fetch(
+        '/sal-salary-pro-server/grpSalaryController/getCurrenetSession?menuid=' + MENUID,
+        { credentials: 'include' }
+      )
+    } catch (e) {}
+  }
+
+  // -------------------------------------------------------------------------
+  // 1) 发现"我能管的所有单位"
+  // -------------------------------------------------------------------------
+  async function fetchAgencies() {
+    const res = await fetch(
+      '/sal-query-pro-server/salaryQueryController/getAllAgencyHN?ele_code=Agency&judge=1&menuid=' + MENUID,
+      { credentials: 'include' }
+    )
+    if (!res.ok) return { ok: false, http: res.status, list: [] }
+    const j = await res.json()
+    const raw = (j && j.data) || []
+    const list = raw.map(function (a) {
+      return {
+        agency_id: String(a.id || a.ID || ''),
+        agency_code: String(a.CODE || a.code || ''),
+        agency_name: String(a.NAME || a.name || a.CODENAME || '')
+      }
+    }).filter(function (a) { return !!a.agency_id })
+    return { ok: true, list: list }
+  }
+
+  async function discoverAgencies() {
+    let r = await fetchAgencies()
+    if (!r.ok) return { ok: false, reason: 'getAllAgencyHN HTTP ' + r.http }
+    if (!r.list.length) {
+      status('🔧 单位列表为空，尝试预热菜单上下文...')
+      await preheatSalaryContext()
+      await sleep(400)
+      r = await fetchAgencies()
+      if (!r.ok) return { ok: false, reason: 'getAllAgencyHN HTTP ' + r.http + '（预热后仍失败）' }
+    }
+    return { ok: true, agencies: r.list }
+  }
+
+  // -------------------------------------------------------------------------
+  // 2) 对每个 agency 发现批次
+  // -------------------------------------------------------------------------
+  async function discoverBatches(agency_id) {
+    const res = await fetch(
+      '/sal-config-pro-server/salaryBatchController/getBatchAgency?menuid=' + MENUID,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json;charset=UTF-8' },
+        body: JSON.stringify({ agency_id: agency_id })
+      }
+    )
+    if (!res.ok) return { ok: false, http: res.status, batches: [] }
+    const j = await res.json()
+    const raw = (j && j.data) || []
+    const seen = new Set()
+    const batches = []
+    for (let i = 0; i < raw.length; i++) {
+      const id = String(raw[i].salbatch_id)
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      batches.push({
+        salbatch_id: id,
+        salbatch_name: '批次' + String(batches.length + 1).padStart(3, '0')
+      })
+    }
+    return { ok: true, batches: batches }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3) 拉列定义
+  // -------------------------------------------------------------------------
+  async function loadItemIds(agency_id, saltype_id, salbatch_id) {
     const res = await fetch(
       '/sal-config-pro-server/salSalaryItem/loadSalaryCollection?menuid=' + MENUID,
       {
@@ -114,9 +172,9 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
         credentials: 'include',
         headers: { 'content-type': 'application/json;charset=UTF-8' },
         body: JSON.stringify({
+          agency_id: agency_id,
           saltype_id: saltype_id,
-          salbatch_id: salbatch_id,
-          agency_id: ctx.AGENCY_ID
+          salbatch_id: salbatch_id
         })
       }
     )
@@ -125,20 +183,25 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     if (!col.data || !col.data.itemColList || !col.data.itemColList.length) {
       return { ok: false, empty: true }
     }
-    return { ok: true, item_ids: col.data.itemColList.map(function (c) { return String(c.item_id) }) }
+    return {
+      ok: true,
+      item_ids: col.data.itemColList.map(function (c) { return String(c.item_id) })
+    }
   }
 
-  async function exportOneTarget(ctx, target) {
-    let col = await loadItemIds(ctx, target.saltype_id, target.salbatch_id)
+  // -------------------------------------------------------------------------
+  // 4) 单组合导出
+  // -------------------------------------------------------------------------
+  async function exportOneCombo(month, agency, saltype, batch, firstBatchId) {
+    let col = await loadItemIds(agency.agency_id, saltype.saltype_id, batch.salbatch_id)
     if (!col.ok && col.http) {
       return { ok: false, skipped: true, reason: 'loadSalaryCollection HTTP ' + col.http }
     }
-    if (!col.ok && col.empty && target.salbatch_id !== '1') {
-      console.log('[salary-export] 列定义为空，回退到批次 1：', target.saltype_name, target.salbatch_name)
-      col = await loadItemIds(ctx, target.saltype_id, '1')
+    if (!col.ok && col.empty && batch.salbatch_id !== firstBatchId) {
+      // 列定义复用首批次
+      col = await loadItemIds(agency.agency_id, saltype.saltype_id, firstBatchId)
     }
-    if (!col.ok) return { ok: false, skipped: true, reason: '无工资项配置（已尝试回退批次1）' }
-    const item_ids = col.item_ids
+    if (!col.ok) return { ok: false, skipped: true, reason: '无工资项配置' }
 
     const expRes = await fetch('/sal-salary-pro-server/SalExcelController/expExcelPost', {
       method: 'POST',
@@ -146,73 +209,156 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
       headers: { 'content-type': 'application/json; charset=UTF-8' },
       body: JSON.stringify({
         impType: 2,
-        agencyid: ctx.AGENCY_ID,
+        agencyid: agency.agency_id,
         need_total: false,
-        month: ctx.MONTH,
-        saltypeid: target.saltype_id,
-        salbatch_id: target.salbatch_id,
+        month: month,
+        saltypeid: saltype.saltype_id,
+        salbatch_id: batch.salbatch_id,
         salDeptId: '0',
         isExpData: true,
-        item_ids: item_ids,
+        item_ids: col.item_ids,
         name: '', ic_id: '', card_no4: '',
         sfgz1: '', sfgz2: '', yfgz1: '', yfgz2: ''
       })
     })
-    if (!expRes.ok) return { ok: false, skipped: false, reason: 'expExcelPost HTTP ' + expRes.status }
+    if (!expRes.ok) {
+      // 5xx 一般表示"该 (单位×类别×批次) 在服务端没数据"，视为静默跳过；
+      // 4xx 才算真错（401/403 是权限问题，404 是接口变了），需要给用户看到
+      const skipped = expRes.status >= 500
+      return { ok: false, skipped: skipped, reason: 'expExcelPost HTTP ' + expRes.status }
+    }
     const blob = await expRes.blob()
     if (blob.size < EMPTY_XLS_THRESHOLD) {
       return { ok: false, skipped: true, reason: '该组合没有数据（' + blob.size + ' 字节）' }
     }
     const ab = await blob.arrayBuffer()
     const base64 = bytesToBase64(new Uint8Array(ab))
-    const safeUnit = (ctx.UNIT_NAME || ctx.AGENCY_ID.slice(0, 8)).replace(/[\\\\/:*?"<>|]/g, '_')
-    const safeType = target.saltype_name.replace(/[\\\\/:*?"<>|]/g, '_')
-    const safeBatch = target.salbatch_name.replace(/[\\\\/:*?"<>|]/g, '_')
+
+    function safe(s) { return String(s || '').replace(/[\\\\/:*?"<>|]/g, '_') }
     const filename =
-      '工资-' + safeUnit + '-' + ctx.MONTH + '月-' + safeType + '-' + safeBatch + '.xls'
-    return { ok: true, filename: filename, base64: base64, size: blob.size }
+      '工资-' + safe(agency.agency_code) + safe(agency.agency_name) +
+      '-' + month + '月-' + safe(saltype.saltype_name) +
+      '-' + safe(batch.salbatch_name) + '.xls'
+
+    return {
+      ok: true,
+      filename: filename,
+      base64: base64,
+      size: blob.size
+    }
   }
 
+  // -------------------------------------------------------------------------
+  // 主流程
+  // -------------------------------------------------------------------------
   try {
-    if (!Array.isArray(TARGETS) || !TARGETS.length) {
-      throw new Error('未配置任何"类别+批次"组合，请在"系统设置 → 单位信息"里维护')
+    if (!Array.isArray(SALTYPES) || !SALTYPES.length) {
+      throw new Error('未配置任何工资类别，请在"系统设置 → 单位信息 → 一体化工资导出"里维护')
     }
 
-    status('🔍 读取登录信息...')
-    const ui = parseUserInfo()
-    if (!ui || !ui.belongOrgId) throw new Error('未能从 cookie 读到 belongOrgId（请先登录一体化系统）')
-    const ctx = {
-      AGENCY_ID: ui.belongOrgId,
-      UNIT_NAME: ui.mof_div_name || ui.admDivName || '',
-      MONTH: FORCE_MONTH || readComboValue('month') || String(new Date().getMonth() + 1)
+    const MONTH = FORCE_MONTH || String(new Date().getMonth() + 1)
+
+    status('🔍 发现单位列表...')
+    const agDisc = await discoverAgencies()
+    if (!agDisc.ok) throw new Error('发现单位失败：' + agDisc.reason)
+    if (!agDisc.agencies.length) throw new Error('当前账号没有可访问的单位（getAllAgencyHN 返回空）')
+
+    // 单位过滤：按 unitFullName 匹配（前后双向 includes，更宽容）
+    let agencies = agDisc.agencies
+    if (FILTER_UNIT_NAME) {
+      const filtered = agencies.filter(function (a) {
+        return (
+          (a.agency_name || '').indexOf(FILTER_UNIT_NAME) >= 0 ||
+          FILTER_UNIT_NAME.indexOf(a.agency_name || '') >= 0
+        )
+      })
+      if (!filtered.length) {
+        throw new Error(
+          '按"' + FILTER_UNIT_NAME + '"过滤后没有匹配单位。\\n可用单位：' +
+            agencies.map(function (a) { return a.agency_code + ' ' + a.agency_name }).join('、')
+        )
+      }
+      agencies = filtered
     }
-    status('📦 共 ' + TARGETS.length + ' 个组合待导出\\n单位 ' +
-           (ctx.UNIT_NAME || ctx.AGENCY_ID.slice(0, 8)) + ' / ' + ctx.MONTH + '月')
-    await sleep(600)
+
+    const agencyBatches = []
+    for (let i = 0; i < agencies.length; i++) {
+      const a = agencies[i]
+      const bd = await discoverBatches(a.agency_id)
+      if (!bd.ok) {
+        agencyBatches.push({ agency: a, batches: [], reason: 'getBatchAgency HTTP ' + bd.http })
+      } else {
+        agencyBatches.push({ agency: a, batches: bd.batches })
+      }
+    }
+
+    // 算总组合数：考虑每个 saltype 的 onlyFirstBatch
+    let totalCombos = 0
+    for (let ai = 0; ai < agencyBatches.length; ai++) {
+      const batchCount = agencyBatches[ai].batches.length
+      for (let si = 0; si < SALTYPES.length; si++) {
+        const limit = SALTYPES[si].onlyFirstBatch ? Math.min(1, batchCount) : batchCount
+        totalCombos += limit
+      }
+    }
+    status(
+      '📦 ' + agencies.length + ' 单位 × ' + SALTYPES.length + ' 类别 = ' + totalCombos + ' 个组合\\n月份：' + MONTH
+    )
+    await sleep(700)
 
     const files = []
     const skipped = []
     const failed = []
-    for (let i = 0; i < TARGETS.length; i++) {
-      const t = TARGETS[i]
-      status('⏳ 进度 ' + (i + 1) + '/' + TARGETS.length + '\\n→ ' + t.saltype_name + ' / ' + t.salbatch_name)
-      let r
-      try {
-        r = await exportOneTarget(ctx, t)
-      } catch (error) {
-        r = { ok: false, skipped: false, reason: error && error.message ? error.message : String(error) }
-      }
-      if (r.ok) {
-        files.push({
-          filename: r.filename, base64: r.base64, size: r.size,
-          saltype: t.saltype_name, salbatch: t.salbatch_name
+    let idx = 0
+
+    for (let ai = 0; ai < agencyBatches.length; ai++) {
+      const ab = agencyBatches[ai]
+      const ag = ab.agency
+      if (!ab.batches.length) {
+        failed.push({
+          agency: ag.agency_code + ' ' + ag.agency_name,
+          saltype: '-', salbatch: '-',
+          reason: ab.reason || '没有任何批次'
         })
-      } else if (r.skipped) {
-        skipped.push({ saltype: t.saltype_name, salbatch: t.salbatch_name, reason: r.reason })
-      } else {
-        failed.push({ saltype: t.saltype_name, salbatch: t.salbatch_name, reason: r.reason })
+        continue
       }
-      await sleep(STEP_DELAY)
+      const firstBatchId = ab.batches[0].salbatch_id
+
+      for (let si = 0; si < SALTYPES.length; si++) {
+        const st = SALTYPES[si]
+        const batchLimit = st.onlyFirstBatch ? Math.min(1, ab.batches.length) : ab.batches.length
+        for (let bi = 0; bi < batchLimit; bi++) {
+          const bt = ab.batches[bi]
+          idx++
+          status(
+            '⏳ 进度 ' + idx + '/' + totalCombos +
+            '\\n→ ' + ag.agency_code + ' ' + ag.agency_name +
+            ' / ' + st.saltype_name + ' / ' + bt.salbatch_name
+          )
+          let r
+          try {
+            r = await exportOneCombo(MONTH, ag, st, bt, firstBatchId)
+          } catch (error) {
+            r = { ok: false, skipped: false, reason: error && error.message ? error.message : String(error) }
+          }
+          const tag = {
+            agency: ag.agency_code + ' ' + ag.agency_name,
+            saltype: st.saltype_name,
+            salbatch: bt.salbatch_name
+          }
+          if (r.ok) {
+            files.push({
+              filename: r.filename, base64: r.base64, size: r.size,
+              agency: tag.agency, saltype: tag.saltype, salbatch: tag.salbatch
+            })
+          } else if (r.skipped) {
+            skipped.push(Object.assign(tag, { reason: r.reason }))
+          } else {
+            failed.push(Object.assign(tag, { reason: r.reason }))
+          }
+          await sleep(STEP_DELAY)
+        }
+      }
     }
 
     status('💾 ' + files.length + ' 个文件待入库...')
@@ -227,13 +373,9 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
 }
 
 /**
- * 宿主收到结果后调用 saveSalaryExportXls 入库；
- * 入库结果可以注入这段脚本回写浮窗状态。
+ * 落盘结果反馈：宿主收到 ok/失败后注入这段更新浮窗
  */
-export function buildSalaryExportFeedbackScript(
-  ok: boolean,
-  text: string
-): string {
+export function buildSalaryExportFeedbackScript(ok: boolean, text: string): string {
   const safeText = JSON.stringify(text)
   const okLit = ok ? 'true' : 'false'
   return `

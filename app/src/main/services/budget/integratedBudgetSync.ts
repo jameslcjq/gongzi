@@ -13,13 +13,6 @@ import type { RuleResult, WorksheetMeta } from '../../../shared/types'
 type Row = Record<string, string | number | null>
 type Value = string | number | null
 
-type FlowConfig = {
-  name: string
-  sourceName: string
-  targetName: string
-  buildRow: (args: BuildArgs) => Row
-}
-
 type BuildArgs = {
   sourceRow: Row
   index: number
@@ -57,18 +50,6 @@ type LookupFailureDraft = {
 
 const budgetWorkflowName = '更新预算'
 
-export async function syncBudgetActiveFromIntegrated(): Promise<RuleResult> {
-  return runOneBudgetFlow(activeFlow)
-}
-
-export async function syncBudgetRetiredFromIntegrated(): Promise<RuleResult> {
-  return runOneBudgetFlow(retiredFlow)
-}
-
-export async function syncBudgetOtherFromIntegrated(): Promise<RuleResult> {
-  return runOneBudgetFlow(otherFlow)
-}
-
 export async function syncAllBudgetFromIntegrated(): Promise<RuleResult> {
   try {
     return await runBudgetStatusSync()
@@ -93,6 +74,35 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
   const activeSourceMap = rowsByIdCard(activeSource, activeSourceRows)
   const retiredSourceMap = rowsByIdCard(retiredSource, retiredSourceRows)
   const otherSourceMap = rowsByIdCard(otherSource, otherSourceRows)
+  const activeTargetRows = await loadLatestSourceRows(activeTarget)
+  const retiredTargetRows = await loadLatestSourceRows(retiredTarget)
+  const otherTargetRows = await loadLatestSourceRows(otherTarget)
+  const activeTargetMap = rowsByIdCard(activeTarget, activeTargetRows)
+  const retiredTargetMap = rowsByIdCard(retiredTarget, retiredTargetRows)
+  const otherTargetMap = rowsByIdCard(otherTarget, otherTargetRows)
+  ensureBudgetSourceCompleteness([
+    {
+      targetName: '预算在职',
+      targetRows: activeTargetRows,
+      target: activeTarget,
+      sourceNames: '一体化在职/一体化退休',
+      existsInSource: (idCard) => activeSourceMap.has(idCard) || retiredSourceMap.has(idCard)
+    },
+    {
+      targetName: '预算退休',
+      targetRows: retiredTargetRows,
+      target: retiredTarget,
+      sourceNames: '一体化退休',
+      existsInSource: (idCard) => retiredSourceMap.has(idCard)
+    },
+    {
+      targetName: '预算其他',
+      targetRows: otherTargetRows,
+      target: otherTarget,
+      sourceNames: '一体化其他',
+      existsInSource: (idCard) => otherSourceMap.has(idCard)
+    }
+  ])
 
   const messages: string[] = []
   const warnings: string[] = []
@@ -117,8 +127,6 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
   await run(database, `DELETE FROM lookup_failures WHERE workflow = ?`, [budgetWorkflowName])
   await run(database, 'BEGIN TRANSACTION')
   try {
-    const activeTargetRows = await loadLatestSourceRows(activeTarget)
-    const activeTargetMap = rowsByIdCard(activeTarget, activeTargetRows)
     const activeTargetIdColumn = findIdCardColumn(activeTarget)
 
     for (const row of activeTargetRows) {
@@ -199,8 +207,6 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
     await clearBudgetActiveExcludedFields(activeTarget)
     await setChangeTypeAll(activeTarget, '信息调整')
 
-    const retiredTargetRows = await loadLatestSourceRows(retiredTarget)
-    const retiredTargetMap = rowsByIdCard(retiredTarget, retiredTargetRows)
     const retiredTargetIdColumn = findIdCardColumn(retiredTarget)
 
     for (const row of retiredTargetRows) {
@@ -246,8 +252,6 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
       counts.retiredAdded += 1
     }
 
-    const otherTargetRows = await loadLatestSourceRows(otherTarget)
-    const otherTargetMap = rowsByIdCard(otherTarget, otherTargetRows)
     const otherTargetIdColumn = findIdCardColumn(otherTarget)
 
     for (const row of otherTargetRows) {
@@ -343,69 +347,37 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
   return okRule(budgetWorkflowName, affectedRows, messages, warnings)
 }
 
-const activeFlow: FlowConfig = {
-  name: '生成预算在职',
-  sourceName: '一体化在职',
-  targetName: '预算在职',
-  buildRow: buildBudgetActiveRow
-}
-
-const retiredFlow: FlowConfig = {
-  name: '生成预算退休',
-  sourceName: '一体化退休',
-  targetName: '预算退休',
-  buildRow: buildBudgetRetiredRow
-}
-
-const otherFlow: FlowConfig = {
-  name: '生成预算其他',
-  sourceName: '一体化其他',
-  targetName: '预算其他',
-  buildRow: buildBudgetOtherRow
-}
-
-async function runOneBudgetFlow(flow: FlowConfig): Promise<RuleResult> {
-  try {
-    const result = await runBudgetFlow(flow)
-    return result
-  } catch (error) {
-    return failRule(flow.name, error)
-  }
-}
-
-async function runBudgetFlow(flow: FlowConfig): Promise<RuleResult> {
-  try {
-    const source = getSheetCtx(flow.sourceName)
-    const target = getSheetCtx(flow.targetName)
-    const lookups = await loadLookups()
-    const sourceRows = await loadLatestSourceRows(source)
-    if (flow.targetName === '预算退休') ensureRetiredHousingReady(sourceRows, source, lookups)
-
-    const warnings: string[] = []
-    if (sourceRows.length === 0) {
-      warnings.push(`${flow.sourceName}没有可生成的数据`)
-    }
-
-    const database = await getDatabase()
-    await run(database, 'BEGIN TRANSACTION')
-    try {
-      await clearTarget(target)
-      const rows = sourceRows.map((sourceRow, index) =>
-        flow.buildRow({ sourceRow, index, source, target, lookups })
+function ensureBudgetSourceCompleteness(
+  checks: Array<{
+    targetName: string
+    targetRows: Row[]
+    target: SheetCtx
+    sourceNames: string
+    existsInSource: (idCard: string) => boolean
+  }>
+): void {
+  const blocked: string[] = []
+  for (const check of checks) {
+    if (check.targetRows.length === 0) continue
+    const idColumn = findIdCardColumn(check.target)
+    const missing = check.targetRows
+      .map((row) => normalizeIdCard(row[idColumn]))
+      .filter((idCard) => idCard && !check.existsInSource(idCard))
+    const threshold = Math.max(10, Math.ceil(check.targetRows.length * 0.15))
+    if (missing.length > threshold) {
+      blocked.push(
+        `${check.targetName} 有 ${missing.length}/${check.targetRows.length} 人在 ${check.sourceNames} 中找不到，超过保护阈值 ${threshold} 人`
       )
-      for (const row of rows) {
-        await insertTargetRow(target, row)
-      }
-      await run(database, 'COMMIT')
-    } catch (error) {
-      await run(database, 'ROLLBACK')
-      throw error
     }
-
-    return okRule(flow.name, sourceRows.length, [`已由${flow.sourceName}重建${flow.targetName}`], warnings)
-  } catch (error) {
-    return failRule(flow.name, error)
   }
+  if (blocked.length === 0) return
+  throw new Error(
+    [
+      '更新预算已暂停：一体化来源数据疑似不完整，继续执行会批量标记调出或去世。',
+      ...blocked,
+      '请先确认一体化在职、退休、其他三张表是否已完整导入。'
+    ].join('\n')
+  )
 }
 
 function buildBudgetActiveRow(args: BuildArgs): Row {
@@ -910,12 +882,6 @@ function ensureRetiredHousingReady(rows: Row[], source: SheetCtx, lookups: Looku
       .join('、')
     throw new Error(`预算退休有 ${missing.length} 人在"新房补"中没有匹配数据，已停止生成。请先到"退休房补"模块执行"核算新房补"。示例：${sample}`)
   }
-}
-
-async function clearTarget(target: SheetCtx): Promise<void> {
-  const database = await getDatabase()
-  await run(database, `DELETE FROM ${target.table}`)
-  await run(database, `DELETE FROM import_batch_rows WHERE worksheet_name = ?`, [target.worksheet.name])
 }
 
 async function insertTargetRow(

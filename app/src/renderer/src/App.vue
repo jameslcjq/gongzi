@@ -52,7 +52,7 @@ const modules: ModuleGroup[] = [
   {
     key: 'lookups',
     label: '对照表',
-    tables: ['岗位工资对照', '薪级工资对照', '乡镇工作年限对照'],
+    tables: ['岗位工资对照', '薪级工资对照', '乡镇工作年限对照', '学校对照表'],
     hidden: true
   },
   {

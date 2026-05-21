@@ -644,6 +644,10 @@ function workflowButtonType(workflow: WorkflowDefinition) {
   if (workflow.status === 'blocked-by-source') return 'info'
   return 'default'
 }
+
+function workflowDisabled(workflow: WorkflowDefinition) {
+  return workflow.status !== 'ready'
+}
 </script>
 
 <template>
@@ -668,13 +672,13 @@ function workflowButtonType(workflow: WorkflowDefinition) {
           <el-tooltip
             v-for="workflow in moduleWorkflows"
             :key="workflow.key"
-            :content="workflow.blockedReason || workflow.name"
+            :content="workflow.blockedReason || (workflow.status === 'ready' ? workflow.name : '规则未完成，暂不允许执行')"
             placement="bottom"
           >
             <el-button
               size="default"
               :type="workflowButtonType(workflow)"
-              :disabled="workflow.status === 'blocked-by-source'"
+              :disabled="workflowDisabled(workflow)"
               :loading="workflowRunningKey === workflow.key"
               @click="emit('run-workflow', workflow.key)"
             >

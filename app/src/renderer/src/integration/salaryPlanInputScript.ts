@@ -1,4 +1,5 @@
 import salaryPlanInputScript from './salaryPlanInput.user.js?raw'
+import type { PersonnelExpensePlanPrefillResult } from '@shared/types'
 
 type SalaryPlanInputScriptOptions = {
   showPageButton?: boolean
@@ -14,9 +15,14 @@ ${salaryPlanInputScript}
 `
 }
 
-export function buildOpenSalaryPlanInputScript(): string {
+export function buildOpenSalaryPlanInputScript(
+  prefill?: PersonnelExpensePlanPrefillResult
+): string {
+  const prefillJson = JSON.stringify(prefill ?? { ok: false, rows: [] })
   return `
 ;(async function openSalaryPlanInputFromToolbar() {
+  var PREFILL = ${prefillJson};
+
   function sleep(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms) })
   }
@@ -132,7 +138,7 @@ export function buildOpenSalaryPlanInputScript(): string {
       message: '没有自动进入“一般用款计划录入”。请确认已登录，并且页面上能看到“预算执行 / 集中支付 / 一般用款计划录入”。'
     }
   }
-  return target.__salaryPlanInput.openFromToolbar()
+  return target.__salaryPlanInput.openFromToolbar(PREFILL)
 })()
 `
 }

@@ -74,10 +74,9 @@ function close() {
           v-else-if="workflow.status === 'needs-rule'"
           size="small"
           :icon="Warning"
-          :loading="runningKey === workflow.key"
-          @click="emit('run', workflow.key)"
+          disabled
         >
-          试运行
+          暂未开放
         </el-button>
         <el-button
           v-else

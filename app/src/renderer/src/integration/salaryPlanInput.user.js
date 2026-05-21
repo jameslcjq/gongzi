@@ -31,6 +31,7 @@
       key: 'allowance',
       label: '津贴补贴',
       code: '30102',
+      codes: ['30102', '30302'],
       hints: ['津贴补贴'],
       exclude: ['提租补贴', '退休提租']
     },
@@ -44,6 +45,7 @@
       key: 'rentSubsidy',
       label: '提租补贴',
       code: '30102',
+      codes: ['30102', '30302'],
       hints: ['提租补贴'],
       exclude: ['退休提租']
     },
@@ -93,6 +95,7 @@
       key: 'retiredRentSubsidy',
       label: '退休提租补贴',
       code: '30302',
+      codes: ['30302'],
       hints: ['退休提租', '退休人员提租', '退休费']
     }
   ]
@@ -127,6 +130,15 @@
     return String(value || '').replace(/\s+/g, '')
   }
 
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
   function rowText(row) {
     return normalizeText(
       [
@@ -143,7 +155,8 @@
 
   function matchesItem(row, item) {
     const text = rowText(row)
-    if (item.code && !text.includes(item.code)) return false
+    const codes = item.codes || (item.code ? [item.code] : [])
+    if (codes.length > 0 && !codes.some((code) => text.includes(code))) return false
     if (item.hints && item.hints.length > 0 && !item.hints.some((hint) => text.includes(hint))) {
       return false
     }
@@ -187,6 +200,37 @@
     const value = row && row[field]
     if (value === null || value === undefined) return ''
     return String(value)
+  }
+
+  function getCurrentAgencyText() {
+    const rows = getGridRows('grid')
+    const first = rows.find(({ row }) => getCellText(row, 'agency_code_name'))
+    return first ? getCellText(first.row, 'agency_code_name') : ''
+  }
+
+  function normalizeUnit(value) {
+    return normalizeText(value).replace(/^[0-9]{3,}\s*/, '')
+  }
+
+  function findPrefillRow(prefill) {
+    if (!prefill || !prefill.ok || !Array.isArray(prefill.rows) || prefill.rows.length === 0) {
+      return null
+    }
+    const agencyText = getCurrentAgencyText()
+    const pageText = normalizeUnit(agencyText)
+    const pageCodeMatch = agencyText.match(/[0-9]{3,}/)
+    const pageCode = pageCodeMatch ? pageCodeMatch[0] : ''
+    if (!pageText && !pageCode) return null
+
+    return (
+      prefill.rows.find((row) => {
+        const rowCode = normalizeText(row.budgetCode || '')
+        const rowUnit = normalizeUnit(row.unitName || '')
+        if (pageCode && rowCode && pageCode === rowCode) return true
+        if (pageText && rowUnit && (pageText.includes(rowUnit) || rowUnit.includes(pageText))) return true
+        return false
+      }) || null
+    )
   }
 
   function hasListGrid() {
@@ -329,6 +373,15 @@
         gap: 10px;
         margin-bottom: 12px;
       }
+      #${MODAL_ID} .spi-source {
+        margin: -2px 0 10px;
+        padding: 8px 10px;
+        background: #f7fafc;
+        border: 1px solid #d8e0e8;
+        border-radius: 4px;
+        color: #52616f;
+        font-size: 13px;
+      }
       #${MODAL_ID} input,
       #${MODAL_ID} select {
         box-sizing: border-box;
@@ -401,22 +454,36 @@
     document.head.appendChild(style)
   }
 
-  function openModal() {
+  function openModal(prefill) {
     modalStyle()
     const existing = document.getElementById(MODAL_ID)
     if (existing) existing.remove()
 
     const modal = document.createElement('div')
     modal.id = MODAL_ID
+    const prefillRow = findPrefillRow(prefill)
     const rows = ITEMS.map((item) => {
+      const amount =
+        prefillRow && prefillRow.amounts && prefillRow.amounts[item.key] !== undefined
+          ? prefillRow.amounts[item.key]
+          : 0
       return (
         '<tr>' +
         '<td>' + item.label + '</td>' +
         '<td>' + (item.code || '按名称匹配') + '</td>' +
-        '<td class="spi-money"><input data-key="' + item.key + '" inputmode="decimal" placeholder="0.00"></td>' +
+        '<td class="spi-money"><input data-key="' +
+        item.key +
+        '" inputmode="decimal" value="' +
+        amount +
+        '" placeholder="0.00"></td>' +
         '</tr>'
       )
     }).join('')
+    const sourceText = prefillRow
+      ? '已读取：' + (prefill.fileName || '人员经费核对表') + ' / ' + (prefillRow.budgetCode ? prefillRow.budgetCode + ' ' : '') + prefillRow.unitName
+      : prefill && prefill.fileName
+        ? '已找到：' + prefill.fileName + '，但未匹配到当前页面单位；金额保持 0。'
+        : '监控文件夹未找到可用人员经费核对表；金额保持 0。'
 
     modal.innerHTML =
       '<div class="spi-mask"></div>' +
@@ -430,6 +497,7 @@
       '<option value="plan_amt_auth">授权支付计划金额</option>' +
       '</select>' +
       '</div>' +
+      '<div class="spi-source">' + escapeHtml(sourceText) + '</div>' +
       '<table><thead><tr><th>经费项目</th><th>匹配科目</th><th>录入金额</th></tr></thead><tbody>' +
       rows +
       '</tbody></table>' +
@@ -728,6 +796,7 @@
     remaining.forEach((item) => missing.push(item.label))
 
     if (missing.length) {
+      getStore().removeItem(DRAFT_KEY)
       status('已填写 ' + filled.length + ' 项，但这些项目没有匹配到批量录入行：\n' + missing.join('、'), 'warn')
       alert('有项目没有匹配到批量录入行，请检查后手动补录：\n\n' + missing.join('\n'))
       return
@@ -735,10 +804,10 @@
 
     const total = filled.reduce((sum, item) => sum + Number(item.amount || 0), 0)
     status('批量录入页已填写 ' + filled.length + ' 项，合计 ' + formatAmount(total) + '。\n请核对页面金额和摘要。', 'ok')
+    getStore().removeItem(DRAFT_KEY)
 
     if (confirm('已自动填写批量录入页。\n\n合计：' + formatAmount(total) + '\n摘要：' + (draft.summary || DEFAULT_SUMMARY) + '\n\n确认无误后，是否现在“保存并送审”？')) {
       try {
-        getStore().removeItem(DRAFT_KEY)
         if (typeof window.inputInfoBatchSave === 'function') {
           window.inputInfoBatchSave('send')
           return
@@ -762,11 +831,11 @@
     }
   }
 
-  function openFromToolbar() {
+  function openFromToolbar(prefill) {
     if (!hasListGrid()) {
       return { ok: false, message: '当前页面不是一般用款计划录入列表页' }
     }
-    openModal()
+    openModal(prefill)
     return { ok: true, message: 'opened' }
   }
 
