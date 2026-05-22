@@ -15,8 +15,7 @@ import {
   chooseImportWatcherFolder,
   getImportWatcherStatus,
   openImportWatcherFolder,
-  startExcelImportWatcher,
-  stopExcelImportWatcher
+  startExcelImportWatcher
 } from '../services/excelImportWatcher'
 import {
   deletePivotConfig,
@@ -29,7 +28,6 @@ import {
 } from '../services/pivot'
 import { exportPivotToExcel } from '../services/pivotExport'
 import {
-  clearLookupFailures,
   listLookupFailures,
   type LookupFailureQuery
 } from '../services/budget/archiveQueries'
@@ -53,6 +51,11 @@ import {
   generatePersonalTaxImportWorkbook,
   previewAnnualAdjustment
 } from '../services/annualAdjustment'
+import {
+  generatePerformancePayroll,
+  generatePerformancePayrollFromHistory,
+  generatePerformancePayrollFromLocal
+} from '../services/performancePayroll'
 import { getUnitSettingsLockState, readUnitSettings, writeUnitSettings } from '../services/unitSettings'
 import { resolveSchoolUnitSettings } from '../services/schoolLookup'
 import {
@@ -147,6 +150,10 @@ import type {
   AnnualAdjustmentFilePick,
   AnnualAdjustmentPreview,
   AnnualAdjustmentPreviewInput,
+  PerformancePayrollGenerateInput,
+  PerformancePayrollGenerateResult,
+  PerformancePayrollHistoryGenerateInput,
+  PerformancePayrollLocalGenerateInput,
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
   PersonnelExpensePlanPrefillResult,
@@ -198,14 +205,6 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('import-watcher:get-status', (): Promise<ImportWatcherStatus> => {
     return getImportWatcherStatus()
-  })
-
-  ipcMain.handle('import-watcher:start', (): Promise<ImportWatcherStatus> => {
-    return startExcelImportWatcher()
-  })
-
-  ipcMain.handle('import-watcher:stop', (): Promise<ImportWatcherStatus> => {
-    return stopExcelImportWatcher()
   })
 
   ipcMain.handle('import-watcher:choose-folder', (): Promise<ImportWatcherStatus> => {
@@ -263,84 +262,6 @@ export function registerAppIpc(): void {
   ipcMain.handle('integration:open-external', async (_event, url: string): Promise<void> => {
     await shell.openExternal(url)
   })
-
-  ipcMain.handle(
-    'integration:get-portal-userinfo',
-    async (
-      _event,
-      payload: { webContentsId: number }
-    ): Promise<
-      | { ok: true; belongOrgId: string; unitName: string; raw: Record<string, unknown> }
-      | { ok: false; reason: string }
-    > => {
-      try {
-        const { webContents } = await import('electron')
-        const wc = webContents.fromId(payload.webContentsId)
-        if (!wc) return { ok: false, reason: '找不到 webContents' }
-        const session = wc.session
-        // 不限定 url，扫整个 session 的全部 cookie，再按名字 / 值内容找 belongOrgId
-        const cookies = await session.cookies.get({})
-        const tryParse = (val: string): Record<string, unknown> | null => {
-          try {
-            return JSON.parse(decodeURIComponent(val)) as Record<string, unknown>
-          } catch {
-            try {
-              return JSON.parse(val) as Record<string, unknown>
-            } catch {
-              return null
-            }
-          }
-        }
-        // 1) 名字命中 userInfo / userinfo
-        let parsed: Record<string, unknown> | null = null
-        for (const c of cookies) {
-          if (/^userinfo$/i.test(c.name) && c.value) {
-            const p = tryParse(c.value)
-            if (p && (p.belongOrgId || p.org_id)) {
-              parsed = p
-              break
-            }
-          }
-        }
-        // 2) 名字没中：扫所有 cookie 值里含 "belongOrgId" 的 JSON
-        if (!parsed) {
-          for (const c of cookies) {
-            if (!c.value || !/belongOrgId|belong_org_id/i.test(c.value)) continue
-            const p = tryParse(c.value)
-            if (p && (p.belongOrgId || p.org_id)) {
-              parsed = p
-              break
-            }
-          }
-        }
-
-        if (!parsed) {
-          const allNames = cookies.map((c) => `${c.domain || '-'}/${c.path || '/'}/${c.name}`)
-          return {
-            ok: false,
-            reason:
-              '未找到 belongOrgId（共 ' +
-              cookies.length +
-              ' 条 cookie）。请确认已登录一体化系统。前 20 个 cookie 名：\n' +
-              allNames.slice(0, 20).join('\n')
-          }
-        }
-        const belongOrgId = String(parsed.belongOrgId || parsed.org_id || '')
-        if (!belongOrgId) {
-          return { ok: false, reason: '找到 cookie 但 belongOrgId 字段为空' }
-        }
-        const unitName = String(
-          parsed.mof_div_name || parsed.admDivName || parsed.userName || ''
-        )
-        return { ok: true, belongOrgId, unitName, raw: parsed }
-      } catch (error) {
-        return {
-          ok: false,
-          reason: error instanceof Error ? error.message : String(error)
-        }
-      }
-    }
-  )
 
   ipcMain.handle(
     'integration:drain-all-frames',
@@ -401,6 +322,46 @@ export function registerAppIpc(): void {
   )
 
   ipcMain.handle(
+    'integration:get-portal-token',
+    async (
+      _event,
+      payload: { webContentsId: number }
+    ): Promise<{ ok: true; token: string; source: string } | { ok: false; reason: string }> => {
+      try {
+        const { webContents } = await import('electron')
+        const wc = webContents.fromId(payload.webContentsId)
+        if (!wc) return { ok: false, reason: '找不到 webContents' }
+        const urls: string[] = []
+        try {
+          urls.push(wc.getURL())
+          for (const f of wc.mainFrame.framesInSubtree) {
+            if (f.url) urls.push(f.url)
+          }
+        } catch {}
+        // 严格只接受带 HWACCESSTOKEN- 前缀的 token（BIM 模块用的，跟 uportal 普通 token 不同）
+        for (const u of urls) {
+          const m = /[?&]tokenid=(HWACCESSTOKEN[^&#]+)/i.exec(u)
+          if (m && m[1]) return { ok: true, token: decodeURIComponent(m[1]), source: 'url' }
+        }
+        // cookie 兜底（捕获嵌在 cookie 值里的 HWACCESSTOKEN-xxx 串）
+        const cookies = await wc.session.cookies.get({})
+        for (const c of cookies) {
+          if (!c.value) continue
+          const m = /HWACCESSTOKEN-[A-Za-z0-9]+/.exec(c.value)
+          if (m) return { ok: true, token: m[0], source: 'cookie' }
+        }
+        return {
+          ok: false,
+          reason:
+            'HWACCESSTOKEN 还未生成（预算模块未激活）。请在一体化系统里手动点开一次"预算编制 → 人员信息查看"页面（让系统完成授权 + 颁 token），然后再点"预算导出"。\n后续同一登录会话内 token 会保留，不用重复手动进。'
+        }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
     'integration:exec-in-all-frames',
     async (
       _event,
@@ -429,6 +390,55 @@ export function registerAppIpc(): void {
           ok: false,
           reason: error instanceof Error ? error.message : String(error)
         }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'voucher-push:read-xlsx',
+    async (
+      _event,
+      payload: { filePath: string }
+    ): Promise<
+      | { ok: true; base64: string; fileName: string; size: number }
+      | { ok: false; reason: string }
+    > => {
+      try {
+        const { readFileSync } = await import('node:fs')
+        const { basename } = await import('node:path')
+        const buf = readFileSync(payload.filePath)
+        return {
+          ok: true,
+          base64: buf.toString('base64'),
+          fileName: basename(payload.filePath),
+          size: buf.length
+        }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'insurance-push:parse-xlsx',
+    async (
+      _event,
+      payload: { filePath: string }
+    ): Promise<
+      | {
+          ok: true
+          records: Array<Record<string, string>>
+        }
+      | { ok: false; reason: string }
+    > => {
+      try {
+        const { parseInsuranceImportXlsx } = await import(
+          '../services/insurance-push/parseInsuranceImportXlsx'
+        )
+        const records = parseInsuranceImportXlsx(payload.filePath)
+        return { ok: true, records }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
       }
     }
   )
@@ -610,6 +620,24 @@ export function registerAppIpc(): void {
     'social-insurance:export-base',
     (_event, input: SocialInsuranceBaseExportInput): Promise<SocialInsuranceBaseExportResult> =>
       exportSocialInsuranceBaseWorkbook(input)
+  )
+
+  ipcMain.handle(
+    'performance-payroll:generate',
+    (_event, input: PerformancePayrollGenerateInput): PerformancePayrollGenerateResult =>
+      generatePerformancePayroll(input)
+  )
+
+  ipcMain.handle(
+    'performance-payroll:generate-from-history',
+    (_event, input: PerformancePayrollHistoryGenerateInput): Promise<PerformancePayrollGenerateResult> =>
+      generatePerformancePayrollFromHistory(input)
+  )
+
+  ipcMain.handle(
+    'performance-payroll:generate-from-local',
+    (_event, input: PerformancePayrollLocalGenerateInput): Promise<PerformancePayrollGenerateResult> =>
+      generatePerformancePayrollFromLocal(input)
   )
 
   ipcMain.handle('unit-settings:get', (): Promise<UnitSettings> => readUnitSettings())
@@ -870,11 +898,6 @@ export function registerAppIpc(): void {
       total: number
       rows: LookupFailureEntry[]
     }> => listLookupFailures(query)
-  )
-
-  ipcMain.handle(
-    'archive:clear-lookup-failures',
-    (_event, workflow?: string): Promise<number> => clearLookupFailures(workflow)
   )
 
   ipcMain.handle('stat-report:list', (): StatReportDef[] => STAT_REPORT_DEFS)

@@ -1011,7 +1011,8 @@
         "name": "序号",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "序号"
       },
       {
         "fieldId": "budget_active_v2_002",
@@ -1382,7 +1383,8 @@
           "210001",
           "211",
           "211001"
-        ]
+        ],
+        "importSource": "单位代码*"
       },
       {
         "fieldId": "budget_active_v2_003",
@@ -1752,7 +1754,8 @@
           "债务科（PPP中心）控制预算",
           "国有资产监督管理科",
           "国有资产监督管理科控制预算"
-        ]
+        ],
+        "importSource": "单位名称*"
       },
       {
         "fieldId": "budget_active_v2_004",
@@ -1764,21 +1767,24 @@
           "信息增加",
           "信息删除",
           "信息调整"
-        ]
+        ],
+        "importSource": "变动类型*"
       },
       {
         "fieldId": "budget_active_v2_005",
         "name": "人员序号*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员序号*"
       },
       {
         "fieldId": "budget_active_v2_006",
         "name": "姓名*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "姓名*"
       },
       {
         "fieldId": "budget_active_v2_007",
@@ -1796,14 +1802,16 @@
           "护照",
           "港澳身份证",
           "其他证件"
-        ]
+        ],
+        "importSource": "证件类型*"
       },
       {
         "fieldId": "budget_active_v2_008",
         "name": "证件号码*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "证件号码*"
       },
       {
         "fieldId": "budget_active_v2_009",
@@ -1814,7 +1822,8 @@
         "options": [
           "男",
           "女"
-        ]
+        ],
+        "importSource": "人员基本情况_性别*"
       },
       {
         "fieldId": "budget_active_v2_010",
@@ -1879,7 +1888,8 @@
           "门巴族",
           "珞巴族",
           "基诺族"
-        ]
+        ],
+        "importSource": "人员基本情况_民族"
       },
       {
         "fieldId": "budget_active_v2_011",
@@ -1895,14 +1905,16 @@
           "离岗创业",
           "退职",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_人员状态*"
       },
       {
         "fieldId": "budget_active_v2_013",
         "name": "进入本单位时间*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员基本情况_进入本单位时间*"
       },
       {
         "fieldId": "budget_active_v2_014",
@@ -1913,7 +1925,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "人员基本情况_是否在编"
       },
       {
         "fieldId": "budget_active_v2_015",
@@ -1937,7 +1950,8 @@
           "遗属",
           "借调人员",
           "挂职人员"
-        ]
+        ],
+        "importSource": "人员基本情况_人员身份*"
       },
       {
         "fieldId": "budget_active_v2_016",
@@ -2226,7 +2240,8 @@
           "二十七级4档",
           "二十七级5档",
           "二十七级6档"
-        ]
+        ],
+        "importSource": "人员基本情况_工资级别"
       },
       {
         "fieldId": "budget_active_v2_017",
@@ -2301,7 +2316,8 @@
           "63档",
           "64档",
           "65档"
-        ]
+        ],
+        "importSource": "人员基本情况_工资薪级"
       },
       {
         "fieldId": "budget_active_v2_018",
@@ -2318,7 +2334,8 @@
           "大中专毕业分配",
           "复退军人安置",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_在职人员来源*"
       },
       {
         "fieldId": "budget_active_v2_019",
@@ -2329,7 +2346,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "人员基本情况_是否工资统发"
       },
       {
         "fieldId": "budget_active_v2_020",
@@ -2375,28 +2393,32 @@
           "相当小学毕业",
           "小学肄业",
           "文盲或半文盲"
-        ]
+        ],
+        "importSource": "人员基本情况_学历*"
       },
       {
         "fieldId": "budget_active_v2_021",
         "name": "出生日期*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员基本情况_出生日期*"
       },
       {
         "fieldId": "budget_active_v2_022",
         "name": "参加工作时间*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员基本情况_参加工作时间*"
       },
       {
         "fieldId": "budget_active_v2_023",
         "name": "工龄（年）*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员基本情况_工龄（年）*"
       },
       {
         "fieldId": "budget_active_v2_024",
@@ -2412,7 +2434,8 @@
           "全额事业",
           "差额事业",
           "自收自支"
-        ]
+        ],
+        "importSource": "人员基本情况_在编类别*"
       },
       {
         "fieldId": "budget_active_v2_025",
@@ -2435,7 +2458,8 @@
           "科员级",
           "办事员级",
           "未定职公务员"
-        ]
+        ],
+        "importSource": "人员基本情况_职务*"
       },
       {
         "fieldId": "budget_active_v2_026",
@@ -2452,7 +2476,8 @@
           "事业技术人员工资",
           "事业普通人员工资",
           "运动员工资"
-        ]
+        ],
+        "importSource": "人员基本情况_工资类别*"
       },
       {
         "fieldId": "budget_active_v2_027",
@@ -2606,7 +2631,8 @@
           "试用/学徒期技术（普通）工人普普通级",
           "试用/学徒期地技术级",
           "试用/学徒期地普通级"
-        ]
+        ],
+        "importSource": "人员基本情况_事业人员岗位工资级别"
       },
       {
         "fieldId": "budget_active_v2_028",
@@ -2629,7 +2655,8 @@
           "十一级",
           "十二级",
           "十三级"
-        ]
+        ],
+        "importSource": "人员基本情况_岗位工资级别*"
       },
       {
         "fieldId": "budget_active_v2_029",
@@ -2657,7 +2684,8 @@
           "普通工人",
           "其他",
           "无"
-        ]
+        ],
+        "importSource": "人员基本情况_技术职称"
       },
       {
         "fieldId": "budget_active_v2_030",
@@ -2678,7 +2706,8 @@
           "初级工",
           "普通工",
           "无"
-        ]
+        ],
+        "importSource": "人员基本情况_职称类别"
       },
       {
         "fieldId": "budget_active_v2_031",
@@ -2744,7 +2773,8 @@
           "人民警察值勤岗位津贴（市级法院、检察院、司法机关）",
           "政府特殊津贴",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_国家特岗津贴1"
       },
       {
         "fieldId": "budget_active_v2_032",
@@ -2810,7 +2840,8 @@
           "人民警察值勤岗位津贴（市级法院、检察院、司法机关）",
           "政府特殊津贴",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_国家特岗津贴2"
       },
       {
         "fieldId": "budget_active_v2_033",
@@ -2826,7 +2857,8 @@
           "初级工",
           "学徒人员",
           "普通工人"
-        ]
+        ],
+        "importSource": "人员基本情况_技术等级代码"
       },
       {
         "fieldId": "budget_active_v2_034",
@@ -2837,7 +2869,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "人员基本情况_是否特殊岗位*"
       },
       {
         "fieldId": "budget_active_v2_035",
@@ -2886,14 +2919,16 @@
           "城市信用合作社",
           "农村信用合作社",
           "中国邮政储蓄银行"
-        ]
+        ],
+        "importSource": "人员基本情况_工资卡开户银行*"
       },
       {
         "fieldId": "budget_active_v2_036",
         "name": "工资卡卡号*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员基本情况_工资卡卡号*"
       },
       {
         "fieldId": "budget_active_v2_037",
@@ -2904,7 +2939,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "人员基本情况_是否教师*"
       },
       {
         "fieldId": "budget_active_v2_038",
@@ -2915,7 +2951,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "人员基本情况_是否党员"
       },
       {
         "fieldId": "budget_active_v2_039",
@@ -2929,7 +2966,8 @@
           "定额",
           "自收自支",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_财政实际供养形式"
       },
       {
         "fieldId": "budget_active_v2_040",
@@ -2941,28 +2979,32 @@
           "财政全额保障",
           "财政差额补助",
           "财政专户资金、单位资金保障"
-        ]
+        ],
+        "importSource": "人员基本情况_人员经费保障方式*"
       },
       {
         "fieldId": "budget_active_v2_041",
         "name": "岗位工资",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_基本工资_岗位工资"
       },
       {
         "fieldId": "budget_active_v2_042",
         "name": "薪级工资",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_基本工资_薪级工资"
       },
       {
         "fieldId": "budget_active_v2_043",
         "name": "试用期人员基本工资",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_基本工资_试用期人员基本工资"
       },
       {
         "fieldId": "budget_active_v2_044",
@@ -3028,7 +3070,8 @@
           "人民警察值勤岗位津贴（市级法院、检察院、司法机关）",
           "政府特殊津贴",
           "其他"
-        ]
+        ],
+        "importSource": "人员支出情况_按月开支项目_国家规定工资津贴_国家特岗津贴1"
       },
       {
         "fieldId": "budget_active_v2_045",
@@ -3094,210 +3137,240 @@
           "人民警察值勤岗位津贴（市级法院、检察院、司法机关）",
           "政府特殊津贴",
           "其他"
-        ]
+        ],
+        "importSource": "人员支出情况_按月开支项目_国家规定工资津贴_国家特岗津贴2"
       },
       {
         "fieldId": "budget_active_v2_046",
         "name": "政府特贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_国家规定工资津贴_政府特贴"
       },
       {
         "fieldId": "budget_active_v2_047",
         "name": "基础性绩效工资",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_绩效工资_基础性绩效工资"
       },
       {
         "fieldId": "budget_active_v2_048",
         "name": "奖励性绩效工资",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_绩效工资_奖励性绩效工资"
       },
       {
         "fieldId": "budget_active_v2_051",
         "name": "基础绩效奖（教师奖励性补贴）",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_绩效工资_基础绩效奖（教师奖励性补贴）"
       },
       {
         "fieldId": "budget_active_v2_049",
         "name": "临时性补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_临时性补贴"
       },
       {
         "fieldId": "budget_active_v2_050",
         "name": "交通费",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_交通费"
       },
       {
         "fieldId": "budget_active_v2_052",
         "name": "老职工提租补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_老职工提租补贴"
       },
       {
         "fieldId": "budget_active_v2_053",
         "name": "新职工提租补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_新职工提租补贴"
       },
       {
         "fieldId": "budget_active_v2_054",
         "name": "教龄津贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_特岗津贴_教龄津贴"
       },
       {
         "fieldId": "budget_active_v2_055",
         "name": "其他特岗津贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_特岗津贴_其他特岗津贴"
       },
       {
         "fieldId": "budget_active_v2_056",
         "name": "其他津贴补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_其他津贴补贴"
       },
       {
         "fieldId": "budget_active_v2_057",
         "name": "上年提租补贴月发放额",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按月开支项目_其他项目_上年提租补贴月发放额"
       },
       {
         "fieldId": "budget_active_v2_058",
         "name": "月合计（元）",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_月合计（元）"
       },
       {
         "fieldId": "budget_active_v2_059",
         "name": "养老保险",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_养老保险"
       },
       {
         "fieldId": "budget_active_v2_060",
         "name": "医疗保险",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_医疗保险"
       },
       {
         "fieldId": "budget_active_v2_061",
         "name": "失业保险",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_失业保险"
       },
       {
         "fieldId": "budget_active_v2_062",
         "name": "工伤保险",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_工伤保险"
       },
       {
         "fieldId": "budget_active_v2_063",
         "name": "其他保险",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_其他保险"
       },
       {
         "fieldId": "budget_active_v2_064",
         "name": "职业年金",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_职业年金"
       },
       {
         "fieldId": "budget_active_v2_065",
         "name": "住房公积金",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_住房公积金"
       },
       {
         "fieldId": "budget_active_v2_066",
         "name": "省部领导特费",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_省部领导特费"
       },
       {
         "fieldId": "budget_active_v2_067",
         "name": "缴纳儿童医疗费",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_缴纳儿童医疗费"
       },
       {
         "fieldId": "budget_active_v2_068",
         "name": "独生子女奖励费",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_独生子女奖励费"
       },
       {
         "fieldId": "budget_active_v2_069",
         "name": "奖金",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_奖金"
       },
       {
         "fieldId": "budget_active_v2_070",
         "name": "其他",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "人员支出情况_按年开支项目_其他"
       },
       {
         "fieldId": "budget_active_v2_071",
         "name": "年合计（元）",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "年合计（元）"
       },
       {
         "fieldId": "budget_active_v2_072",
         "name": "国家规定工资津贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "国家规定工资津贴"
       },
       {
         "fieldId": "budget_active_v2_073",
         "name": "备注",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "备注"
       },
       {
         "fieldId": "budget_active_v2_074",
         "name": "财政生效年月",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "财政生效年月"
       },
       {
         "fieldId": "budget_active_v2_074",
@@ -3311,7 +3384,8 @@
           "辞职离职",
           "自然减员（含死亡）",
           "其他"
-        ]
+        ],
+        "importSource": "减少原因"
       },
       {
         "fieldId": "budget_active_v2_075",
@@ -3323,7 +3397,8 @@
           "1-专职教师",
           "2-其他人员",
           "3-管理人员"
-        ]
+        ],
+        "importSource": "在职教职工类型"
       },
       {
         "fieldId": "budget_active_v2_076",
@@ -3334,14 +3409,16 @@
         "options": [
           "1-在岗",
           "2-离岗创业"
-        ]
+        ],
+        "importSource": "在职人员属性*"
       },
       {
         "fieldId": "budget_active_v2_077",
         "name": "隶属处（科）室",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "隶属处（科）室"
       },
       {
         "fieldId": "budget_active_v2_078",
@@ -3352,70 +3429,80 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否财政供养人员*"
       },
       {
         "fieldId": "budget_active_v2_079",
         "name": "岗位津贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "岗位津贴"
       },
       {
         "fieldId": "budget_active_v2_080",
         "name": "地区津贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "地区津贴"
       },
       {
         "fieldId": "budget_active_v2_081",
         "name": "其余津贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "其余津贴"
       },
       {
         "fieldId": "budget_active_v2_082",
         "name": "规范津贴补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "规范津贴补贴"
       },
       {
         "fieldId": "budget_active_v2_083",
         "name": "改革性补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "改革性补贴"
       },
       {
         "fieldId": "budget_active_v2_084",
         "name": "自行出台的其他补贴",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "自行出台的其他补贴"
       },
       {
         "fieldId": "budget_active_v2_085",
         "name": "基本工资*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "基本工资*"
       },
       {
         "fieldId": "budget_active_v2_086",
         "name": "其他收入",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "其他收入"
       },
       {
         "fieldId": "budget_active_v2_087",
         "name": "实际执行工资",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "实际执行工资"
       },
       {
         "fieldId": "budget_active_v2_088",
@@ -3426,7 +3513,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否保民生及其他刚性支出人员*"
       },
       {
         "fieldId": "budget_active_v2_089",
@@ -3437,7 +3525,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加养老保险*"
       },
       {
         "fieldId": "budget_active_v2_089",
@@ -3448,7 +3537,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加医疗保险*"
       },
       {
         "fieldId": "budget_active_v2_090",
@@ -3459,35 +3549,40 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加工伤保险*"
       },
       {
         "fieldId": "budget_active_v2_091",
         "name": "基础绩效奖",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "基础绩效奖"
       },
       {
         "fieldId": "budget_active_v2_092",
         "name": "年度考核奖",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "年度考核奖"
       },
       {
         "fieldId": "budget_active_v2_093",
         "name": "年终一次性奖金",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "年终一次性奖金"
       },
       {
         "fieldId": "budget_active_v2_094",
         "name": "立功受奖一次性奖金",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String text"
+        "desc": "String text",
+        "importSource": "立功受奖一次性奖金"
       }
     ],
     "systemFields": [
@@ -3625,7 +3720,8 @@
         "name": "序号",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "序号"
       },
       {
         "fieldId": "budget-预算退休-1",
@@ -3996,7 +4092,8 @@
           "210001",
           "211",
           "211001"
-        ]
+        ],
+        "importSource": "单位代码*"
       },
       {
         "fieldId": "budget-预算退休-2",
@@ -4366,7 +4463,8 @@
           "债务科（PPP中心）控制预算",
           "国有资产监督管理科",
           "国有资产监督管理科控制预算"
-        ]
+        ],
+        "importSource": "单位名称*"
       },
       {
         "fieldId": "budget-预算退休-3",
@@ -4378,21 +4476,24 @@
           "信息增加",
           "信息删除",
           "信息调整"
-        ]
+        ],
+        "importSource": "变动类型*"
       },
       {
         "fieldId": "budget-预算退休-4",
         "name": "人员序号*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "人员序号*"
       },
       {
         "fieldId": "budget-预算退休-5",
         "name": "姓名*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "姓名*"
       },
       {
         "fieldId": "budget-预算退休-6",
@@ -4410,14 +4511,16 @@
           "护照",
           "港澳身份证",
           "其他证件"
-        ]
+        ],
+        "importSource": "证件类型*"
       },
       {
         "fieldId": "budget-预算退休-7",
         "name": "证件号码*",
         "type": "证件",
         "controlType": 7,
-        "desc": "Identity 证件号"
+        "desc": "Identity 证件号",
+        "importSource": "证件号码*"
       },
       {
         "fieldId": "budget-预算退休-8",
@@ -4428,7 +4531,8 @@
         "options": [
           "男",
           "女"
-        ]
+        ],
+        "importSource": "退休人员基本情况_性别*"
       },
       {
         "fieldId": "budget-预算退休-9",
@@ -4493,7 +4597,8 @@
           "门巴族",
           "珞巴族",
           "基诺族"
-        ]
+        ],
+        "importSource": "退休人员基本情况_民族"
       },
       {
         "fieldId": "budget-预算退休-a",
@@ -4509,14 +4614,16 @@
           "离岗创业",
           "退职",
           "其他"
-        ]
+        ],
+        "importSource": "退休人员基本情况_人员状态*"
       },
       {
         "fieldId": "budget-预算退休-c",
         "name": "进入本单位时间*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "退休人员基本情况_进入本单位时间*"
       },
       {
         "fieldId": "budget-预算退休-d",
@@ -4540,7 +4647,8 @@
           "遗属",
           "借调人员",
           "挂职人员"
-        ]
+        ],
+        "importSource": "退休人员基本情况_人员身份*"
       },
       {
         "fieldId": "budget-预算退休-e",
@@ -4829,7 +4937,8 @@
           "二十七级4档",
           "二十七级5档",
           "二十七级6档"
-        ]
+        ],
+        "importSource": "退休人员基本情况_工资级别*"
       },
       {
         "fieldId": "budget-预算退休-f",
@@ -4904,7 +5013,8 @@
           "63档",
           "64档",
           "65档"
-        ]
+        ],
+        "importSource": "退休人员基本情况_工资薪级*"
       },
       {
         "fieldId": "budget-预算退休-g",
@@ -4915,7 +5025,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "退休人员基本情况_是否工资统发*"
       },
       {
         "fieldId": "budget-预算退休-h",
@@ -4961,35 +5072,40 @@
           "相当小学毕业",
           "小学肄业",
           "文盲或半文盲"
-        ]
+        ],
+        "importSource": "退休人员基本情况_学历*"
       },
       {
         "fieldId": "budget-预算退休-i",
         "name": "出生日期",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "退休人员基本情况_出生日期"
       },
       {
         "fieldId": "budget-预算退休-j",
         "name": "参加工作时间*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "退休人员基本情况_参加工作时间*"
       },
       {
         "fieldId": "budget-预算退休-k",
         "name": "退休时间*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "退休人员基本情况_退休时间*"
       },
       {
         "fieldId": "budget-预算退休-l",
         "name": "工龄（年）*",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员基本情况_工龄（年）*"
       },
       {
         "fieldId": "budget-预算退休-m",
@@ -5012,7 +5128,8 @@
           "科员级",
           "办事员级",
           "未定职公务员"
-        ]
+        ],
+        "importSource": "退休人员基本情况_职务*"
       },
       {
         "fieldId": "budget-预算退休-n",
@@ -5023,7 +5140,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "退休人员基本情况_提前退休人员"
       },
       {
         "fieldId": "budget-预算退休-o",
@@ -5034,7 +5152,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "退休人员基本情况_养老金发放人员"
       },
       {
         "fieldId": "budget-预算退休-p",
@@ -5046,7 +5165,8 @@
           "财政全额保障",
           "财政差额补助",
           "财政专户资金、单位资金保障"
-        ]
+        ],
+        "importSource": "退休人员基本情况_人员经费保障方式*"
       },
       {
         "fieldId": "budget-预算退休-r",
@@ -5069,7 +5189,8 @@
           "十一级",
           "十二级",
           "十三级"
-        ]
+        ],
+        "importSource": "退休人员基本情况_岗位工资级别*"
       },
       {
         "fieldId": "budget-预算退休-s",
@@ -5080,7 +5201,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "退休人员基本情况_是否特殊岗位*"
       },
       {
         "fieldId": "budget-预算退休-t",
@@ -5129,14 +5251,16 @@
           "城市信用合作社",
           "农村信用合作社",
           "中国邮政储蓄银行"
-        ]
+        ],
+        "importSource": "退休人员基本情况_工资卡开户银行*"
       },
       {
         "fieldId": "budget-预算退休-u",
         "name": "工资卡卡号*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "退休人员基本情况_工资卡卡号*"
       },
       {
         "fieldId": "budget_retired_v2_030",
@@ -5150,7 +5274,8 @@
           "辞职离职",
           "自然减员（含死亡）",
           "其他"
-        ]
+        ],
+        "importSource": "退休人员基本情况_减少原因"
       },
       {
         "fieldId": "budget-预算退休-v",
@@ -5164,154 +5289,176 @@
           "定额",
           "自收自支",
           "其他"
-        ]
+        ],
+        "importSource": "退休人员基本情况_财政实际供养形式"
       },
       {
         "fieldId": "budget-预算退休-w",
         "name": "离休费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_离休费"
       },
       {
         "fieldId": "budget-预算退休-x",
         "name": "退休费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_退休费"
       },
       {
         "fieldId": "budget_retired_v2_034",
         "name": "生活性补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "退休人员支出情况_按月开支项目_生活性补贴"
       },
       {
         "fieldId": "budget-预算退休-z",
         "name": "护理费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_护理费"
       },
       {
         "fieldId": "budget-预算退休-10",
         "name": "交通费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_交通费"
       },
       {
         "fieldId": "budget-预算退休-11",
         "name": "福利费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_福利费"
       },
       {
         "fieldId": "budget-预算退休-12",
         "name": "高龄护工费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_高龄护工费"
       },
       {
         "fieldId": "budget-预算退休-13",
         "name": "提租补贴",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_提租补贴"
       },
       {
         "fieldId": "budget_retired_v2_040",
         "name": "其他补贴加基础绩效奖",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "退休人员支出情况_按月开支项目_其他补贴加基础绩效奖"
       },
       {
         "fieldId": "budget-预算退休-15",
         "name": "上年提租补贴月发放额",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "退休人员支出情况_按月开支项目_上年提租补贴月发放额"
       },
       {
         "fieldId": "budget-预算退休-16",
         "name": "月合计（元）",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按月开支项目_月合计（元）"
       },
       {
         "fieldId": "budget-预算退休-17",
         "name": "生活补助",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按年开支项目_生活补助"
       },
       {
         "fieldId": "budget-预算退休-18",
         "name": "特需费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按年开支项目_特需费"
       },
       {
         "fieldId": "budget-预算退休-19",
         "name": "取暖费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按年开支项目_取暖费"
       },
       {
         "fieldId": "budget-预算退休-1a",
         "name": "健康休养费",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按年开支项目_健康休养费"
       },
       {
         "fieldId": "budget-预算退休-1b",
         "name": "退休一次性补贴",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按年开支项目_退休一次性补贴"
       },
       {
         "fieldId": "budget-预算退休-1c",
         "name": "小计",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "退休人员支出情况_按年开支项目_小计"
       },
       {
         "fieldId": "budget-预算退休-1d",
         "name": "年合计（元）",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "年合计（元）"
       },
       {
         "fieldId": "budget-预算退休-1e",
         "name": "备注",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "备注"
       },
       {
         "fieldId": "budget-预算退休-1f",
         "name": "财政生效年月*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "财政生效年月*"
       },
       {
         "fieldId": "budget_retired_v2_052",
         "name": "国家规定工资津补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "国家规定工资津补贴"
       },
       {
         "fieldId": "budget_retired_v2_053",
@@ -5323,7 +5470,8 @@
           "1-专职教师",
           "2-其他人员",
           "3-管理人员"
-        ]
+        ],
+        "importSource": "在职教职工类型"
       },
       {
         "fieldId": "budget_retired_v2_054",
@@ -5334,7 +5482,8 @@
         "options": [
           "1-在岗",
           "2-离岗创业"
-        ]
+        ],
+        "importSource": "在职人员属性"
       },
       {
         "fieldId": "budget_retired_v2_055",
@@ -5346,21 +5495,24 @@
           "1-社保机构发放",
           "2-原单位发放",
           "3-其他"
-        ]
+        ],
+        "importSource": "退休金发放方式"
       },
       {
         "fieldId": "budget_retired_v2_056",
         "name": "隶属处（科）室",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "隶属处（科）室"
       },
       {
         "fieldId": "budget_retired_v2_057",
         "name": "出生日期*",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "出生日期*"
       },
       {
         "fieldId": "budget_retired_v2_058",
@@ -5371,84 +5523,96 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否财政供养人员*"
       },
       {
         "fieldId": "budget_retired_v2_059",
         "name": "岗位津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "岗位津贴"
       },
       {
         "fieldId": "budget_retired_v2_060",
         "name": "地区津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "地区津贴"
       },
       {
         "fieldId": "budget_retired_v2_061",
         "name": "其余津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "其余津贴"
       },
       {
         "fieldId": "budget_retired_v2_062",
         "name": "规范津贴补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "规范津贴补贴"
       },
       {
         "fieldId": "budget_retired_v2_063",
         "name": "改革性补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "改革性补贴"
       },
       {
         "fieldId": "budget_retired_v2_064",
         "name": "自行出台的其他补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "自行出台的其他补贴"
       },
       {
         "fieldId": "budget_retired_v2_065",
         "name": "基本工资",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "基本工资"
       },
       {
         "fieldId": "budget_retired_v2_066",
         "name": "基本退职费",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "基本退职费"
       },
       {
         "fieldId": "budget_retired_v2_067",
         "name": "基本退休金",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "基本退休金"
       },
       {
         "fieldId": "budget_retired_v2_068",
         "name": "其他收入",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "其他收入"
       },
       {
         "fieldId": "budget_retired_v2_069",
         "name": "实际执行工资",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "实际执行工资"
       },
       {
         "fieldId": "budget_retired_v2_070",
@@ -5459,7 +5623,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否保民生及其他刚性支出人员*"
       },
       {
         "fieldId": "budget_retired_v2_071",
@@ -5470,7 +5635,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加养老保险*"
       },
       {
         "fieldId": "budget_retired_v2_072",
@@ -5481,7 +5647,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加医疗保险*"
       },
       {
         "fieldId": "budget_retired_v2_073",
@@ -5492,42 +5659,48 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加工伤保险*"
       },
       {
         "fieldId": "budget_retired_v2_074",
         "name": "基础绩效奖",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "基础绩效奖"
       },
       {
         "fieldId": "budget_retired_v2_075",
         "name": "年度考核奖",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "年度考核奖"
       },
       {
         "fieldId": "budget_retired_v2_076",
         "name": "年终一次性奖金",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "年终一次性奖金"
       },
       {
         "fieldId": "budget_retired_v2_077",
         "name": "立功受奖一次性奖金",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "立功受奖一次性奖金"
       },
       {
         "fieldId": "budget_retired_v2_078",
         "name": "医疗保险退休人员一次性补缴经费",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "医疗保险退休人员一次性补缴经费"
       }
     ],
     "systemFields": [
@@ -5665,7 +5838,8 @@
         "name": "序号",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "序号"
       },
       {
         "fieldId": "budget-其他人员-1",
@@ -6036,7 +6210,8 @@
           "210001",
           "211",
           "211001"
-        ]
+        ],
+        "importSource": "单位代码*"
       },
       {
         "fieldId": "budget-其他人员-2",
@@ -6406,7 +6581,8 @@
           "债务科（PPP中心）控制预算",
           "国有资产监督管理科",
           "国有资产监督管理科控制预算"
-        ]
+        ],
+        "importSource": "单位名称*"
       },
       {
         "fieldId": "budget-其他人员-3",
@@ -6418,21 +6594,24 @@
           "信息增加",
           "信息删除",
           "信息调整"
-        ]
+        ],
+        "importSource": "变动类型*"
       },
       {
         "fieldId": "budget-其他人员-4",
         "name": "人员序号",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "人员序号"
       },
       {
         "fieldId": "budget-其他人员-5",
         "name": "姓名*",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "姓名*"
       },
       {
         "fieldId": "budget-其他人员-6",
@@ -6450,14 +6629,16 @@
           "护照",
           "港澳身份证",
           "其他证件"
-        ]
+        ],
+        "importSource": "证件类型"
       },
       {
         "fieldId": "budget-其他人员-7",
         "name": "证件号码",
         "type": "证件",
         "controlType": 7,
-        "desc": "Identity 证件号"
+        "desc": "Identity 证件号",
+        "importSource": "证件号码"
       },
       {
         "fieldId": "budget-其他人员-8",
@@ -6468,7 +6649,8 @@
         "options": [
           "男",
           "女"
-        ]
+        ],
+        "importSource": "人员基本情况_性别"
       },
       {
         "fieldId": "budget-其他人员-9",
@@ -6533,7 +6715,8 @@
           "门巴族",
           "珞巴族",
           "基诺族"
-        ]
+        ],
+        "importSource": "人员基本情况_民族"
       },
       {
         "fieldId": "budget-其他人员-a",
@@ -6549,14 +6732,16 @@
           "离岗创业",
           "退职",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_人员状态"
       },
       {
         "fieldId": "budget-其他人员-c",
         "name": "进入本单位时间",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "人员基本情况_进入本单位时间"
       },
       {
         "fieldId": "budget-其他人员-d",
@@ -6580,7 +6765,8 @@
           "遗属",
           "借调人员",
           "挂职人员"
-        ]
+        ],
+        "importSource": "人员基本情况_人员身份"
       },
       {
         "fieldId": "other_people_v2_014",
@@ -6597,7 +6783,8 @@
           "大中专毕业分配",
           "复退军人安置",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_在职人员来源"
       },
       {
         "fieldId": "budget-其他人员-e",
@@ -6643,28 +6830,32 @@
           "相当小学毕业",
           "小学肄业",
           "文盲或半文盲"
-        ]
+        ],
+        "importSource": "人员基本情况_学历"
       },
       {
         "fieldId": "budget-其他人员-f",
         "name": "出生日期",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "人员基本情况_出生日期"
       },
       {
         "fieldId": "budget-其他人员-g",
         "name": "参加工作时间",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "人员基本情况_参加工作时间"
       },
       {
         "fieldId": "budget-其他人员-h",
         "name": "工龄（年）",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "人员基本情况_工龄（年）"
       },
       {
         "fieldId": "budget-其他人员-i",
@@ -6680,7 +6871,8 @@
           "全额事业",
           "差额事业",
           "自收自支"
-        ]
+        ],
+        "importSource": "人员基本情况_在编类别"
       },
       {
         "fieldId": "budget-其他人员-j",
@@ -6729,14 +6921,16 @@
           "城市信用合作社",
           "农村信用合作社",
           "中国邮政储蓄银行"
-        ]
+        ],
+        "importSource": "人员基本情况_工资卡开户银行"
       },
       {
         "fieldId": "budget-其他人员-k",
         "name": "工资卡卡号",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "人员基本情况_工资卡卡号"
       },
       {
         "fieldId": "budget-其他人员-l",
@@ -6750,7 +6944,8 @@
           "定额",
           "自收自支",
           "其他"
-        ]
+        ],
+        "importSource": "人员基本情况_财政实际供养形式"
       },
       {
         "fieldId": "budget-其他人员-m",
@@ -6762,98 +6957,112 @@
           "财政全额保障",
           "财政差额补助",
           "财政专户资金、单位资金保障"
-        ]
+        ],
+        "importSource": "人员基本情况_人员经费保障方式"
       },
       {
         "fieldId": "budget-其他人员-n",
         "name": "遗属生活补助",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_遗属生活补助"
       },
       {
         "fieldId": "budget-其他人员-o",
         "name": "临时工工资",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_临时工工资"
       },
       {
         "fieldId": "budget-其他人员-p",
         "name": "其他人员工资",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_其他人员工资"
       },
       {
         "fieldId": "budget-其他人员-q",
         "name": "缴纳养老保险",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_缴纳养老保险"
       },
       {
         "fieldId": "budget-其他人员-r",
         "name": "缴纳医疗保险",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_缴纳医疗保险"
       },
       {
         "fieldId": "budget-其他人员-s",
         "name": "缴纳失业保险",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_缴纳失业保险"
       },
       {
         "fieldId": "budget-其他人员-t",
         "name": "缴纳工伤保险",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_缴纳工伤保险"
       },
       {
         "fieldId": "budget-其他人员-u",
         "name": "缴纳生育保险",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_缴纳生育保险"
       },
       {
         "fieldId": "budget-其他人员-v",
         "name": "缴纳其他保险",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_缴纳其他保险"
       },
       {
         "fieldId": "budget-其他人员-w",
         "name": "小计",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "月发放工资_小计"
       },
       {
         "fieldId": "budget-其他人员-x",
         "name": "年合计（元）",
         "type": "数值",
         "controlType": 6,
-        "desc": "Double（666.66）"
+        "desc": "Double（666.66）",
+        "importSource": "年合计（元）"
       },
       {
         "fieldId": "budget-其他人员-y",
         "name": "备注",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "备注"
       },
       {
         "fieldId": "budget-其他人员-z",
         "name": "财政生效年月",
         "type": "文本框",
         "controlType": 2,
-        "desc": "String 文本"
+        "desc": "String 文本",
+        "importSource": "财政生效年月"
       },
       {
         "fieldId": "other_people_v2_037",
@@ -6867,14 +7076,16 @@
           "辞职离职",
           "自然减员（含死亡）",
           "其他"
-        ]
+        ],
+        "importSource": "减少原因"
       },
       {
         "fieldId": "other_people_v2_038",
         "name": "国家规定工资津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "国家规定工资津贴"
       },
       {
         "fieldId": "other_people_v2_039",
@@ -6886,7 +7097,8 @@
           "1-专职教师",
           "2-其他人员",
           "3-管理人员"
-        ]
+        ],
+        "importSource": "在职教职工类型"
       },
       {
         "fieldId": "other_people_v2_040",
@@ -6897,14 +7109,16 @@
         "options": [
           "1-在岗",
           "2-离岗创业"
-        ]
+        ],
+        "importSource": "在职人员属性"
       },
       {
         "fieldId": "other_people_v2_041",
         "name": "隶属处（科）室",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "隶属处（科）室"
       },
       {
         "fieldId": "other_people_v2_042",
@@ -6915,70 +7129,80 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否财政供养人员"
       },
       {
         "fieldId": "other_people_v2_043",
         "name": "岗位津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "岗位津贴"
       },
       {
         "fieldId": "other_people_v2_044",
         "name": "地区津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "地区津贴"
       },
       {
         "fieldId": "other_people_v2_045",
         "name": "其余津贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "其余津贴"
       },
       {
         "fieldId": "other_people_v2_046",
         "name": "规范津贴补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "规范津贴补贴"
       },
       {
         "fieldId": "other_people_v2_047",
         "name": "改革性补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "改革性补贴"
       },
       {
         "fieldId": "other_people_v2_048",
         "name": "自行出台的其他补贴",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "自行出台的其他补贴"
       },
       {
         "fieldId": "other_people_v2_049",
         "name": "基本工资",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "基本工资"
       },
       {
         "fieldId": "other_people_v2_050",
         "name": "其他收入",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "其他收入"
       },
       {
         "fieldId": "other_people_v2_051",
         "name": "实际执行工资",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "实际执行工资"
       },
       {
         "fieldId": "other_people_v2_052",
@@ -6989,7 +7213,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否保民生及其他刚性支出人员*"
       },
       {
         "fieldId": "other_people_v2_053",
@@ -7000,7 +7225,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加养老保险*"
       },
       {
         "fieldId": "other_people_v2_054",
@@ -7011,7 +7237,8 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加医疗保险*"
       },
       {
         "fieldId": "other_people_v2_055",
@@ -7022,42 +7249,48 @@
         "options": [
           "否",
           "是"
-        ]
+        ],
+        "importSource": "是否参加工伤保险*"
       },
       {
         "fieldId": "other_people_v2_056",
         "name": "基础绩效奖",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "基础绩效奖"
       },
       {
         "fieldId": "other_people_v2_057",
         "name": "年度考核奖",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "年度考核奖"
       },
       {
         "fieldId": "other_people_v2_058",
         "name": "年终一次性奖金",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "年终一次性奖金"
       },
       {
         "fieldId": "other_people_v2_059",
         "name": "立功受奖一次性奖金",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "立功受奖一次性奖金"
       },
       {
         "fieldId": "other_people_v2_060",
         "name": "医疗保险退休人员一次性补缴经费",
         "type": "???",
         "controlType": 2,
-        "desc": "String ??"
+        "desc": "String ??",
+        "importSource": "医疗保险退休人员一次性补缴经费"
       }
     ],
     "systemFields": [
@@ -11240,5 +11473,1206 @@
         "type": "表格"
       }
     ]
+  },
+  {
+    "name": "预算行政在职",
+    "worksheetId": "budget_gov_active_v1_sheet",
+    "fieldCount": 93,
+    "fields": [
+      {
+        "fieldId": "budget_gov_active_v1_001",
+        "name": "序号",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "序号"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_002",
+        "name": "单位代码*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "单位代码*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_003",
+        "name": "单位名称*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "单位名称*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_004",
+        "name": "变动类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "变动类型*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_005",
+        "name": "人员序号*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员序号*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_006",
+        "name": "姓名*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "姓名*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_007",
+        "name": "证件类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "证件类型*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_008",
+        "name": "证件号码*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "证件号码*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_009",
+        "name": "人员基本情况表_性别*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_性别*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_010",
+        "name": "人员基本情况表_民族",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_民族"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_011",
+        "name": "人员基本情况表_人员状态*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_人员状态*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_012",
+        "name": "人员基本情况表_进入本单位时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_进入本单位时间*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_013",
+        "name": "人员基本情况表_人员身份*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_人员身份*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_014",
+        "name": "人员基本情况表_职级",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_职级"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_015",
+        "name": "人员基本情况表_工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_工资级别"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_016",
+        "name": "人员基本情况表_工资薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_工资薪级"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_017",
+        "name": "人员基本情况表_在职人员来源*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_在职人员来源*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_018",
+        "name": "人员基本情况表_学历*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_学历*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_019",
+        "name": "人员基本情况表_出生日期*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_出生日期*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_020",
+        "name": "人员基本情况表_参加工作时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_参加工作时间*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_021",
+        "name": "人员基本情况表_工龄（年）*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_工龄（年）*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_022",
+        "name": "人员基本情况表_在编类别*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_在编类别*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_023",
+        "name": "人员基本情况表_职务",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_职务"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_024",
+        "name": "人员基本情况表_工资类别*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_工资类别*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_025",
+        "name": "人员基本情况表_岗位工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_岗位工资级别"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_026",
+        "name": "人员基本情况表_职称类别",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_职称类别"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_027",
+        "name": "人员基本情况表_国家特岗津贴1",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_国家特岗津贴1"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_028",
+        "name": "人员基本情况表_国家特岗津贴2",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_国家特岗津贴2"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_029",
+        "name": "人员基本情况表_工资卡开户银行*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_工资卡开户银行*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_030",
+        "name": "人员基本情况表_工资卡卡号*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_工资卡卡号*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_031",
+        "name": "人员基本情况表_是否特殊岗位",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_是否特殊岗位"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_032",
+        "name": "人员基本情况表_是否工资统发*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_是否工资统发*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_033",
+        "name": "人员基本情况表_是否党员",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_是否党员"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_034",
+        "name": "人员基本情况表_财政实际供养形式",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_财政实际供养形式"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_035",
+        "name": "人员基本情况表_人员经费保障方式*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员基本情况表_人员经费保障方式*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_036",
+        "name": "人员支出情况_按月开支项目_基本工资_职务（岗位）工资",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_基本工资_职务（岗位）工资"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_037",
+        "name": "人员支出情况_按月开支项目_基本工资_级别（技术等级）工资",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_基本工资_级别（技术等级）工资"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_038",
+        "name": "人员支出情况_按月开支项目_基本工资_试用期工资",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_基本工资_试用期工资"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_039",
+        "name": "人员支出情况_按月开支项目_国家规定工资津补贴_国家特岗津贴1",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_国家规定工资津补贴_国家特岗津贴1"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_040",
+        "name": "人员支出情况_按月开支项目_国家规定工资津补贴_国家特岗津贴2",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_国家规定工资津补贴_国家特岗津贴2"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_041",
+        "name": "人员支出情况_按月开支项目_国家规定工资津补贴_政府特贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_国家规定工资津补贴_政府特贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_042",
+        "name": "人员支出情况_按月开支项目_省规定津补贴_工作性津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_省规定津补贴_工作性津贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_043",
+        "name": "人员支出情况_按月开支项目_省规定津补贴_生活性补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_省规定津补贴_生活性补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_044",
+        "name": "人员支出情况_按月开支项目_其他项目_临时性补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_临时性补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_045",
+        "name": "人员支出情况_按月开支项目_其他项目_交通费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_交通费"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_046",
+        "name": "人员支出情况_按月开支项目_其他项目_公务交通补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_公务交通补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_047",
+        "name": "人员支出情况_按月开支项目_其他项目_基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_基础绩效奖"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_048",
+        "name": "人员支出情况_按月开支项目_其他项目_老职工提租补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_老职工提租补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_049",
+        "name": "人员支出情况_按月开支项目_其他项目_新职工提租补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_新职工提租补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_050",
+        "name": "人员支出情况_按月开支项目_其他项目_特岗津贴_警衔津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_特岗津贴_警衔津贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_051",
+        "name": "人员支出情况_按月开支项目_其他项目_特岗津贴_其他特岗津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_特岗津贴_其他特岗津贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_052",
+        "name": "人员支出情况_按月开支项目_其他项目_其他津贴补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_其他津贴补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_053",
+        "name": "人员支出情况_按月开支项目_其他项目_上年公务交通补贴月发放额",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_上年公务交通补贴月发放额"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_054",
+        "name": "人员支出情况_按月开支项目_其他项目_上年提租补贴月发放额",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按月开支项目_其他项目_上年提租补贴月发放额"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_055",
+        "name": "人员支出情况_月合计（元）",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_月合计（元）"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_056",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_养老保险",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_养老保险"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_057",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_医疗保险",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_医疗保险"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_058",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_失业保险",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_失业保险"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_059",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_工伤保险",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_工伤保险"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_060",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_其他保险",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_其他保险"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_061",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_职业年金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_职业年金"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_062",
+        "name": "人员支出情况_按年开支项目_社会保障缴费_住房公积金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_社会保障缴费_住房公积金"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_063",
+        "name": "人员支出情况_按年开支项目_省部领导特费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_省部领导特费"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_064",
+        "name": "人员支出情况_按年开支项目_缴纳儿童医疗费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_缴纳儿童医疗费"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_065",
+        "name": "人员支出情况_按年开支项目_独生子女父母奖励费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_独生子女父母奖励费"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_066",
+        "name": "人员支出情况_按年开支项目_医改补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_医改补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_067",
+        "name": "人员支出情况_按年开支项目_奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_奖金"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_068",
+        "name": "人员支出情况_按年开支项目_其他",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员支出情况_按年开支项目_其他"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_069",
+        "name": "年合计（元）",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "年合计（元）"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_070",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "备注"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_071",
+        "name": "财政生效年月*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "财政生效年月*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_072",
+        "name": "减少原因",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "减少原因"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_073",
+        "name": "国家规定工资津补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "国家规定工资津补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_074",
+        "name": "在职人员属性*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "在职人员属性*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_075",
+        "name": "隶属处（科）室",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "隶属处（科）室"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_076",
+        "name": "是否财政供养人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否财政供养人员*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_077",
+        "name": "岗位津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "岗位津贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_078",
+        "name": "地区津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "地区津贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_079",
+        "name": "其余津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "其余津贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_080",
+        "name": "规范津贴补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "规范津贴补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_081",
+        "name": "改革性补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "改革性补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_082",
+        "name": "自行出台的其他补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "自行出台的其他补贴"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_083",
+        "name": "基本工资*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "基本工资*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_084",
+        "name": "其他收入",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "其他收入"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_085",
+        "name": "实际执行工资",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "实际执行工资"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_086",
+        "name": "是否保民生及其他刚性支出人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否保民生及其他刚性支出人员*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_087",
+        "name": "是否参加养老保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否参加养老保险*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_088",
+        "name": "是否参加医疗保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否参加医疗保险*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_089",
+        "name": "是否参加工伤保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否参加工伤保险*"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_090",
+        "name": "基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "基础绩效奖"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_091",
+        "name": "年度考核奖",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "年度考核奖"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_092",
+        "name": "年终一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "年终一次性奖金"
+      },
+      {
+        "fieldId": "budget_gov_active_v1_093",
+        "name": "立功受奖一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "立功受奖一次性奖金"
+      }
+    ],
+    "systemFields": [],
+    "views": []
+  },
+  {
+    "name": "预算行政离退休",
+    "worksheetId": "budget_gov_retired_v1_sheet",
+    "fieldCount": 76,
+    "fields": [
+      {
+        "fieldId": "budget_gov_retired_v1_001",
+        "name": "序号",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "序号"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_002",
+        "name": "单位代码*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "单位代码*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_003",
+        "name": "单位名称*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "单位名称*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_004",
+        "name": "变动类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "变动类型*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_005",
+        "name": "人员序号*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "人员序号*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_006",
+        "name": "姓名*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "姓名*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_007",
+        "name": "证件类型*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "证件类型*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_008",
+        "name": "证件号码*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "证件号码*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_009",
+        "name": "离退休人员基本情况_性别*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_性别*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_010",
+        "name": "离退休人员基本情况_民族",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_民族"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_011",
+        "name": "离退休人员基本情况_人员状态*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_人员状态*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_012",
+        "name": "离退休人员基本情况_进入本单位时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_进入本单位时间*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_013",
+        "name": "离退休人员基本情况_人员身份*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_人员身份*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_014",
+        "name": "离退休人员基本情况_职级",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_职级"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_015",
+        "name": "离退休人员基本情况_工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_工资级别"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_016",
+        "name": "离退休人员基本情况_工资薪级",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_工资薪级"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_017",
+        "name": "离退休人员基本情况_是否工资统发*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_是否工资统发*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_018",
+        "name": "离退休人员基本情况_学历*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_学历*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_019",
+        "name": "离退休人员基本情况_出生日期",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_出生日期"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_020",
+        "name": "离退休人员基本情况_参加工作时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_参加工作时间*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_021",
+        "name": "离退休人员基本情况_离退休时间*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_离退休时间*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_022",
+        "name": "离退休人员基本情况_工龄（年）*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_工龄（年）*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_023",
+        "name": "离退休人员基本情况_职务",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_职务"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_024",
+        "name": "离退休人员基本情况_提前退休人员",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_提前退休人员"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_025",
+        "name": "离退休人员基本情况_养老金发放人员",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_养老金发放人员"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_026",
+        "name": "离退休人员基本情况_人员经费保障方式*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_人员经费保障方式*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_027",
+        "name": "离退休人员基本情况_岗位工资级别",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_岗位工资级别"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_028",
+        "name": "离退休人员基本情况_工资卡开户银行*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_工资卡开户银行*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_029",
+        "name": "离退休人员基本情况_工资卡卡号*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_工资卡卡号*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_030",
+        "name": "离退休人员基本情况_减少原因",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_减少原因"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_031",
+        "name": "离退休人员基本情况_是否特殊岗位*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_是否特殊岗位*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_032",
+        "name": "离退休人员基本情况_财政实际供养形式",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离退休人员基本情况_财政实际供养形式"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_033",
+        "name": "离休退休人员支出情况_按月开支项目_基本离休费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_基本离休费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_034",
+        "name": "离休退休人员支出情况_按月开支项目_退休费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_退休费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_035",
+        "name": "离休退休人员支出情况_按月开支项目_生活性补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_生活性补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_036",
+        "name": "离休退休人员支出情况_按月开支项目_护理费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_护理费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_037",
+        "name": "离休退休人员支出情况_按月开支项目_交通费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_交通费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_038",
+        "name": "离休退休人员支出情况_按月开支项目_福利费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_福利费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_039",
+        "name": "离休退休人员支出情况_按月开支项目_高龄护工费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_高龄护工费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_040",
+        "name": "离休退休人员支出情况_按月开支项目_提租补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_提租补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_041",
+        "name": "离休退休人员支出情况_按月开支项目_其他补贴加基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_其他补贴加基础绩效奖"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_042",
+        "name": "离休退休人员支出情况_按月开支项目_上年提租补贴月发放额",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_上年提租补贴月发放额"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_043",
+        "name": "离休退休人员支出情况_按月开支项目_月合计（元）",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按月开支项目_月合计（元）"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_044",
+        "name": "离休退休人员支出情况_按年开支项目_生活补助",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按年开支项目_生活补助"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_045",
+        "name": "离休退休人员支出情况_按年开支项目_特需费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按年开支项目_特需费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_046",
+        "name": "离休退休人员支出情况_按年开支项目_取暖费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按年开支项目_取暖费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_047",
+        "name": "离休退休人员支出情况_按年开支项目_健康休养费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按年开支项目_健康休养费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_048",
+        "name": "离休退休人员支出情况_按年开支项目_退休一次性补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按年开支项目_退休一次性补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_049",
+        "name": "离休退休人员支出情况_按年开支项目_小计",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "离休退休人员支出情况_按年开支项目_小计"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_050",
+        "name": "年合计（元）",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "年合计（元）"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_051",
+        "name": "国家规定工资津补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "国家规定工资津补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_052",
+        "name": "备注",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "备注"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_053",
+        "name": "财政生效年月",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "财政生效年月"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_054",
+        "name": "退休金发放方式",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "退休金发放方式"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_055",
+        "name": "隶属处（科）室",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "隶属处（科）室"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_056",
+        "name": "是否财政供养人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否财政供养人员*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_057",
+        "name": "岗位津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "岗位津贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_058",
+        "name": "地区津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "地区津贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_059",
+        "name": "其余津贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "其余津贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_060",
+        "name": "规范津贴补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "规范津贴补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_061",
+        "name": "改革性补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "改革性补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_062",
+        "name": "自行出台的其他补贴",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "自行出台的其他补贴"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_063",
+        "name": "基本工资",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "基本工资"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_064",
+        "name": "基本退职费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "基本退职费"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_065",
+        "name": "基本退休金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "基本退休金"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_066",
+        "name": "其他收入",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "其他收入"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_067",
+        "name": "实际执行工资",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "实际执行工资"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_068",
+        "name": "是否保民生及其他刚性支出人员*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否保民生及其他刚性支出人员*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_069",
+        "name": "是否参加养老保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否参加养老保险*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_070",
+        "name": "是否参加医疗保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否参加医疗保险*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_071",
+        "name": "是否参加工伤保险*",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "是否参加工伤保险*"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_072",
+        "name": "基础绩效奖",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "基础绩效奖"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_073",
+        "name": "年度考核奖",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "年度考核奖"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_074",
+        "name": "年终一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "年终一次性奖金"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_075",
+        "name": "立功受奖一次性奖金",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "立功受奖一次性奖金"
+      },
+      {
+        "fieldId": "budget_gov_retired_v1_076",
+        "name": "医疗保险退休人员一次性补缴经费",
+        "type": "文本框",
+        "controlType": 2,
+        "importSource": "医疗保险退休人员一次性补缴经费"
+      }
+    ],
+    "systemFields": [],
+    "views": []
   }
 ]

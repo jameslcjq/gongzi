@@ -1,11 +1,12 @@
 import { app, dialog } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { getDataPath } from '../config/paths'
 import { exec, getDatabase, getDatabasePath } from '../db/connection'
 import type { BackupSummary } from '../../shared/types'
 
 export function getBackupFolder(): string {
-  const folder = join(app.getPath('userData'), 'backups')
+  const folder = getDataPath('backups')
   mkdirSync(folder, { recursive: true })
   return folder
 }

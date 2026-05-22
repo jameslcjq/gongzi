@@ -50,6 +50,10 @@ import type {
   AnnualAdjustmentFilePick,
   AnnualAdjustmentPreview,
   AnnualAdjustmentPreviewInput,
+  PerformancePayrollGenerateInput,
+  PerformancePayrollGenerateResult,
+  PerformancePayrollHistoryGenerateInput,
+  PerformancePayrollLocalGenerateInput,
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
   SocialInsuranceBaseExportInput,
@@ -85,9 +89,6 @@ const salaryApi = {
 
   getImportWatcherStatus: (): Promise<ImportWatcherStatus> =>
     ipcRenderer.invoke('import-watcher:get-status'),
-  startImportWatcher: (): Promise<ImportWatcherStatus> =>
-    ipcRenderer.invoke('import-watcher:start'),
-  stopImportWatcher: (): Promise<ImportWatcherStatus> => ipcRenderer.invoke('import-watcher:stop'),
   chooseImportWatcherFolder: (): Promise<ImportWatcherStatus> =>
     ipcRenderer.invoke('import-watcher:choose-folder'),
   openImportWatcherFolder: (): Promise<ImportWatcherStatus> =>
@@ -111,12 +112,10 @@ const salaryApi = {
     code: string
   ): Promise<{ ok: true; count: number } | { ok: false; reason: string }> =>
     ipcRenderer.invoke('integration:exec-in-all-frames', { webContentsId, code }),
-  getPortalUserInfo: (
+  getPortalToken: (
     webContentsId: number
-  ): Promise<
-    | { ok: true; belongOrgId: string; unitName: string; raw: Record<string, unknown> }
-    | { ok: false; reason: string }
-  > => ipcRenderer.invoke('integration:get-portal-userinfo', { webContentsId }),
+  ): Promise<{ ok: true; token: string; source: string } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('integration:get-portal-token', { webContentsId }),
   drainAllPortalFrames: (
     webContentsId: number,
     code: string
@@ -136,6 +135,7 @@ const salaryApi = {
       originalName: string
       savedPath: string
       url: string
+      isBudget?: boolean
     }) => void
   ): (() => void) => {
     const listener = (
@@ -146,10 +146,35 @@ const salaryApi = {
         originalName: string
         savedPath: string
         url: string
+        isBudget?: boolean
       }
     ): void => handler(payload)
     ipcRenderer.on('integration:webview-download-done', listener)
     return () => ipcRenderer.removeListener('integration:webview-download-done', listener)
+  },
+  onBudgetImportDone: (
+    handler: (payload: {
+      ok: boolean
+      savedPath: string
+      totalInserted?: number
+      totalUpdated?: number
+      totalSkipped?: number
+      sheets?: Array<{
+        sheetName: string
+        worksheetName: string
+        inserted: number
+        updated: number
+        skipped: number
+        status: string
+        message?: string
+      }>
+      message?: string
+    }) => void
+  ): (() => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]): void =>
+      handler(payload)
+    ipcRenderer.on('integration:budget-import-done', listener)
+    return () => ipcRenderer.removeListener('integration:budget-import-done', listener)
   },
   onWebviewOpenTabRequest: (
     handler: (payload: { sourceWebContentsId: number; url: string; disposition?: string }) => void
@@ -161,6 +186,18 @@ const salaryApi = {
     ipcRenderer.on('integration:webview-open-tab', listener)
     return () => ipcRenderer.removeListener('integration:webview-open-tab', listener)
   },
+  parseInsuranceImportXlsx: (
+    filePath: string
+  ): Promise<
+    | { ok: true; records: Array<Record<string, string>> }
+    | { ok: false; reason: string }
+  > => ipcRenderer.invoke('insurance-push:parse-xlsx', { filePath }),
+  readVoucherXlsx: (
+    filePath: string
+  ): Promise<
+    | { ok: true; base64: string; fileName: string; size: number }
+    | { ok: false; reason: string }
+  > => ipcRenderer.invoke('voucher-push:read-xlsx', { filePath }),
   saveSalaryExportXls: (
     filename: string,
     base64: string
@@ -214,6 +251,18 @@ const salaryApi = {
     input: SocialInsuranceBaseExportInput
   ): Promise<SocialInsuranceBaseExportResult> =>
     ipcRenderer.invoke('social-insurance:export-base', input),
+  generatePerformancePayroll: (
+    input: PerformancePayrollGenerateInput
+  ): Promise<PerformancePayrollGenerateResult> =>
+    ipcRenderer.invoke('performance-payroll:generate', input),
+  generatePerformancePayrollFromHistory: (
+    input: PerformancePayrollHistoryGenerateInput
+  ): Promise<PerformancePayrollGenerateResult> =>
+    ipcRenderer.invoke('performance-payroll:generate-from-history', input),
+  generatePerformancePayrollFromLocal: (
+    input: PerformancePayrollLocalGenerateInput
+  ): Promise<PerformancePayrollGenerateResult> =>
+    ipcRenderer.invoke('performance-payroll:generate-from-local', input),
   openLocalPath: (path: string): Promise<string> => ipcRenderer.invoke('app:open-path', path),
   listPrinters: (): Promise<PrinterSummary[]> => ipcRenderer.invoke('print:list-printers'),
   printCurrentView: (request?: PrintRequest): Promise<void> =>
@@ -335,8 +384,6 @@ const salaryApi = {
     query?: LookupFailureQuery
   ): Promise<{ total: number; rows: LookupFailureEntry[] }> =>
     ipcRenderer.invoke('archive:list-lookup-failures', query ?? {}),
-  clearLookupFailures: (workflow?: string): Promise<number> =>
-    ipcRenderer.invoke('archive:clear-lookup-failures', workflow),
 
   listStatReports: (): Promise<StatReportDef[]> => ipcRenderer.invoke('stat-report:list'),
   runStatReport: (id: string): Promise<StatReportResult> =>

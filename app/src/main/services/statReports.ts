@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as XLSX from 'xlsx'
@@ -14,6 +13,7 @@ import type {
   StatReportResult,
   StatReportRow
 } from '../../shared/types'
+import { getDataPath } from '../config/paths'
 
 const HR_TABLE = '人事信息'
 
@@ -836,7 +836,7 @@ export async function runStatReport(id: string): Promise<StatReportResult> {
 export async function exportStatReport(
   result: StatReportResult
 ): Promise<{ filePath: string; rowCount: number }> {
-  const exportDir = join(app.getPath('userData'), '统计报表导出')
+  const exportDir = getDataPath('统计报表导出')
   mkdirSync(exportDir, { recursive: true })
   const safeName = result.name.replace(/[\\/:*?"<>|]/g, '_')
   const stamp = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[\/\s:]/g, '').replace(/,/g, '')

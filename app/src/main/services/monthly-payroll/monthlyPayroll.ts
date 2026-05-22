@@ -1,5 +1,4 @@
 import { copyFile, readdir, readFile, rename, rmdir, unlink, writeFile } from 'node:fs/promises'
-import { app } from 'electron'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -25,6 +24,7 @@ import {
   importHousingFundDetail,
   type HousingFundDetailRow
 } from './detailImport'
+import { archiveRoot, getDataPath } from '../../config/paths'
 
 type CellValue = string | number | boolean | Date | null | undefined
 
@@ -897,7 +897,7 @@ export async function generateMonthlyPayrollReportView(
     }
   }
 
-  const outputDir = join(app.getPath('userData'), '工资报账输出')
+  const outputDir = getDataPath('工资报账输出')
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
   const insuranceImportPath = socialSecurity ? join(outputDir, `保险导入_${stamp}.xlsx`) : undefined
@@ -1331,18 +1331,7 @@ function monthlyPayrollArchiveDir(run: MonthlyPayrollRun): string {
 }
 
 function monthlyPayrollArchiveRoot(): string {
-  const candidates = [
-    process.cwd(),
-    dirname(process.cwd()),
-    app.getAppPath(),
-    dirname(app.getAppPath())
-  ]
-  const existing = candidates.find((candidate) => existsSync(join(candidate, '工资存档')))
-  if (existing) return join(existing, '工资存档')
-
-  const cwd = process.cwd()
-  const workspaceRoot = basename(cwd).toLowerCase() === 'app' ? dirname(cwd) : cwd
-  return join(workspaceRoot, '工资存档')
+  return archiveRoot
 }
 
 async function copyArchiveFile(
@@ -1897,7 +1886,7 @@ function buildReportSheets(
       name: '自动生成',
       columns: gridColumns(12),
       showColumnHeader: false,
-      columnWidths: [5.16, 16.5, 19.5, 27.75, 1.25, 26.5, 8.5, 7.5, 1.5, 26.5, 9, 9],
+      columnWidths: [5.16, 16.5, 19.5, 27.75, 1.25, 25.5, 8.5, 11.5, 1.5, 26.5, 9, 9],
       rowHeights: [27, null, null, 21, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15, 13.15],
       merges: ['A1:D1', 'F1:L1', 'C2:D2', 'F2:L2', 'F3:H3', 'J3:L3', 'I3:I19', 'A13:C13'],
       rows: [
@@ -2653,6 +2642,7 @@ type VoucherEntry = {
   subjectName: string
   debit?: number
   credit?: number
+  attachmentCount?: number
   summary: string
   partyCode?: string | number
   partyName?: string
@@ -2672,6 +2662,8 @@ type VoucherBuildOptions = {
   includeInsuranceVoucher: boolean
 }
 
+const INSURANCE_VOUCHER_ATTACHMENT_COUNT = 7
+
 function lastDayOfPayrollMonth(today: Date): Date {
   return new Date(today.getFullYear(), today.getMonth() + 1, 0)
 }
@@ -2683,6 +2675,7 @@ function buildVoucherSheet(
   const { unit, today, active, socialSecurity, activeTax } = input
   const date = lastDayOfPayrollMonth(today)
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  const salaryAttachmentCount = options.includeSalaryVoucher ? 14 : 5
 
   const insurancePersonalPension = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '养老保险个人') : 0
   const insuranceUnitPension = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '养老保险单位') : 0
@@ -2765,7 +2758,17 @@ function buildVoucherSheet(
     )
   }
 
-  const rows = entries.map((e) => voucherRow(e, dateStr))
+  const rows = entries.map((e) =>
+    voucherRow(
+      {
+        ...e,
+        attachmentCount:
+          e.attachmentCount ??
+          (e.voucherNo === '2' ? INSURANCE_VOUCHER_ATTACHMENT_COUNT : salaryAttachmentCount)
+      },
+      dateStr
+    )
+  )
   return { name: '凭证', columns: VOUCHER_COLUMNS, rows }
 }
 
@@ -2779,7 +2782,7 @@ function voucherRow(e: VoucherEntry, dateStr: string): Array<string | number> {
   row[5] = e.debit ?? 0
   row[6] = e.credit ?? 0
   row[7] = e.summary
-  row[8] = e.voucherNo === '1' ? 14 : 5
+  row[8] = e.attachmentCount ?? 0
   row[9] = ''
   row[10] = e.summary
   if (e.partyCode !== undefined) row[11] = e.partyCode

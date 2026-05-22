@@ -39,6 +39,7 @@ const props = defineProps<{
   activeView: string
   workflows: WorkflowDefinition[]
   workflowRunningKey: string
+  displayName?: string
 }>()
 
 const emit = defineEmits<{
@@ -59,6 +60,7 @@ const emit = defineEmits<{
 }>()
 
 const sortState = ref<{ key: string; order: 'asc' | 'desc' } | null>(null)
+const worksheetTitle = computed(() => props.displayName || props.worksheet.name)
 const NON_SORTABLE_FIELDS = new Set([
   '身份证号',
   '身份证号码',
@@ -661,7 +663,7 @@ function workflowDisabled(workflow: WorkflowDefinition) {
     <header class="ws-header">
       <div class="ws-title">
         <el-icon><ArrowUpBold /></el-icon>
-        <h2>{{ worksheet.name }}</h2>
+        <h2>{{ worksheetTitle }}</h2>
         <el-button text :icon="Setting" size="small" @click="emit('show-fields')">
           字段结构
         </el-button>
@@ -794,7 +796,7 @@ function workflowDisabled(workflow: WorkflowDefinition) {
 
         <div v-else class="ws-empty">
           <strong>暂无数据</strong>
-          <span>点击右上角"+ 记录"录入第一条，或把 Excel 拖进 D:\\laojiu\\Import 自动入库</span>
+          <span>点击右上角"+ 记录"录入第一条，或把 Excel 拖进 D:\\laojiu\\工资导入 自动入库</span>
         </div>
         </div>
       </div>

@@ -9,11 +9,6 @@ import {
   generateAnnualSalaryReport
 } from './annual-report/annualReport'
 import {
-  calculateBudgetActiveBaseSalary,
-  increaseSalaryGrade,
-  updateSalaryGrade
-} from './budget/budgetActive'
-import {
   syncAllBudgetFromIntegrated,
 } from './budget/integratedBudgetSync'
 import {
@@ -45,27 +40,6 @@ const workflows: WorkflowRegistryItem[] = [
     module: '预算',
     status: 'ready',
     run: syncAllBudgetFromIntegrated
-  },
-  {
-    key: 'budget-active.update-grade',
-    name: '更新薪级',
-    module: '预算在职',
-    status: 'ready',
-    run: updateSalaryGrade
-  },
-  {
-    key: 'budget-active.increase-grade',
-    name: '增加薪级',
-    module: '预算在职',
-    status: 'ready',
-    run: increaseSalaryGrade
-  },
-  {
-    key: 'budget-active.calculate-base-performance',
-    name: '计算基础性绩效工资',
-    module: '预算在职',
-    status: 'ready',
-    run: calculateBudgetActiveBaseSalary
   },
   {
     key: 'housing-subsidy.prepare-new',

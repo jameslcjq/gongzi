@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Bell, CircleCheck, CircleClose, Setting, Tickets, Upload } from '@element-plus/icons-vue'
+import {
+  Bell,
+  CircleCheck,
+  CircleClose,
+  Lock,
+  Setting,
+  SwitchButton,
+  Tickets,
+  Upload,
+  User
+} from '@element-plus/icons-vue'
+import { setSwitchToIntegration } from './integration/insurancePushQueue'
 import FieldStructureDialog from './components/FieldStructureDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import IntegratedPortalPage from './components/IntegratedPortalPage.vue'
 import AnnualAdjustmentPage from './components/AnnualAdjustmentPage.vue'
 import MonthlyPayrollPage from './components/MonthlyPayrollPage.vue'
+import PerformancePayrollPage from './components/PerformancePayrollPage.vue'
 import PivotPage from './components/PivotPage.vue'
 import StatReportPage from './components/StatReportPage.vue'
 import RecordFormDialog from './components/RecordFormDialog.vue'
@@ -43,9 +55,8 @@ type ModuleGroup = {
 
 const modules: ModuleGroup[] = [
   { key: 'integration', label: '一体化对接', tables: [] },
-  { key: 'integrated', label: '一体化', tables: ['一体化在职', '一体化退休', '一体化其他'] },
-  { key: 'payroll', label: '工资报账', tables: [] },
-  { key: 'annual-adjustment', label: '社保个税', tables: [] },
+  { key: 'integrated', label: '工资数据', tables: ['一体化在职', '一体化退休', '一体化其他'] },
+  { key: 'payroll', label: '工资业务', tables: [] },
   { key: 'budget', label: '预算', tables: ['预算在职', '预算退休', '预算其他'] },
   { key: 'annual', label: '工资年报', tables: ['工资年报', '绩效工资'] },
   { key: 'township', label: '乡镇补贴', tables: ['乡镇补贴'] },
@@ -71,9 +82,25 @@ const modules: ModuleGroup[] = [
 ]
 
 const visibleModules = modules.filter((module) => !module.hidden)
+const worksheetDisplayNames: Record<string, string> = {
+  一体化在职: '在职工资',
+  一体化退休: '退休工资',
+  一体化其他: '其他工资'
+}
+
+function displayWorksheetName(name: string) {
+  return worksheetDisplayNames[name] ?? name
+}
 
 const summary = ref<AppSummary | null>(null)
 const error = ref('')
+const loginStorageKey = 'salary-system:logged-in'
+const isLoggedIn = ref(localStorage.getItem(loginStorageKey) === '1')
+const loginForm = ref({
+  username: 'admin',
+  password: ''
+})
+const loginRemember = ref(true)
 const activeModuleKey = ref(modules[0].key)
 const selectedWorksheetId = ref('')
 const worksheetRecords = ref<WorksheetRecordsResult | null>(null)
@@ -142,6 +169,7 @@ const lookupFailureLoading = ref(false)
 const lookupFailureTitle = ref('')
 const lookupFailureRows = ref<LookupFailureEntry[]>([])
 const pivotSubTab = ref<'reports' | 'pivot'>('reports')
+const payrollSubTab = ref<'monthly' | 'performance' | 'annualAdjustment'>('monthly')
 const monthlyPayrollRefreshKey = ref(0)
 
 const activeModule = computed(
@@ -553,7 +581,7 @@ async function deleteRecords(recordIds: number[]) {
 
 async function clearCurrentWorksheet() {
   if (!selectedWorksheet.value) return
-  const name = selectedWorksheet.value.name
+  const name = displayWorksheetName(selectedWorksheet.value.name)
 
   try {
     await ElMessageBox.confirm(
@@ -619,7 +647,7 @@ async function promptHrMasterSync() {
     const preview = await window.salaryApi.previewHrMasterSyncFromIntegrated()
     const warnings = buildHrMasterSyncWarnings(preview)
     if (preview.updatableRows === 0) {
-      await showIdCardLookupNotice('一体化在职身份证匹配提醒', warnings)
+      await showIdCardLookupNotice(`${displayWorksheetName('一体化在职')}身份证匹配提醒`, warnings)
       return
     }
 
@@ -627,8 +655,8 @@ async function promptHrMasterSync() {
     const title = isEmptyMaster ? '更新人事信息主表' : '发现人事信息差异'
     const selections = await openSyncDiffDialog(
       title,
-      appendSyncSummaryWarnings(`一体化在职：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
-      flattenSyncDiffRows('一体化在职', preview.diffs, 'sourceRecordId')
+      appendSyncSummaryWarnings(`${displayWorksheetName('一体化在职')}：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
+      flattenSyncDiffRows(displayWorksheetName('一体化在职'), preview.diffs, 'sourceRecordId')
     )
     if (!selections) return
 
@@ -644,39 +672,6 @@ async function promptHrMasterSync() {
   } finally {
     hrMasterSyncPrompting = false
   }
-}
-
-function buildHrMasterSyncMessage(preview: HrMasterSyncPreview): string {
-  if (preview.masterRows === 0) {
-    return [
-      `<p>人事信息主表当前为空。系统从一体化在职识别到 <b>${preview.updatableRows}</b> 条可写入数据。</p>`,
-      `<p>是否将这些人的单位名称、职称、职级、薪级更新到人事信息？</p>`
-    ].join('')
-  }
-
-  const rows = preview.diffs.slice(0, 20).map((diff) => {
-    const action = diff.action === 'insert' ? '新增' : '更新'
-    const changes = diff.changes
-      .map((change) => {
-        const current = change.currentValue || '空'
-        return `${escapeHtml(change.fieldName)}：${escapeHtml(current)} → ${escapeHtml(change.nextValue)}`
-      })
-      .join('；')
-    return `<li><b>${escapeHtml(action)}</b> ${escapeHtml(diff.name || diff.idCard)}：${changes}</li>`
-  })
-
-  const more = preview.diffs.length > 20 ? `<p>仅显示前 20 条，另有 ${preview.diffs.length - 20} 条未展示。</p>` : ''
-  const missing = preview.missingLookupRows
-    ? `<p>另有 ${preview.missingLookupRows} 条因对照表未匹配到金额，未纳入本次更新。</p>`
-    : ''
-
-  return [
-    `<p>一体化在职与人事信息存在 <b>${preview.updatableRows}</b> 条可更新差异：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人。</p>`,
-    `<ul style="max-height: 280px; overflow: auto; padding-left: 18px; margin: 8px 0;">${rows.join('')}</ul>`,
-    more,
-    missing,
-    `<p>是否将以上差异更新到人事信息？</p>`
-  ].join('')
 }
 
 async function promptBudgetActiveMasterSync() {
@@ -711,38 +706,6 @@ async function promptBudgetActiveMasterSync() {
   }
 }
 
-function buildBudgetActiveMasterSyncMessage(preview: BudgetActiveMasterSyncPreview): string {
-  if (preview.masterRows === 0) {
-    return [
-      `<p>人事信息主表当前为空。系统从预算在职识别到 <b>${preview.updatableRows}</b> 条可写入数据。</p>`,
-      `<p>是否将这些人的性别、民族、参加工作时间更新到人事信息？</p>`
-    ].join('')
-  }
-
-  const rows = preview.diffs.slice(0, 20).map((diff) => {
-    const action = diff.action === 'insert' ? '新增' : '更新'
-    const changes = diff.changes
-      .map((change) => {
-        const current = change.currentValue || '空'
-        return `${escapeHtml(change.fieldName)}：${escapeHtml(current)} → ${escapeHtml(change.nextValue)}`
-      })
-      .join('；')
-    return `<li><b>${escapeHtml(action)}</b> ${escapeHtml(diff.name || diff.idCard)}：${changes}</li>`
-  })
-  const more = preview.diffs.length > 20 ? `<p>仅显示前 20 条，另有 ${preview.diffs.length - 20} 条未展示。</p>` : ''
-  const missing = preview.missingIdCardRows
-    ? `<p>另有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入本次更新。</p>`
-    : ''
-
-  return [
-    `<p>预算在职与人事信息存在 <b>${preview.updatableRows}</b> 条可更新差异：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人。</p>`,
-    `<ul style="max-height: 280px; overflow: auto; padding-left: 18px; margin: 8px 0;">${rows.join('')}</ul>`,
-    more,
-    missing,
-    `<p>是否将以上差异更新到人事信息？</p>`
-  ].join('')
-}
-
 async function promptTeacherDetailMasterSync() {
   if (teacherDetailSyncPrompting) return
   teacherDetailSyncPrompting = true
@@ -773,42 +736,6 @@ async function promptTeacherDetailMasterSync() {
   } finally {
     teacherDetailSyncPrompting = false
   }
-}
-
-function buildTeacherDetailMasterSyncMessage(preview: TeacherDetailMasterSyncPreview): string {
-  if (preview.masterRows === 0) {
-    return [
-      `<p>人事信息主表当前为空。系统从在编教职工基本信息识别到 <b>${preview.updatableRows}</b> 条可写入数据。</p>`,
-      `<p>本次会比对并写入两张表中名称相同的字段，共 ${preview.comparedFields.length} 个字段。</p>`,
-      `<p>是否更新到人事信息？</p>`
-    ].join('')
-  }
-
-  const rows = preview.diffs.slice(0, 20).map((diff) => {
-    const action = diff.action === 'insert' ? '新增' : '更新'
-    const changes = diff.changes
-      .slice(0, 8)
-      .map((change) => {
-        const current = change.currentValue || '空'
-        return `${escapeHtml(change.fieldName)}：${escapeHtml(current)} → ${escapeHtml(change.nextValue)}`
-      })
-      .join('；')
-    const moreChanges = diff.changes.length > 8 ? `；另有 ${diff.changes.length - 8} 项` : ''
-    return `<li><b>${escapeHtml(action)}</b> ${escapeHtml(diff.name || diff.idCard)}：${changes}${moreChanges}</li>`
-  })
-  const more = preview.diffs.length > 20 ? `<p>仅显示前 20 条，另有 ${preview.diffs.length - 20} 条未展示。</p>` : ''
-  const missing = preview.missingIdCardRows
-    ? `<p>另有 ${preview.missingIdCardRows} 条缺少身份证号码，未纳入本次更新。</p>`
-    : ''
-
-  return [
-    `<p>在编教职工基本信息与人事信息存在 <b>${preview.updatableRows}</b> 条可更新差异：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人。</p>`,
-    `<p>比对字段：${preview.comparedFields.map(escapeHtml).join('、')}</p>`,
-    `<ul style="max-height: 280px; overflow: auto; padding-left: 18px; margin: 8px 0;">${rows.join('')}</ul>`,
-    more,
-    missing,
-    `<p>是否将以上差异更新到人事信息？</p>`
-  ].join('')
 }
 
 function flattenSyncDiffRows(
@@ -858,10 +785,10 @@ function openSyncDiffDialog(
 function buildHrMasterSyncWarnings(preview: HrMasterSyncPreview): string[] {
   return [
     ...(preview.missingIdCardRows
-      ? [`一体化在职有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
+      ? [`${displayWorksheetName('一体化在职')}有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
       : []),
     ...(preview.missingLookupRows
-      ? [`一体化在职有 ${preview.missingLookupRows} 条按工资金额未匹配到岗位/薪级对照，未纳入本次更新。`]
+      ? [`${displayWorksheetName('一体化在职')}有 ${preview.missingLookupRows} 条按工资金额未匹配到岗位/薪级对照，未纳入本次更新。`]
       : [])
   ]
 }
@@ -980,12 +907,32 @@ async function handleTownshipImported() {
   }
 }
 
+function handleLogin() {
+  if (!loginForm.value.username.trim() || !loginForm.value.password.trim()) {
+    ElMessage.warning('请输入用户名和密码')
+    return
+  }
+  isLoggedIn.value = true
+  if (loginRemember.value) {
+    localStorage.setItem(loginStorageKey, '1')
+  } else {
+    localStorage.removeItem(loginStorageKey)
+  }
+  ElMessage.success('登录成功')
+}
+
+function handleLogout() {
+  localStorage.removeItem(loginStorageKey)
+  loginForm.value.password = ''
+  isLoggedIn.value = false
+}
+
 function buildTownshipNameIssueMessage(result: TownshipIdCardFillResult): string {
   const rows = result.issues.slice(0, 30).map((issue) => {
     const reason =
       issue.reason === 'duplicate'
-        ? `人事信息/一体化在职/一体化退休中有 ${issue.matchedCount} 个同名不同证件号`
-        : '人事信息/一体化在职/一体化退休中未查到'
+        ? `人事信息/${displayWorksheetName('一体化在职')}/${displayWorksheetName('一体化退休')}中有 ${issue.matchedCount} 个同名不同证件号`
+        : `人事信息/${displayWorksheetName('一体化在职')}/${displayWorksheetName('一体化退休')}中未查到`
     return `<li>${escapeHtml(issue.name || `第 ${issue.rowId} 行`)}：${escapeHtml(reason)}</li>`
   })
   const more = result.issues.length > 30 ? `<p>仅显示前 30 条，另有 ${result.issues.length - 30} 条未展示。</p>` : ''
@@ -993,29 +940,6 @@ function buildTownshipNameIssueMessage(result: TownshipIdCardFillResult): string
     `<p>身份证号已自动更新 ${result.updatedRows} 条；查不到 ${result.notFoundRows} 条，重名 ${result.duplicateRows} 条。</p>`,
     `<ul style="max-height: 280px; overflow: auto; padding-left: 18px; margin: 8px 0;">${rows.join('')}</ul>`,
     more
-  ].join('')
-}
-
-function buildTownshipMasterSyncMessage(preview: TownshipMasterSyncPreview): string {
-  const rows = preview.diffs.slice(0, 20).map((diff) => {
-    const changes = diff.changes
-      .map((change) => {
-        const current = change.currentValue || '空'
-        return `${escapeHtml(change.fieldName)}：${escapeHtml(current)} → ${escapeHtml(change.nextValue)}`
-      })
-      .join('；')
-    return `<li>${escapeHtml(diff.name || diff.idCard)}：${changes}</li>`
-  })
-  const more = preview.diffs.length > 20 ? `<p>仅显示前 20 条，另有 ${preview.diffs.length - 20} 条未展示。</p>` : ''
-  const missing = preview.missingMasterRows
-    ? `<p>另有 ${preview.missingMasterRows} 条身份证号在人事信息中未匹配到，未纳入本次更新。</p>`
-    : ''
-  return [
-    `<p>乡镇补贴与人事信息存在 <b>${preview.updatableRows}</b> 条可更新差异。</p>`,
-    `<ul style="max-height: 280px; overflow: auto; padding-left: 18px; margin: 8px 0;">${rows.join('')}</ul>`,
-    more,
-    missing,
-    `<p>是否将工作时间、工龄、乡镇工作年限更新到人事信息？</p>`
   ].join('')
 }
 
@@ -1066,7 +990,7 @@ async function openSettingsWorksheet(name: string) {
 const worksheetOptions = computed(() =>
   (summary.value?.worksheets ?? []).map((item) => ({
     worksheetId: item.worksheetId,
-    name: item.name
+    name: displayWorksheetName(item.name)
   }))
 )
 
@@ -1079,15 +1003,60 @@ onMounted(() => {
     if (document.visibilityState === 'hidden') return
     if (!importWatcherLoading.value) void refreshImportWatcher()
   }, 5000)
+  // 注册"切换到一体化对接"回调，供 MonthlyPayrollPage 推送保险时跳转用
+  setSwitchToIntegration(() => {
+    activeModuleKey.value = 'integration'
+  })
 })
 
 onUnmounted(() => {
+  setSwitchToIntegration(null)
   if (importWatcherTimer) clearInterval(importWatcherTimer)
 })
 </script>
 
 <template>
-  <div class="md-shell">
+  <section v-if="!isLoggedIn" class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-mark">资</div>
+        <h1>工资系统</h1>
+        <p>工资业务与数据管理工作台</p>
+      </div>
+
+      <el-form :model="loginForm" label-position="top" autocomplete="on" @submit.prevent="handleLogin">
+        <el-form-item label="用户名">
+          <el-input
+            v-model="loginForm.username"
+            :prefix-icon="User"
+            name="username"
+            autocomplete="username"
+            placeholder="请输入用户名"
+          />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input
+            v-model="loginForm.password"
+            :prefix-icon="Lock"
+            type="password"
+            name="password"
+            autocomplete="current-password"
+            placeholder="请输入密码"
+            show-password
+            @keyup.enter="handleLogin"
+          />
+        </el-form-item>
+        <el-checkbox v-model="loginRemember" class="login-remember">保持登录</el-checkbox>
+        <el-button type="primary" native-type="submit" class="login-button">立即登录</el-button>
+      </el-form>
+
+      <div class="login-footer">
+        <p>© 2026 老九 版权所有</p>
+      </div>
+    </div>
+  </section>
+
+  <div v-else class="md-shell">
     <header class="md-topbar">
       <div class="md-brand">
         <div class="md-brand-mark">资</div>
@@ -1111,6 +1080,7 @@ onUnmounted(() => {
       </nav>
 
       <div class="md-topbar-actions">
+        <span class="md-copyright">© 2026 老九 版权所有</span>
         <el-popover placement="bottom-end" width="420" trigger="click" popper-class="import-notice-popover">
           <template #reference>
             <button class="md-import-notice" :class="{ failed: failedImportCount > 0 }">
@@ -1179,6 +1149,11 @@ onUnmounted(() => {
             <el-icon><Setting /></el-icon>
           </button>
         </el-tooltip>
+        <el-tooltip content="退出登录" placement="bottom">
+          <button class="md-icon-btn" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+          </button>
+        </el-tooltip>
       </div>
     </header>
 
@@ -1206,24 +1181,55 @@ onUnmounted(() => {
 
       <IntegratedPortalPage v-else-if="activeModuleKey === 'integration'" />
 
-      <AnnualAdjustmentPage
-        v-else-if="activeModuleKey === 'annual-adjustment'"
-        :import-watcher="importWatcher"
-        :loading="importWatcherLoading"
-        @refresh="refreshImportWatcher"
-        @open-folder="openImportWatcherFolder"
-      />
+      <template v-else-if="activeModuleKey === 'payroll'">
+        <aside class="md-sidebar">
+          <div class="md-sidebar-list">
+            <div
+              class="md-sidebar-item"
+              :class="{ active: payrollSubTab === 'monthly' }"
+              @click="payrollSubTab = 'monthly'"
+            >
+              <el-icon><Tickets /></el-icon>
+              <span>工资报账</span>
+            </div>
+            <div
+              class="md-sidebar-item"
+              :class="{ active: payrollSubTab === 'performance' }"
+              @click="payrollSubTab = 'performance'"
+            >
+              <el-icon><Tickets /></el-icon>
+              <span>绩效工资</span>
+            </div>
+            <div
+              class="md-sidebar-item"
+              :class="{ active: payrollSubTab === 'annualAdjustment' }"
+              @click="payrollSubTab = 'annualAdjustment'"
+            >
+              <el-icon><Tickets /></el-icon>
+              <span>社保个税</span>
+            </div>
+          </div>
+        </aside>
+        <main class="md-content">
+          <MonthlyPayrollPage
+            v-if="payrollSubTab === 'monthly'"
+            :import-watcher="importWatcher"
+            :loading="importWatcherLoading"
+            :refresh-key="monthlyPayrollRefreshKey"
+            @refresh="refreshImportWatcher"
+          />
+          <PerformancePayrollPage v-else-if="payrollSubTab === 'performance'" />
+          <AnnualAdjustmentPage
+            v-else
+            :import-watcher="importWatcher"
+            :loading="importWatcherLoading"
+            @refresh="refreshImportWatcher"
+            @open-folder="openImportWatcherFolder"
+          />
+        </main>
+      </template>
 
-      <MonthlyPayrollPage
-        v-else-if="activeModuleKey === 'payroll'"
-        :import-watcher="importWatcher"
-        :loading="importWatcherLoading"
-        :refresh-key="monthlyPayrollRefreshKey"
-        @refresh="refreshImportWatcher"
-        @open-folder="openImportWatcherFolder"
-      />
-
-      <template v-if="activeModuleKey !== 'pivot' && activeModuleKey !== 'payroll' && activeModuleKey !== 'integration' && activeModuleKey !== 'annual-adjustment'">
+      <template v-if="activeModuleKey !== 'pivot' && activeModuleKey !== 'payroll' && activeModuleKey !== 'integration'">
         <aside class="md-sidebar">
           <div class="md-sidebar-list">
             <div
@@ -1234,7 +1240,7 @@ onUnmounted(() => {
               @click="selectedWorksheetId = table.worksheetId"
             >
               <el-icon><Tickets /></el-icon>
-              <span>{{ table.name }}</span>
+              <span>{{ displayWorksheetName(table.name) }}</span>
             </div>
             <div v-if="tablesInModule.length === 0" class="md-sidebar-empty">本模块暂无工作表</div>
           </div>
@@ -1253,6 +1259,7 @@ onUnmounted(() => {
           <WorksheetView
             v-if="selectedWorksheet"
             :worksheet="selectedWorksheet"
+            :display-name="displayWorksheetName(selectedWorksheet.name)"
             :records="worksheetRecords"
             :records-loading="recordsLoading"
             :page="page"
@@ -1288,7 +1295,7 @@ onUnmounted(() => {
     <RecordFormDialog
       v-if="selectedWorksheet"
       v-model="recordDialogVisible"
-      :worksheet-name="selectedWorksheet.name"
+      :worksheet-name="displayWorksheetName(selectedWorksheet.name)"
       :fields="selectedWorksheet.fields"
       :initial-values="recordDialogInitial"
       :mode="recordDialogMode"
@@ -1299,7 +1306,7 @@ onUnmounted(() => {
     <FieldStructureDialog
       v-if="selectedWorksheet"
       v-model="fieldDialogVisible"
-      :worksheet-name="selectedWorksheet.name"
+      :worksheet-name="displayWorksheetName(selectedWorksheet.name)"
       :fields="selectedWorksheet.fields"
       :saving="fieldSaving"
       @save="saveFields"
@@ -1416,6 +1423,77 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.login-container {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(47, 84, 235, 0.92) 0%, rgba(30, 58, 138, 0.96) 100%),
+    var(--bg);
+}
+
+.login-card {
+  width: 400px;
+  padding: 34px 38px 30px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.24);
+}
+
+.login-header {
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.login-mark {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 800;
+  background: #2f54eb;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(47, 84, 235, 0.24);
+}
+
+.login-header h1 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.login-header p {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.login-remember {
+  margin-top: 2px;
+}
+
+.login-button {
+  width: 100%;
+  height: 38px;
+  margin-top: 16px;
+}
+
+.login-footer {
+  margin-top: 30px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.login-footer p {
+  margin: 0;
+}
+
 .md-shell {
   display: flex;
   flex-direction: column;
@@ -1519,6 +1597,13 @@ onUnmounted(() => {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+
+.md-copyright {
+  margin-right: 8px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 .md-import-notice {

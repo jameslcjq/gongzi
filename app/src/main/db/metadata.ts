@@ -6,6 +6,7 @@ let metadataCache: WorksheetMeta[] | null = null
 
 function resolveMetadataPath(): string {
   const candidates = [
+    resolve(process.resourcesPath ?? '', 'docs/data/worksheets-retained.json'),
     resolve(process.cwd(), '../docs/data/worksheets-retained.json'),
     resolve(process.cwd(), 'docs/data/worksheets-retained.json'),
     resolve(__dirname, '../../../docs/data/worksheets-retained.json')

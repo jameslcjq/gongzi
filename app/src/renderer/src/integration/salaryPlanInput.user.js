@@ -848,5 +848,8 @@
   }
 
   boot()
-  setInterval(boot, 1200)
+  if (window.__salaryPlanInputTimer) {
+    clearInterval(window.__salaryPlanInputTimer)
+  }
+  window.__salaryPlanInputTimer = setInterval(boot, 1200)
 })()

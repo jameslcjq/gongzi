@@ -1,4 +1,4 @@
-import { all, getDatabase, run } from '../../db/connection'
+import { all, getDatabase } from '../../db/connection'
 import type { LookupFailureEntry } from '../../../shared/types'
 
 export interface LookupFailureQuery {
@@ -70,23 +70,5 @@ export async function listLookupFailures(query: LookupFailureQuery = {}): Promis
       createdAt: row.created_at
     }))
   }
-}
-
-export async function clearLookupFailures(workflow?: string): Promise<number> {
-  const database = await getDatabase()
-  const totalRow = await all<{ count: number }>(
-    database,
-    workflow
-      ? `SELECT COUNT(*) AS count FROM lookup_failures WHERE workflow = ?`
-      : `SELECT COUNT(*) AS count FROM lookup_failures`,
-    workflow ? [workflow] : []
-  )
-  const total = totalRow[0]?.count ?? 0
-  if (workflow) {
-    await run(database, `DELETE FROM lookup_failures WHERE workflow = ?`, [workflow])
-  } else {
-    await run(database, `DELETE FROM lookup_failures`)
-  }
-  return total
 }
 

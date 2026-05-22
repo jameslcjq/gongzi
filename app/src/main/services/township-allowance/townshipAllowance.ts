@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx'
 import type { RuleResult } from '../../../shared/types'
 import { failRule, okRule } from '../ruleResult'
 import { findColumnByName, getWorksheetByName, tableNameOf } from '../worksheetTable'
+import { getDataPath } from '../../config/paths'
 
 const N = {
   integratedActive: '\u4e00\u4f53\u5316\u5728\u804c',
@@ -27,7 +28,7 @@ const F = {
   lookupAmount: '\u91d1\u989d'
 }
 
-const reportFolder = 'D:\\laojiu\\Import\\reports'
+const reportFolder = getDataPath('reports')
 const annualIncreaseSettingKey = 'township_allowance_last_annual_increase_year'
 
 export async function applyAnnualTownshipYearIncreaseIfNeeded(

@@ -4,6 +4,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ImportBatchSummary, ImportPreview } from '@shared/types'
 
 type WorksheetOption = { worksheetId: string; name: string }
+const worksheetDisplayNames: Record<string, string> = {
+  一体化在职: '在职工资',
+  一体化退休: '退休工资',
+  一体化其他: '其他工资'
+}
+
+function displayWorksheetName(name?: string) {
+  if (!name) return ''
+  return worksheetDisplayNames[name] ?? name
+}
 
 const props = defineProps<{
   modelValue: boolean
@@ -130,7 +140,7 @@ async function refreshBatches() {
 async function rollback(batch: ImportBatchSummary) {
   try {
     await ElMessageBox.confirm(
-      `确认回滚批次 #${batch.id}（${batch.worksheetName} ${batch.rowCount} 行）吗？`,
+      `确认回滚批次 #${batch.id}（${displayWorksheetName(batch.worksheetName)} ${batch.rowCount} 行）吗？`,
       '回滚导入批次',
       { type: 'warning', confirmButtonText: '回滚', cancelButtonText: '取消' }
     )
@@ -192,12 +202,12 @@ const statusTag = (status: ImportBatchSummary['status']) => {
         show-icon
         :closable="false"
         :title="`发现 ${preview.unknownHeaders.length} 个系统未登记字段，已暂停导入`"
-        :description="`请先到「${preview.worksheetName} - 字段结构」中新增字段后再重新导入：${preview.unknownHeaders.join('、')}`"
+        :description="`请先到「${displayWorksheetName(preview.worksheetName)} - 字段结构」中新增字段后再重新导入：${preview.unknownHeaders.join('、')}`"
         style="margin-bottom: 12px"
       />
 
       <div v-if="preview" class="preview-meta">
-        目标：<strong>{{ preview.worksheetName }}</strong>
+        目标：<strong>{{ displayWorksheetName(preview.worksheetName) }}</strong>
         共 {{ preview.totalRows }} 行，已匹配 {{ preview.matchedHeaders.length }} 列
       </div>
 
@@ -266,7 +276,9 @@ const statusTag = (status: ImportBatchSummary['status']) => {
 
       <el-table :data="batches" border size="small" height="240">
         <el-table-column prop="id" label="#" width="70" />
-        <el-table-column prop="worksheetName" label="工作表" min-width="140" />
+        <el-table-column label="工作表" min-width="140">
+          <template #default="{ row }">{{ displayWorksheetName(row.worksheetName) }}</template>
+        </el-table-column>
         <el-table-column prop="sourceName" label="来源文件" min-width="180" show-overflow-tooltip />
         <el-table-column prop="rowCount" label="行数" width="80" align="right" />
         <el-table-column label="状态" width="100">

@@ -8,6 +8,7 @@ import { all, getDatabase, run } from '../db/connection'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import { readUnitSettings } from './unitSettings'
 import { getWorksheetByName, tableNameOf } from './worksheetTable'
+import { getDataPath } from '../config/paths'
 import type {
   AnnualAdjustmentApplyInput,
   AnnualAdjustmentApplyResult,
@@ -178,7 +179,7 @@ export async function applyAnnualAdjustment(
   const sources = await readAnnualSources(input)
   const prepared = prepareAnnualSources(sources)
   const integratedPlan = await buildAnnualIntegratedPlan(prepared.people)
-  const outputDir = join(app.getPath('userData'), '社保个税输出')
+  const outputDir = getDataPath('社保个税输出')
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
 
@@ -238,7 +239,7 @@ export async function generatePersonalTaxImportWorkbook(
   const rows = await buildPersonalTaxRows(input.incomeFields)
   if (rows.length === 0) throw new Error('一体化在职没有可导出的人员')
 
-  const outputDir = join(app.getPath('userData'), '社保个税输出')
+  const outputDir = getDataPath('社保个税输出')
   mkdirSync(outputDir, { recursive: true })
   const filePath = join(outputDir, `正常工资薪金所得_${timestamp()}.xls`)
   await writePersonalTaxWorkbook(
@@ -270,7 +271,7 @@ export async function exportSocialInsuranceBaseWorkbook(
   const rows = await buildSocialInsuranceBaseRows(input.baseFields)
   if (rows.length === 0) throw new Error('一体化在职没有可导出的人员')
 
-  const outputDir = join(app.getPath('userData'), '社保个税输出')
+  const outputDir = getDataPath('社保个税输出')
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
   const filePath = join(outputDir, `参保职工列表_社保基数_${stamp}.xlsx`)
@@ -416,7 +417,7 @@ async function writePersonalTaxWorkbook(
 ): Promise<void> {
   if (templateWorkbookPath && existsForRead(templateWorkbookPath)) {
     const stamp = timestamp()
-    const dataPath = join(app.getPath('userData'), '社保个税输出', `个税导入数据_${stamp}.json`)
+    const dataPath = getDataPath('社保个税输出', `个税导入数据_${stamp}.json`)
     writeFileSync(dataPath, JSON.stringify(rows), 'utf8')
     try {
       await runPowerShellScript(
@@ -502,7 +503,7 @@ async function writeSocialInsuranceBaseWorkbook(
   stamp: string
 ): Promise<void> {
   if (templateWorkbookPath && existsForRead(templateWorkbookPath)) {
-    const dataPath = join(app.getPath('userData'), '社保个税输出', `社保基数数据_${stamp}.json`)
+    const dataPath = getDataPath('社保个税输出', `社保基数数据_${stamp}.json`)
     writeFileSync(dataPath, JSON.stringify(rows), 'utf8')
     try {
       await runPowerShellScript(
@@ -575,7 +576,7 @@ function resolveBuiltinTemplatePath(fileName: string): string | undefined {
   ]
   const source = candidates.find((candidate) => existsForRead(candidate))
   if (!source) return undefined
-  const targetDir = join(app.getPath('userData'), '内置模板')
+  const targetDir = getDataPath('内置模板')
   mkdirSync(targetDir, { recursive: true })
   const target = join(targetDir, fileName)
   copyFileSync(source, target)

@@ -8,6 +8,12 @@ export type WorksheetField = {
   hidden?: boolean
   displayOrder?: number
   custom?: boolean
+  /**
+   * 用于一体化预算 xls 导入时的"列匹配键"。形如 "人员基本情况_性别*" / "序号"，
+   * 由 xls 表头 row2(分组) + row3(字段) 拼成。
+   * 与 name 解耦：name 是 UI 显示名，importSource 是匹配名，可独立演进。
+   */
+  importSource?: string
 }
 
 export type WorksheetMeta = {
@@ -239,6 +245,60 @@ export type SalaryExportSaltype = {
   saltype_name: string
   /** 是否只导首批次（退休类用 true，因为它通常没有"数币"等二级批次） */
   onlyFirstBatch?: boolean
+}
+
+export type IntegratedHistorySalaryPeriod = {
+  year: number
+  month: number
+}
+
+export type IntegratedHistorySalaryPerson = {
+  name: string
+  idCard: string
+  jobSalary: number
+  salaryLevel: number
+  postAllowance: number
+  livingAllowance: number
+  rowNumber?: number
+}
+
+export type IntegratedHistorySalaryDataset = IntegratedHistorySalaryPeriod & {
+  agencyId: string
+  agencyName: string
+  agencyCode?: string
+  saltypeId: string
+  saltypeName: string
+  salbatchId: string
+  salbatchName: string
+  people: IntegratedHistorySalaryPerson[]
+  warnings: string[]
+}
+
+export type PerformancePayrollGenerateInput = {
+  unitName?: string
+  first: IntegratedHistorySalaryDataset
+  second: IntegratedHistorySalaryDataset
+}
+
+export type PerformancePayrollHistoryGenerateInput = {
+  firstPeriod: IntegratedHistorySalaryPeriod
+  secondPeriod: IntegratedHistorySalaryPeriod
+}
+
+export type PerformancePayrollLocalGenerateInput = PerformancePayrollHistoryGenerateInput & {
+  firstWorkbookPath: string
+  secondWorkbookPath: string
+}
+
+export type PerformancePayrollGenerateResult = {
+  ok: boolean
+  filePath: string
+  rowCount: number
+  matchedCount: number
+  changedCount: number
+  firstMissingCount: number
+  secondMissingCount: number
+  warnings: string[]
 }
 
 export type UnitSettings = {

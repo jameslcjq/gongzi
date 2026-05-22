@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Close,
   Download,
   Link,
-  Money,
   Plus,
   Refresh,
-  Upload,
   VideoCamera,
   VideoPause
 } from '@element-plus/icons-vue'
@@ -26,11 +24,16 @@ import {
   buildOpenSalaryPlanInputScript,
   buildSalaryPlanInputScript
 } from '../integration/salaryPlanInputScript'
-import { buildBudgetExportScript } from '../integration/budgetExportScript'
+import {
+  buildAutoVoucherEntryScript,
+  buildStartAutoVoucherEntryScript
+} from '../integration/autoVoucherEntryScript'
+// 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 自动入库
+import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
+import { buildPushVoucherScript } from '../integration/pushVoucherScript'
+import { pendingPushQueue, type PushStep } from '../integration/insurancePushQueue'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
-const voucherImportUrl =
-  'http://172.24.147.202/gld-web/gl/html/common/Import.html?modelType=29&mode=0&menuid=227b6262406c4afb836d98abe98d4f85'
 
 type SalaryExportFile = {
   filename: string
@@ -62,7 +65,7 @@ type PortalWebview = HTMLElement & {
   getTitle?: () => string
   getWebContentsId: () => number
   reload: () => void
-  loadURL?: (url: string) => Promise<void>
+  loadURL: (url: string) => Promise<void>
   src: string
 }
 
@@ -99,37 +102,10 @@ const tabs = ref<Tab[]>([
 ])
 const activeTabId = ref<string>(tabs.value[0].id)
 const salaryExporting = ref(false)
-const budgetExporting = ref(false)
-
-// ---------------------------------------------------------------------------
-// 预算导出（模拟点击 → 文件由 will-download 拦截器接住自动入库）
-// ---------------------------------------------------------------------------
-async function exportBudget(): Promise<void> {
-  const wv = activeWebview()
-  if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
-    return
-  }
-  if (budgetExporting.value) return
-  budgetExporting.value = true
-  try {
-    const result = (await wv.executeJavaScript(buildBudgetExportScript())) as {
-      ok: boolean
-      message: string
-    }
-    if (result?.ok) {
-      ElMessage.success(
-        result.message + '；下载完成后会自动入库（监听 D:\\laojiu\\Import）'
-      )
-    } else {
-      ElMessage.warning(result?.message || '预算导出未触发')
-    }
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '预算导出脚本执行失败')
-  } finally {
-    budgetExporting.value = false
-  }
-}
+const autoVoucherEntryRunning = ref(false)
+// 预算 xls 改成被动模式：不再有 toolbar 按钮、不模拟点击、不自动跳转。
+// 用户在内网手动点系统的导出按钮 → main 进程 will-download 按文件名 "人员信息"
+// 判定为预算文件 → 落入 预算导出/ 子目录 → 立即调 budgetExcelImport 入库。
 
 // ---------------------------------------------------------------------------
 // 录制模式
@@ -320,18 +296,132 @@ function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
 // 主进程通过 IPC 通知"webview 内有弹窗请求"
 let stopOpenTabListener: (() => void) | null = null
 let stopDownloadDoneListener: (() => void) | null = null
+let stopBudgetImportListener: (() => void) | null = null
+// 保险/凭证推送队列：MonthlyPayrollPage 把多步任务塞进 pendingPushQueue，
+// 这里串行处理，每步在 active webview 上跑对应注入脚本
+const processingPushQueue = ref(false)
+
+async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
+  if (step.kind === 'insurance') {
+    ElMessage.info(`【保险】开始：${step.label}（${step.records.length} 条）`)
+    const r = (await wv.executeJavaScript(buildPushInsuranceScript(step.records))) as {
+      ok: boolean
+      reason?: string
+      recordCount?: number
+    }
+    if (r?.ok) {
+      ElMessage.success(`✅ 保险已推送 ${r.recordCount} 条 / ${step.label}`)
+    } else {
+      ElMessage.error(`❌ 保险推送失败：${r?.reason || '未知错误'}`)
+    }
+  } else if (step.kind === 'voucher') {
+    ElMessage.info(`【凭证】开始：${step.label}（${step.fileName}）`)
+    const r = (await wv.executeJavaScript(
+      buildPushVoucherScript(step.fileName, step.fileBase64, step.label)
+    )) as { ok: boolean; reason?: string }
+    if (r?.ok) {
+      ElMessage.success(`✅ 凭证已导入 / ${step.label}`)
+    } else {
+      ElMessage.error(`❌ 凭证推送失败：${r?.reason || '未知错误'}`)
+    }
+  }
+}
+
+async function processPushQueue(): Promise<void> {
+  if (processingPushQueue.value) return
+  if (!pendingPushQueue.value.length) return
+  processingPushQueue.value = true
+  try {
+    const wv = activeWebview()
+    if (!wv) {
+      ElMessage.error('一体化 webview 尚未就绪，推送任务已丢弃，请重新触发')
+      pendingPushQueue.value = []
+      return
+    }
+    while (pendingPushQueue.value.length > 0) {
+      const step = pendingPushQueue.value.shift() as PushStep
+      try {
+        await runOneStep(wv, step)
+      } catch (error) {
+        ElMessage.error(
+          `执行 ${step.kind} 步骤异常：${error instanceof Error ? error.message : String(error)}`
+        )
+        // 出错继续做后面的步骤
+      }
+      // 步骤间隔，让浮窗状态可读
+      await new Promise((r) => window.setTimeout(r, 1200))
+    }
+  } finally {
+    processingPushQueue.value = false
+  }
+}
+
+watch(
+  () => pendingPushQueue.value.length,
+  (len) => {
+    if (len > 0) void processPushQueue()
+  },
+  { immediate: false }
+)
+
 onMounted(() => {
+  if (pendingPushQueue.value.length > 0) {
+    void nextTick(() => {
+      window.setTimeout(() => void processPushQueue(), 800)
+    })
+  }
+  stopBudgetImportListener = window.salaryApi.onBudgetImportDone(
+    (payload: {
+      ok: boolean
+      savedPath: string
+      totalInserted?: number
+      totalUpdated?: number
+      totalSkipped?: number
+      sheets?: Array<{
+        sheetName: string
+        worksheetName: string
+        inserted: number
+        updated: number
+        skipped: number
+        status: string
+        message?: string
+      }>
+      message?: string
+    }) => {
+      if (payload.ok) {
+        const lines = (payload.sheets || [])
+          .filter((s) => s.inserted + s.updated > 0)
+          .map((s) => `  • ${s.worksheetName}: 新增 ${s.inserted} / 更新 ${s.updated}`)
+        ElMessage.success({
+          message:
+            `✅ 预算 xls 入库完成：插入 ${payload.totalInserted || 0}，更新 ${payload.totalUpdated || 0}\n` +
+            (lines.length ? lines.join('\n') : '（所有 sheet 为空或无新增）'),
+          duration: 10000
+        })
+      } else {
+        ElMessage.error(`预算入库失败：${payload.message || '未知错误'}`)
+      }
+    }
+  )
+
   stopDownloadDoneListener = window.salaryApi.onWebviewDownloadDone((payload: {
     ok: boolean
     state: string
     originalName: string
     savedPath: string
     url: string
+    isBudget?: boolean
   }) => {
     if (payload.ok) {
-      ElMessage.success(
-        `已自动入库：${payload.originalName} → ${payload.savedPath}（watcher 会自动导入）`
-      )
+      if (payload.isBudget) {
+        ElMessage.success(
+          `预算 xls 已存档：${payload.savedPath}；正在自动入库...`
+        )
+      } else {
+        ElMessage.success(
+          `已自动入库：${payload.originalName} → ${payload.savedPath}（watcher 会自动导入）`
+        )
+      }
     } else {
       ElMessage.warning(`一体化下载未完成（${payload.state}）：${payload.originalName}`)
     }
@@ -365,6 +455,10 @@ onBeforeUnmount(() => {
   if (stopDownloadDoneListener) {
     stopDownloadDoneListener()
     stopDownloadDoneListener = null
+  }
+  if (stopBudgetImportListener) {
+    stopBudgetImportListener()
+    stopBudgetImportListener = null
   }
 })
 
@@ -430,10 +524,6 @@ function reload(): void {
   activeWebview()?.reload()
 }
 
-function openVoucherImport(): void {
-  openNewTab(voucherImportUrl)
-}
-
 async function openExternal(): Promise<void> {
   const url = activeTab.value?.url || portalUrl
   try {
@@ -476,6 +566,36 @@ async function openSalaryPlanInput(): Promise<void> {
   }
 }
 
+async function startAutoVoucherEntry(): Promise<void> {
+  const wv = activeWebview()
+  if (!wv) {
+    ElMessage.warning('一体化页面尚未就绪')
+    return
+  }
+  if (autoVoucherEntryRunning.value) return
+  autoVoucherEntryRunning.value = true
+
+  try {
+    await installPortalAutomationScripts(activeTabId.value)
+    const result = (await wv.executeJavaScript(buildStartAutoVoucherEntryScript())) as
+      | { ok: true; savedCount?: number; skippedCount?: number }
+      | { ok: false; message?: string; savedCount?: number; skippedCount?: number }
+      | undefined
+
+    if (result?.ok) {
+      ElMessage.success(
+        `自动录入完成：保存 ${result.savedCount || 0} 次，跳过 ${result.skippedCount || 0} 条`
+      )
+    } else {
+      ElMessage.warning(result?.message || '请先进入“直接支付外部数据”的列表页')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '自动录入脚本执行失败')
+  } finally {
+    autoVoucherEntryRunning.value = false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 一体化页面脚本注入（跨 frame）
 // ---------------------------------------------------------------------------
@@ -485,6 +605,7 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
 
   const scripts = [
     { name: '凭证按钮', code: buildVoucherMergeScript({ autoStart: false }) },
+    { name: '自动录入', code: buildAutoVoucherEntryScript({ autoStart: false }) },
     { name: '人员经费录入', code: buildSalaryPlanInputScript({ showPageButton: false }) }
   ]
 
@@ -511,6 +632,11 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
       }
     } catch (error) {
       console.warn(`${script.name}注入失败`, error)
+    }
+    try {
+      await wv.executeJavaScript(script.code)
+    } catch (error) {
+      console.warn(`${script.name}顶层注入失败`, error)
     }
   }
 }
@@ -644,18 +770,17 @@ void nextTick(() => {
       <div class="portal-actions">
         <el-button :icon="Refresh" @click="reload">刷新</el-button>
         <el-button type="primary" @click="openSalaryPlanInput">人员经费录入</el-button>
-        <el-button :icon="Upload" @click="openVoucherImport">凭证导入</el-button>
+        <el-button
+          type="success"
+          :loading="autoVoucherEntryRunning"
+          @click="startAutoVoucherEntry"
+          >自动录入</el-button
+        >
         <el-button
           :icon="Download"
           :loading="salaryExporting"
           @click="exportSalary"
           >导出工资</el-button
-        >
-        <el-button
-          :icon="Money"
-          :loading="budgetExporting"
-          @click="exportBudget"
-          >预算导出</el-button
         >
         <el-button
           v-if="!recording"

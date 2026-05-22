@@ -3,10 +3,12 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDatabase } from './db/connection'
 import { registerAppIpc } from './ipc/appApi'
+import { appDisplayName, ensureBusinessFolders, ensureImportFolderDesktopShortcut } from './config/paths'
 import {
-  getImportWatcherStatus,
+  getCachedImportFolder,
   startExcelImportWatcher
 } from './services/excelImportWatcher'
+import { importBudgetXls } from './services/budgetExcelImport'
 import { applyAnnualTownshipYearIncreaseIfNeeded } from './services/township-allowance/townshipAllowance'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -26,45 +28,83 @@ function installDownloadInterception(targetSession: Session, hostWindow: Browser
       const isPortalSource = /172\.24\.147\.202|portal|sal-|bim\//i.test(url)
       const isImportable = /\.(xls|xlsx|csv)$/i.test(filename)
       if (!isPortalSource || !isImportable) {
-        return // 让它正常走默认下载行为
+        return // 让它正常走默认下载行为（操作系统的另存为对话框）
       }
 
-      // 异步取 watcher 文件夹（不能让监听器变 async，否则 will-download 默认行为已走完）
-      void getImportWatcherStatus()
-        .then((status) => {
-          const folder = status.folderPath
-          if (!folder) return
-          if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
+      // ⚠ setSavePath 必须同步调用：异步取目录会让 Electron 先弹出保存对话框
+      const folder = getCachedImportFolder()
+      if (!folder) {
+        console.warn('[will-download] 没有可用的导入目录，放它走默认行为')
+        return
+      }
 
-          const safe = filename.replace(/[\\/:*?"<>|]/g, '_')
-          const ts = new Date()
-            .toISOString()
-            .replace(/[-:]/g, '')
-            .replace(/[T.]/g, '_')
-            .slice(0, 17)
-          const dotIdx = safe.lastIndexOf('.')
-          const stem = dotIdx > 0 ? safe.slice(0, dotIdx) : safe
-          const ext = dotIdx > 0 ? safe.slice(dotIdx) : '.xls'
-          const finalName = `一体化_${stem}_${ts}${ext}`
-          const fullPath = join(folder, finalName)
+      // 预算"人员信息查看"导出的文件名形如 "019070_人员信息_20260522..._xxx.xls"
+      // 只用文件名判定：含"人员信息"四字 → 预算分支（走子目录 + 调 budget importer）
+      // 其他都按工资 xls 处理（主目录 + watcher 自动入库）
+      const isBudget = /人员信息/.test(filename)
+      const targetDir = isBudget ? join(folder, '预算导出') : folder
+      try {
+        if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
+        if (isBudget && !existsSync(targetDir)) mkdirSync(targetDir, { recursive: true })
+      } catch (e) {
+        console.warn('[will-download] 建目录失败', e)
+      }
 
-          item.setSavePath(fullPath)
+      const safe = filename.replace(/[\\/:*?"<>|]/g, '_')
+      const ts = new Date()
+        .toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/[T.]/g, '_')
+        .slice(0, 17)
+      const dotIdx = safe.lastIndexOf('.')
+      const stem = dotIdx > 0 ? safe.slice(0, dotIdx) : safe
+      const ext = dotIdx > 0 ? safe.slice(dotIdx) : '.xls'
+      const prefix = isBudget ? '预算_' : '一体化_'
+      const finalName = `${prefix}${stem}_${ts}${ext}`
+      const fullPath = join(targetDir, finalName)
 
-          item.once('done', (_e, state) => {
-            if (!hostWindow.isDestroyed()) {
-              hostWindow.webContents.send('integration:webview-download-done', {
-                ok: state === 'completed',
-                state,
-                originalName: filename,
-                savedPath: fullPath,
-                url
-              })
-            }
+      // 关键：同步设置保存路径，绕开"另存为"对话框
+      item.setSavePath(fullPath)
+
+      item.once('done', (_e, state) => {
+        const completed = state === 'completed'
+        // 预算 xls 下载完成 → 立即触发入库
+        if (completed && isBudget) {
+          void importBudgetXls(fullPath)
+            .then((result) => {
+              if (!hostWindow.isDestroyed()) {
+                hostWindow.webContents.send('integration:budget-import-done', {
+                  ok: result.ok,
+                  savedPath: fullPath,
+                  totalInserted: result.totalInserted,
+                  totalUpdated: result.totalUpdated,
+                  totalSkipped: result.totalSkipped,
+                  sheets: result.sheets
+                })
+              }
+            })
+            .catch((error) => {
+              console.error('[budget-import] 失败', error)
+              if (!hostWindow.isDestroyed()) {
+                hostWindow.webContents.send('integration:budget-import-done', {
+                  ok: false,
+                  savedPath: fullPath,
+                  message: error instanceof Error ? error.message : String(error)
+                })
+              }
+            })
+        }
+        if (!hostWindow.isDestroyed()) {
+          hostWindow.webContents.send('integration:webview-download-done', {
+            ok: completed,
+            state,
+            originalName: filename,
+            savedPath: fullPath,
+            url,
+            isBudget
           })
-        })
-        .catch((error) => {
-          console.warn('[will-download] 取 import folder 失败', error)
-        })
+        }
+      })
     } catch (error) {
       console.warn('[will-download] 处理异常', error)
     }
@@ -83,7 +123,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 1100,
     minHeight: 720,
-    title: '工资系统',
+    title: appDisplayName,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
@@ -133,6 +173,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  ensureBusinessFolders()
+  ensureImportFolderDesktopShortcut()
   try {
     await getDatabase()
     const townshipAnnualIncrease = await applyAnnualTownshipYearIncreaseIfNeeded()

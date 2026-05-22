@@ -1,7 +1,7 @@
-import { app } from 'electron'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import sqlite3 from 'sqlite3'
+import { getDataPath } from '../config/paths'
 import { readWorksheetMetadata } from './metadata'
 import {
   getSqlType,
@@ -21,6 +21,7 @@ import {
   resolveBudgetWorksheetStatus,
   resolvePersonnelStatus
 } from '../services/personnelStatus'
+import { ensurePackagedLookupSeeds } from '../services/lookupSeeds'
 
 let db: sqlite3.Database | undefined
 let databasePath = ''
@@ -28,7 +29,7 @@ let databasePath = ''
 export async function getDatabase(): Promise<sqlite3.Database> {
   if (db) return db
 
-  databasePath = join(app.getPath('userData'), 'salary-system.sqlite')
+  databasePath = getDataPath('salary-system.sqlite')
   await mkdir(dirname(databasePath), { recursive: true })
 
   db = await openDatabase(databasePath)
@@ -42,6 +43,7 @@ export async function getDatabase(): Promise<sqlite3.Database> {
   await exec(db, readRetainedSchemaSql())
   await ensureSystemTables(db)
   await syncWorksheetColumns(db)
+  await ensurePackagedLookupSeeds(db)
   await backfillHrBankFieldsFromBudget(db)
   await ensureBudgetStatusColumns(db)
   await refreshAllPersonnelStatuses(db)

@@ -2,6 +2,12 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, DocumentChecked, FolderOpened, Printer, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import {
+  pendingPushQueue,
+  requestSwitchToIntegration,
+  type PushStep
+} from '../integration/insurancePushQueue'
+import type { InsuranceRecord } from '../integration/pushInsuranceScript'
 import type {
   ImportWatcherStatus,
   MonthlyPayrollReportResult,
@@ -24,7 +30,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   refresh: []
-  openFolder: []
 }>()
 
 const running = ref(false)
@@ -47,6 +52,7 @@ const printSettings = ref<MonthlyPayrollPrintSettings>({
 const printing = ref(false)
 const voucherPrintTotalPages = ref<number | null>(null)
 const voucherPrintTotalPagesLoading = ref(false)
+const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 
 onMounted(() => {
   void refreshHistory({ autoOpenCurrentMonth: true })
@@ -97,6 +103,70 @@ async function openHistoryFile(path: string | null) {
   if (!path) return
   const err = await window.salaryApi.openLocalPath(path)
   if (err) ElMessage.error(`无法打开：${err}`)
+}
+
+const pushingInsuranceRunId = ref<number | null>(null)
+async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> {
+  if (!row.insuranceImportPath && !row.voucherImportPath) {
+    ElMessage.warning('该记录没有保险/凭证文件可推送')
+    return
+  }
+  pushingInsuranceRunId.value = row.id
+  try {
+    const label = `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
+    const steps: PushStep[] = []
+    const stepHints: string[] = []
+
+    // 步骤 1：保险
+    if (row.insuranceImportPath) {
+      const parsed = await window.salaryApi.parseInsuranceImportXlsx(row.insuranceImportPath)
+      if (!parsed.ok) {
+        ElMessage.error('解析保险 xlsx 失败：' + parsed.reason)
+        return
+      }
+      if (parsed.records.length) {
+        steps.push({
+          kind: 'insurance',
+          records: parsed.records as InsuranceRecord[],
+          label
+        })
+        stepHints.push(`保险 ${parsed.records.length} 条`)
+      }
+    }
+
+    // 步骤 2：凭证
+    if (row.voucherImportPath) {
+      const v = await window.salaryApi.readVoucherXlsx(row.voucherImportPath)
+      if (!v.ok) {
+        ElMessage.error('读取凭证 xlsx 失败：' + v.reason)
+        return
+      }
+      steps.push({
+        kind: 'voucher',
+        fileBase64: v.base64,
+        fileName: v.fileName,
+        label
+      })
+      stepHints.push(`凭证 ${(v.size / 1024).toFixed(1)} KB`)
+    }
+
+    if (!steps.length) {
+      ElMessage.warning('保险/凭证均无内容')
+      return
+    }
+
+    pendingPushQueue.value = steps
+    ElMessage.info(
+      `已准备 ${steps.length} 步推送（${stepHints.join('、')}），正在跳转到"一体化对接"...`
+    )
+    requestSwitchToIntegration()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    setTimeout(() => {
+      if (pushingInsuranceRunId.value === row.id) pushingInsuranceRunId.value = null
+    }, 800)
+  }
 }
 
 async function viewHistoryReport(row: MonthlyPayrollRun) {
@@ -374,7 +444,7 @@ async function runPreprocess(): Promise<void> {
       result.value = confirmedResult
       if (confirmedResult.ok && confirmedResult.warnings.length === 0) {
         ElMessage.success('回写复核通过，开始生成报表')
-        await runGenerate({ skipWorkflow: true })
+        await runGenerate()
       } else if (confirmedResult.ok) {
         ElMessage.warning(confirmedResult.warnings[0] ?? '回写后仍有差异，请人工介入')
       } else {
@@ -385,7 +455,7 @@ async function runPreprocess(): Promise<void> {
     if (next.ok) {
       ElMessage.success('月度工资报账预处理完成')
       if (next.warnings.length === 0) {
-        await runGenerate({ skipWorkflow: true })
+        await runGenerate()
       }
     } else {
       ElMessage.error(next.warnings[0] ?? '月度工资报账预处理失败')
@@ -397,7 +467,7 @@ async function runPreprocess(): Promise<void> {
   }
 }
 
-async function runGenerate(options: { skipWorkflow?: boolean } = {}): Promise<void> {
+async function runGenerate(): Promise<void> {
   if (isCurrentMonthArchived.value) {
     ElMessage.warning('本月工资已月结，不能重新生成报表')
     return
@@ -407,24 +477,22 @@ async function runGenerate(options: { skipWorkflow?: boolean } = {}): Promise<vo
     return
   }
   generating.value = true
-  if (!options.skipWorkflow) generateResult.value = null
+  generateResult.value = null
   report.value = null
   try {
     const payload = currentPayload()
     if (!payload) return
-    const next = options.skipWorkflow
-      ? null
-      : await window.salaryApi.runWorkflow('monthly-payroll.generate', payload)
+    const next = await window.salaryApi.runWorkflow('monthly-payroll.generate', payload)
     const nextReport = await window.salaryApi.generateMonthlyPayrollReportView(payload)
-    if (next) generateResult.value = next
+    generateResult.value = next
     report.value = nextReport
     activeReportSheet.value = firstVisibleSheetName(nextReport.sheets)
     const now = new Date()
     selectedMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    if (!next || next.ok) {
+    if (next.ok) {
       ElMessage.success(nextReport.message)
       void refreshHistory()
-    } else if (next) {
+    } else {
       ElMessage.error(next.warnings[0] ?? '月度工资报账汇总生成失败')
     }
   } catch (error) {
@@ -779,7 +847,7 @@ watch(
     printSettings.value.reportPrinterName
   ] as const,
   () => {
-    if (isVoucherPrintSheet(activeSheet.value?.name)) {
+    if (activeSheet.value?.name === '凭证' || isVoucherPrintSheet(activeSheet.value?.name)) {
       void refreshVoucherPrintTotalPages()
     } else {
       voucherPrintTotalPages.value = null
@@ -868,6 +936,11 @@ function isSalaryVoucher(row: unknown[]): boolean {
   return String(row[0] ?? '').includes('工资')
 }
 
+function voucherPrintTotalPagesForRow(row: unknown[]): number | null {
+  if (!isSalaryVoucher(row)) return INSURANCE_VOUCHER_ATTACHMENT_PAGES
+  return voucherPrintTotalPages.value
+}
+
 function voucherUsagePrintText(row: unknown[]): string {
   const lines = voucherUsageLines(row)
   if (!isSalaryVoucher(row)) return lines.join('\n')
@@ -935,8 +1008,13 @@ function toChineseRmb(value: number): string {
   return out
 }
 
-function formatVoucherCell(value: unknown, colIndex: number): string {
+function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): string {
   if (value === '' || value === null || value === undefined) return ''
+  if (colIndex === 8 && voucherPrintTotalPages.value !== null) {
+    const voucherNo = String(row[2] ?? '')
+    if (voucherNo === '2') return String(INSURANCE_VOUCHER_ATTACHMENT_PAGES)
+    if (voucherNo === '1') return String(voucherPrintTotalPages.value)
+  }
   if (colIndex === 5 || colIndex === 6) {
     const n = Number(value)
     if (!Number.isFinite(n) || n === 0) return ''
@@ -1010,7 +1088,6 @@ function isCustomStyledSheet(name: string): boolean {
         <el-tag :type="canRun ? 'success' : 'warning'" effect="plain">{{ modeText }}</el-tag>
         <el-tag v-if="isCurrentMonthArchived" type="info" effect="plain">本月已月结</el-tag>
         <el-button :icon="Refresh" :loading="loading" @click="emit('refresh')">刷新检测</el-button>
-        <el-button :icon="FolderOpened" @click="emit('openFolder')">打开监控文件夹</el-button>
         <el-button
           type="primary"
           :icon="VideoPlay"
@@ -1059,39 +1136,6 @@ function isCustomStyledSheet(name: string): boolean {
     <div class="rule-note">
       <strong>自动判断规则</strong>
       <p>选择“只报工资”时不生成凭证；选择“只报社保”时只打印五险一金等社保相关报表，但会读取工资表一起生成工资凭证和社保凭证。未检测到个税文件时不报个税。</p>
-    </div>
-
-    <div v-if="result" class="result-panel" :class="{ failed: !result.ok }">
-      <div class="result-title">
-        <strong>{{ result.workflowName }}</strong>
-        <el-tag :type="result.ok ? 'success' : 'danger'" effect="plain">
-          {{ result.ok ? '完成' : '失败' }}
-        </el-tag>
-      </div>
-      <div class="result-lines">
-        <p v-for="message in result.messages" :key="message">{{ message }}</p>
-        <p v-for="warning in result.warnings" :key="warning" class="warning">{{ warning }}</p>
-      </div>
-      <div class="next-step">
-        <strong>下一步</strong>
-        <p v-if="result.warnings.length">
-          先处理上面的差异或异常；确认一体化在职、一体化其他、一体化退休都准确后，再进入报表生成。
-        </p>
-        <template v-else>
-          <p>
-            本月基础核对通过。系统会自动生成报表预览；如果内容和上次一致，会沿用上次输出文件。
-          </p>
-          <el-button
-            type="default"
-            :icon="VideoPlay"
-            :loading="generating"
-            :disabled="isCurrentMonthArchived"
-            @click="() => runGenerate()"
-          >
-            重新生成
-          </el-button>
-        </template>
-      </div>
     </div>
 
     <div v-if="generateResult" class="result-panel generated" :class="{ failed: !generateResult.ok }">
@@ -1154,6 +1198,14 @@ function isCustomStyledSheet(name: string): boolean {
                 type="primary"
                 @click="openHistoryFile(row.insuranceImportPath)"
               >保险导入</el-button>
+              <el-button
+                v-if="row.insuranceImportPath || row.voucherImportPath"
+                size="small"
+                text
+                type="success"
+                :loading="pushingInsuranceRunId === row.id"
+                @click="pushInsuranceToIntegrated(row)"
+              >推送到一体化</el-button>
               <el-button
                 v-if="row.payrollBackpayPath"
                 size="small"
@@ -1346,7 +1398,7 @@ function isCustomStyledSheet(name: string): boolean {
           <tbody>
             <tr v-for="(row, rIdx) in activeSheet.rows" :key="rIdx">
               <td v-for="(cell, cIdx) in row" :key="cIdx" :class="{ 'col-money': cIdx === 5 || cIdx === 6 }">
-                {{ formatVoucherCell(cell, cIdx) }}
+                {{ formatVoucherCell(row, cell, cIdx) }}
               </td>
             </tr>
           </tbody>
@@ -1378,10 +1430,10 @@ function isCustomStyledSheet(name: string): boolean {
           <span class="voucher-item amount-number transfer-number">{{ voucherAmount(row[6]) }}</span>
 
           <span
-            v-if="voucherPrintTotalPages !== null && !voucherPrintTotalPagesLoading"
+            v-if="voucherPrintTotalPagesForRow(row) !== null && !voucherPrintTotalPagesLoading"
             class="voucher-item voucher-total-pages"
           >
-            {{ voucherPrintTotalPages }}
+            {{ voucherPrintTotalPagesForRow(row) }}
           </span>
           <span class="voucher-item voucher-usage-print">{{ voucherUsagePrintText(row) }}</span>
         </article>
@@ -1855,7 +1907,7 @@ function isCustomStyledSheet(name: string): boolean {
 
 /* 自动生成 — 12-column three-band layout (left summary, middle 财务会计, right 预算会计) */
 .sheet-auto .print-area {
-  width: 200mm;
+  width: 206mm;
   margin: 0 auto;
 }
 
@@ -1864,7 +1916,7 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .sheet-auto .report-table td {
-  padding: 1px 4px;
+  padding: 1px 3px;
   vertical-align: middle;
 }
 

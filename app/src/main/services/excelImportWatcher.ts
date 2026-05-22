@@ -1,4 +1,4 @@
-import { app, dialog, shell } from 'electron'
+import { dialog, shell } from 'electron'
 import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
@@ -12,6 +12,7 @@ import type {
 import { commitExcelImport } from './excelImport'
 import { inferWorksheet } from './worksheetInference'
 import { isPersonnelExpensePlanWorkbook } from './budget/personnelExpensePlanPrefill'
+import { getDataPath, importFolder } from '../config/paths'
 
 const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
@@ -23,12 +24,20 @@ function enqueueImport<T>(task: () => Promise<T>): Promise<T> {
   importQueue = next.catch(() => undefined)
   return next
 }
-const preferredImportFolder = 'D:\\laojiu\\Import'
+const preferredImportFolder = importFolder
 const importFolderSettingKey = 'excel_import_folder'
 
 let watcher: FSWatcher | undefined
 let folderPath = ''
 let running = false
+
+/**
+ * 同步取当前监控文件夹路径（不存在则回退到默认值）。
+ * 用于 will-download 等必须同步获取的场景（异步获取会让保存对话框先弹出来）。
+ */
+export function getCachedImportFolder(): string {
+  return folderPath || preferredImportFolder || resolveDefaultFolder()
+}
 
 export async function startExcelImportWatcher(customFolderPath?: string): Promise<ImportWatcherStatus> {
   if (customFolderPath) {
@@ -250,7 +259,7 @@ function resolveDefaultFolder(): string {
   if (canUseFolder(preferredImportFolder)) {
     return preferredImportFolder
   }
-  return join(app.getPath('userData'), 'excel-import')
+  return getDataPath('excel-import')
 }
 
 function canUseFolder(path: string): boolean {
