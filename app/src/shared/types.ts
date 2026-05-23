@@ -839,3 +839,95 @@ export type StatReportDrillResult = {
   rows: Array<Record<string, string | number | null>>
   totalRows: number
 }
+
+// === 邮件附件下载 ===
+
+export interface MailAccount {
+  id?: number
+  email: string
+  imapHost: string
+  imapPort: number
+  username: string
+  authCodeEncrypted: string
+  displayName?: string
+  folder?: string
+  fromFilter?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface MailAccountView {
+  id: number
+  email: string
+  imapHost: string
+  imapPort: number
+  username: string
+  authCodeMasked: string
+  displayName?: string
+  folder?: string
+  fromFilter?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface MailDownloadRule {
+  id?: number
+  enabled: boolean
+  accountId: number
+  subjectContains?: string
+  extensionFilter?: string
+  onlyUnread?: boolean
+  markSeen?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface MailDownloadRecord {
+  id?: number
+  messageUid: number
+  messageId?: string
+  messageDate: string
+  fromAddress: string
+  subject: string
+  attachmentFilename: string
+  attachmentSize: number
+  savedPath: string
+  accountId: number
+  ruleId?: number | null
+  createdAt?: string
+}
+
+export interface MailDownloadLog {
+  id?: number
+  accountId: number
+  ruleId?: number | null
+  level: 'info' | 'warn' | 'error'
+  message: string
+  detail?: string
+  createdAt?: string
+}
+
+export interface MailCheckProgress {
+  phase: 'connecting' | 'scanning' | 'downloading' | 'done'
+  accountEmail?: string
+  totalMessages?: number
+  scannedMessages?: number
+  foundCount?: number
+  downloadedCount?: number
+  skippedCount?: number
+  errorCount?: number
+  currentFilename?: string
+  message?: string
+}
+
+export interface MailCheckResult {
+  accountId: number
+  accountEmail: string
+  totalMessages: number
+  scannedMessages: number
+  foundCount: number
+  downloadedCount: number
+  skippedCount: number
+  errorCount: number
+  errors: string[]
+}

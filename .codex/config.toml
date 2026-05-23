@@ -1,0 +1,9 @@
+﻿# Official Codex configuration restored by script.
+# DeepSeek/MoonBridge provider settings have been removed.
+
+model = "gpt-5.5"
+model_provider = "openai"
+model_reasoning_effort = "high"
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"

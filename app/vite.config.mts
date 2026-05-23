@@ -23,7 +23,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['sqlite3']
+              external: ['sqlite3', 'imapflow', 'mailparser']
             }
           }
         }

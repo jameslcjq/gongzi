@@ -57,7 +57,14 @@ import type {
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
   SocialInsuranceBaseExportInput,
-  SocialInsuranceBaseExportResult
+  SocialInsuranceBaseExportResult,
+  MailAccountView,
+  MailAccount,
+  MailDownloadRule,
+  MailDownloadLog,
+  MailDownloadRecord,
+  MailCheckProgress,
+  MailCheckResult
 } from '../shared/types'
 
 type PivotConfigSummary = {
@@ -398,7 +405,54 @@ const salaryApi = {
     columnKey?: string,
     columnLabel?: string
   ): Promise<StatReportDrillResult> =>
-    ipcRenderer.invoke('stat-report:drill', filters, filterDesc, columnKey, columnLabel)
+    ipcRenderer.invoke('stat-report:drill', filters, filterDesc, columnKey, columnLabel),
+
+  // === 邮件附件下载 ===
+  listMailAccounts: (): Promise<MailAccountView[]> =>
+    ipcRenderer.invoke('mail:account-list'),
+  saveMailAccount: (data: Partial<MailAccount> & { authCodeEncrypted: string }): Promise<MailAccountView> =>
+    ipcRenderer.invoke('mail:account-save', data),
+  deleteMailAccount: (id: number): Promise<void> =>
+    ipcRenderer.invoke('mail:account-delete', id),
+  testMailAccount: (data: { imapHost: string; imapPort: number; username: string; authCodeEncrypted: string }): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke('mail:account-test', data),
+
+  listMailRules: (accountId?: number): Promise<MailDownloadRule[]> =>
+    ipcRenderer.invoke('mail:rule-list', accountId),
+  saveMailRule: (data: Partial<MailDownloadRule> & { accountId: number }): Promise<MailDownloadRule> =>
+    ipcRenderer.invoke('mail:rule-save', data),
+  deleteMailRule: (id: number): Promise<void> =>
+    ipcRenderer.invoke('mail:rule-delete', id),
+
+  listMailFolders: (accountId: number): Promise<string[]> =>
+    ipcRenderer.invoke('mail:folder-list', accountId),
+
+  startMailCheck: (request?: { accountId?: number; daysBack?: number }): Promise<{ ok: boolean; reason?: string; downloadedCount?: number; skippedCount?: number; errorCount?: number }> =>
+    ipcRenderer.invoke('mail:check', request ?? {}),
+  stopMailCheck: (): Promise<void> =>
+    ipcRenderer.invoke('mail:check-stop'),
+
+  onMailCheckProgress: (handler: (progress: MailCheckProgress) => void): (() => void) => {
+    const listener = (_event: unknown, progress: MailCheckProgress): void => handler(progress)
+    ipcRenderer.on('mail:check-progress', listener)
+    return () => { ipcRenderer.removeListener('mail:check-progress', listener) }
+  },
+
+  listMailLogs: (accountId?: number, level?: string, limit?: number, offset?: number): Promise<MailDownloadLog[]> =>
+    ipcRenderer.invoke('mail:log-list', accountId, level, limit, offset),
+  clearMailLogs: (accountId?: number): Promise<number> =>
+    ipcRenderer.invoke('mail:log-clear', accountId),
+
+  chooseMailDir: (): Promise<string | null> =>
+    ipcRenderer.invoke('mail:choose-dir'),
+  openMailDir: (dirPath: string): Promise<void> =>
+    ipcRenderer.invoke('mail:open-dir', dirPath),
+
+  listMailRecords: (limit?: number, offset?: number): Promise<MailDownloadRecord[]> =>
+    ipcRenderer.invoke('mail:record-list', limit, offset),
+
+  clearMailRecords: (accountId?: number): Promise<number> =>
+    ipcRenderer.invoke('mail:record-clear', accountId)
 }
 
 contextBridge.exposeInMainWorld('salaryApi', salaryApi)

@@ -3,6 +3,8 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDatabase } from './db/connection'
 import { registerAppIpc } from './ipc/appApi'
+import { registerMailIpc } from './ipc/mailApi'
+import { startAutoCheck } from './services/mail/mailImapService'
 import { appDisplayName, ensureBusinessFolders, ensureImportFolderDesktopShortcut } from './config/paths'
 import {
   getCachedImportFolder,
@@ -190,11 +192,19 @@ app.whenReady().then(async () => {
     console.error('数据库初始化失败', error)
   }
   registerAppIpc()
+  registerMailIpc()
   createWindow()
 
   startExcelImportWatcher().catch((error) => {
     console.error('Excel 导入监听启动失败', error)
   })
+
+  // 启动后 5 秒自动检测邮件附件
+  setTimeout(() => {
+    startAutoCheck(30).catch((error) => {
+      console.error('邮件自动检测失败', error)
+    })
+  }, 5000)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

@@ -401,6 +401,65 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS mail_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      imap_host TEXT NOT NULL,
+      imap_port INTEGER NOT NULL DEFAULT 993,
+      username TEXT NOT NULL,
+      auth_code_encrypted TEXT NOT NULL,
+      display_name TEXT,
+      folder TEXT,
+      from_filter TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS mail_download_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      from_contains TEXT,
+      subject_contains TEXT,
+      extension_filter TEXT,
+      target_dir TEXT,
+      save_subdir TEXT NOT NULL DEFAULT '下载附件',
+      folder TEXT,
+      only_unread INTEGER DEFAULT 0,
+      mark_seen INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (account_id) REFERENCES mail_accounts(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS mail_download_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      message_uid INTEGER NOT NULL,
+      message_id TEXT,
+      message_date TEXT,
+      from_address TEXT,
+      subject TEXT,
+      attachment_filename TEXT NOT NULL,
+      attachment_size INTEGER NOT NULL DEFAULT 0,
+      attachment_hash TEXT,
+      saved_path TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_mail_record_dedup
+      ON mail_download_records (account_id, message_uid, attachment_filename, attachment_size);
+
+    CREATE TABLE IF NOT EXISTS mail_download_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER,
+      level TEXT NOT NULL DEFAULT 'info',
+      message TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `
   )
 
@@ -432,6 +491,13 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'source_tables', definition: 'TEXT NOT NULL DEFAULT \'\'' },
     { name: 'is_conflict', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'updated_at', definition: 'TEXT' }
+  ])
+  await ensureColumns(database, 'mail_accounts', [
+    { name: 'folder', definition: 'TEXT' },
+    { name: 'from_filter', definition: 'TEXT' }
+  ])
+  await ensureColumns(database, 'mail_download_rules', [
+    { name: 'folder', definition: 'TEXT' }
   ])
 }
 

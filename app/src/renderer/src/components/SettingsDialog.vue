@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsistencyAuditPage from './ConsistencyAuditPage.vue'
+import MailAttachmentPage from './MailAttachmentPage.vue'
 import type {
   BackupSummary,
   ImportWatcherStatus,
@@ -581,6 +582,10 @@ function formatMoney(value: number): string {
             <el-button @click="openLookupWorksheet('学校对照表')">学校对照表</el-button>
           </div>
         </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="邮件附件" name="mail">
+        <MailAttachmentPage />
       </el-tab-pane>
 
       <el-tab-pane label="危险操作" name="danger">
