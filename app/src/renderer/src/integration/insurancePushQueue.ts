@@ -8,6 +8,7 @@ import type { InsuranceRecord } from './pushInsuranceScript'
  * 支持两种步骤：
  *   - insurance：保险记录数组，POST /pay-voucher-server/.../savePayRawData
  *   - voucher：凭证文件 base64，POST /gld-account-server/.../gl_import_file_json (multipart)
+ *   - salary-system-import：工资系统的工资变动/补发工资 Excel 导入
  *
  * 一次塞多步 → 串行处理（先保险再凭证）。一步失败也继续处理后续步骤（独立报错）。
  */
@@ -24,7 +25,17 @@ export type VoucherPushStep = {
   label: string
 }
 
-export type PushStep = InsurancePushStep | VoucherPushStep
+export type SalarySystemImportPushStep = {
+  kind: 'salary-system-import'
+  mode: 'salary' | 'backpay'
+  fileBase64: string
+  fileName: string
+  fileSize: number
+  month?: string
+  label: string
+}
+
+export type PushStep = InsurancePushStep | VoucherPushStep | SalarySystemImportPushStep
 
 export const pendingPushQueue = ref<PushStep[]>([])
 

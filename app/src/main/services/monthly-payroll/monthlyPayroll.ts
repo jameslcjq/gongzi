@@ -1,89 +1,95 @@
-import { copyFile, readdir, readFile, rename, rmdir, unlink, writeFile } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import * as XLSX from 'xlsx'
-import { all, getDatabase, run } from '../../db/connection'
-import { getWorksheetLocalColumns, quoteIdentifier } from '../../db/schema'
 import { failRule, okRule } from '../ruleResult'
-import { findColumnByName, getWorksheetByName, tableNameOf } from '../worksheetTable'
 import type {
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
-  MonthlyPayrollArchiveResult,
-  MonthlyPayrollRun,
+  MonthlyPayrollVoucherPageCounts,
   MonthlyPayrollWorkflowInput,
-  MonthlyPayrollWriteBackPreview,
   RuleResult,
   UnitSettings
 } from '../../../shared/types'
 import { readUnitSettings } from '../unitSettings'
+import { readMonthlyPayrollPrintSettings } from '../printSettings'
 import {
-  importSocialSecurityDetail,
-  importTaxDetail,
-  importHousingFundDetail,
-  type HousingFundDetailRow
-} from './detailImport'
-import { archiveRoot, getDataPath } from '../../config/paths'
-
-type CellValue = string | number | boolean | Date | null | undefined
-
-type SalarySummary = {
-  active: Record<string, number>
-  survivor: Record<string, number>
-  activePeople: PayrollPerson[]
-  survivorPeople: PayrollPerson[]
-}
-
-type PayrollPerson = {
-  idCard: string
-  name: string
-  account: string
-  rowNumber: number
-  values: Record<string, number | string>
-}
-
-type SocialSecuritySummary = {
-  byItem: Record<string, number>
-  rowCount: number
-}
-
-type PersonalInsuranceTotals = {
-  pension: number
-  annuity: number
-  medical: number
-  unemployment: number
-  housing: number
-  total: number
-}
-
-type TaxSummary = {
-  totalTax: number
-  rows: TaxPerson[]
-  missingIdCards: TaxPerson[]
-}
-
-type TaxPerson = {
-  idCard: string
-  name: string
-  taxAmount: number
-  rowNumber: number
-}
-
-type RetiredSummary = {
-  count: number
-  housing: number
-}
-
-type RetiredHousingPerson = {
-  name: string
-  idCard: string
-  unitName: string
-  housing: number
-  backpay: number
-  payable: number
-  actualPay: number
-}
+  loadIntegratedActiveAggregates,
+  loadIntegratedActiveBackpayRows,
+  loadIntegratedActiveHousingFund,
+  loadIntegratedActivePersonalInsuranceTotals,
+  loadIntegratedSimpleAggregates,
+  loadRetiredHousingDetails,
+  loadRetiredSummary,
+  runDetailImports
+} from './monthlyPayrollDataLoaders'
+import { getDataPath } from '../../config/paths'
+import {
+  parseSalaryWorkbook,
+  parseSocialSecurityWorkbook,
+  parseTaxWorkbook
+} from './monthlyPayrollParsers'
+import {
+  applyIntegratedWriteBackPlan,
+  applyTaxAndRecomputeIntegratedActive,
+  buildIntegratedActiveWriteBackPlan,
+  buildIntegratedOtherWriteBackPlan,
+  buildMonthlyPayrollWriteBackPreview,
+  comparePayrollPeople,
+  formatCompareMessage,
+  formatCompareWarning,
+  getActiveCompareFields,
+  mergeAppliedWriteBackPreview,
+  mergeIntegratedWriteBackPlans,
+  recomputeIntegratedOtherLikeWorksheet,
+  summarizeIntegratedActive,
+  survivorCompareFields,
+  type IntegratedActiveRecomputeResult,
+  type IntegratedSimplePaySummary
+} from './integratedPayroll'
+import { readMonthlyPayrollSettings } from './monthlyPayrollSettings'
+import {
+  findSameMonthlyPayrollRun,
+  fingerprintReportSheets,
+  isMonthlyPayrollMonthArchived,
+  normalizeMonthlyPayrollDataSourceMode,
+  persistMonthlyPayrollRun,
+  resolvePayrollPeriod
+} from './monthlyPayrollRuns'
+import {
+  buildInsuranceVoucherUsage,
+  buildSalaryVoucherUsage,
+  buildVoucherSheet,
+  departmentEconomicSubjectForSocialItem,
+  formatVoucherAmount,
+  toChineseRmb
+} from './voucherSheet'
+import { sumSocialByCanonicalName, sumSocialByKeyword } from './socialSecuritySummary'
+import { getSalaryWorkbookPrintPageSummary } from './printSalaryViaExcel'
+import { writeSalaryImportWorkbook } from './salaryImportWorkbook'
+import type {
+  IntegratedActiveAggregates,
+  IntegratedSimpleAggregates,
+  PersonalInsuranceTotals,
+  RetiredHousingPerson,
+  RetiredSummary,
+  SalarySummary,
+  SocialSecuritySummary,
+  TaxSummary
+} from './monthlyPayrollTypes'
+import {
+  formatMoney,
+  normalizeIdCard,
+  num,
+  roundMoney,
+  text
+} from './monthlyPayrollUtils'
+export {
+  archiveMonthlyPayrollRun,
+  cancelMonthlyPayrollMonthClose,
+  deleteMonthlyPayrollRun,
+  getMonthlyPayrollRunReport,
+  listMonthlyPayrollRuns
+} from './monthlyPayrollRuns'
 
 type MonthlyPayrollBusinessSummary = {
   activeCount: number
@@ -95,311 +101,62 @@ type MonthlyPayrollBusinessSummary = {
   retiredHousingActualPay: number
 }
 
-type IntegratedSimplePaySummary = {
-  rowCount: number
-  actualPayTotal: number
-}
-
-type CompareSummary = {
-  sourceName: string
-  targetName: string
-  sourceRows: number
-  targetRows: number
-  added: number
-  removed: number
-  changed: number
-  changedExamples: string[]
-}
-
-type IntegratedWriteBackUpdate = {
-  rowId: number
-  value: number
-}
-
-type IntegratedWriteBackChange = {
-  worksheetName: string
-  idCard: string
-  name: string
-  fieldName: string
-  sourceValue: number
-  targetValue: number
-  batchCode: string
-  reason: string
-  updates: IntegratedWriteBackUpdate[]
-}
-
-type IntegratedManualDifference = {
-  worksheetName: string
-  idCard: string
-  name: string
-  fieldName: string
-  sourceValue: number
-  targetValue: number
-  reason: string
-}
-
-type IntegratedWriteBackPlan = {
-  changes: IntegratedWriteBackChange[]
-  manual: IntegratedManualDifference[]
-}
-
-type IntegratedRow = {
-  idCard: string
-  name: string
-  rowId: number
-  values: Record<string, string | number>
-}
-
 function normalizeMonthlyPayrollInput(
   input?: MonthlyPayrollWorkflowInput
-): MonthlyPayrollWorkflowInput | undefined {
-  if (!input) return input
-  if (input.processScope === 'salary') {
-    return { ...input, socialSecurityWorkbookPath: undefined }
+): MonthlyPayrollWorkflowInput {
+  const normalized: MonthlyPayrollWorkflowInput = {
+    ...(input ?? {}),
+    dataSourceMode: normalizeMonthlyPayrollDataSourceMode(input?.dataSourceMode)
   }
-  return input
+  if (normalized.processScope === 'salary') {
+    return { ...normalized, socialSecurityWorkbookPath: undefined }
+  }
+  return normalized
 }
 
 const workflowName = '月度工资报账预处理'
 const generateWorkflowName = '月度工资报账汇总生成'
+const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
+const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
 
-const activeSalaryFields = [
-  '岗位工资',
-  '薪级工资',
-  '基本补发',
-  '应发基础工资',
-  '教龄津贴',
-  '岗位津贴',
-  '生活补贴',
-  '绩效补发',
-  '基础性绩效',
-  '乡镇补贴',
-  '边远乡镇补贴',
-  '住房补贴',
-  '交通补贴',
-  '应发工资合计',
-  '养老保险',
-  '职业年金',
-  '医保大病统筹',
-  '失业保险',
-  '住房公积金',
-  '个税',
-  '扣款补发',
-  '补扣工资',
-  '五险一金',
-  '实发工资合计'
-]
-
-const activeCompareFields: Array<[string, string]> = [
-  ['姓名', 'name'],
-  ['岗位工资', '岗位工资'],
-  ['薪级工资', '薪级工资'],
-  ['岗位津贴', '岗位津贴'],
-  ['生活补贴', '生活补贴'],
-  ['其他一', '其他一'],
-  ['教（工）龄补贴', '教（工）龄补贴'],
-  ['住房补贴', '住房补贴'],
-  ['交通费', '交通费'],
-  ['养老保险缴费', '养老保险缴费'],
-  ['职业年金缴费', '职业年金缴费'],
-  ['医疗保险', '医疗保险'],
-  ['失业保险', '失业保险'],
-  ['公积金', '公积金'],
-  ['补扣工资', '当月个人所得税']
-]
-
-const survivorCompareFields: Array<[string, string]> = [
-  ['姓名', 'name'],
-  ['应发工资小计', '应发工资小计'],
-  ['实发合计', '实发合计']
-]
-
-const INTEGRATED_ACTIVE_PAY_FIELDS = [
-  '岗位工资',
-  '薪级工资',
-  '岗位津贴',
-  '生活补贴',
-  '绩效工资',
-  '工作性津贴',
-  '教（工）龄补贴',
-  '特岗性津补贴',
-  '交通费',
-  '公车补贴',
-  '住房补贴',
-  '基础绩效奖',
-  '补发工资',
-  '其他一'
-]
-
-const INTEGRATED_ACTIVE_DEDUCT_FIELDS = [
-  '公积金',
-  '养老保险缴费',
-  '职业年金缴费',
-  '医疗保险',
-  '失业保险'
-]
-
-const INTEGRATED_NUMERIC_REPRESENTATIVE_FIELDS = new Set([
-  '月份',
-  '部门内序号',
-  '业务年度',
-  '序号',
-  '人数',
-  '年龄',
-  '工龄（年）',
-  '参加工作时间'
-])
-
-type IntegratedActiveRecomputeResult = {
-  rowCount: number
-  taxApplied: number
-  taxMissing: number
-  payableTotal: number
-  actualPayTotal: number
+function isIntegratedDataSource(input: MonthlyPayrollWorkflowInput | undefined): boolean {
+  return normalizeMonthlyPayrollDataSourceMode(input?.dataSourceMode) === 'integrated'
 }
 
-export async function applyTaxAndRecomputeIntegratedActive(
-  taxByIdCard: Record<string, number>
-): Promise<IntegratedActiveRecomputeResult> {
-  const worksheet = getWorksheetByName('一体化在职')
-  const idCardCol = findColumnByName(worksheet, '证件号码')
-  const deductCol = findColumnByName(worksheet, '补扣工资')
-  const payableCol = findColumnByName(worksheet, '应发工资')
-  const actualCol = findColumnByName(worksheet, '实发合计')
-  const payCols = INTEGRATED_ACTIVE_PAY_FIELDS.map((name) => findColumnByName(worksheet, name))
-  const deductionCols = INTEGRATED_ACTIVE_DEDUCT_FIELDS.map((name) => findColumnByName(worksheet, name))
-  const columns = getWorksheetLocalColumns(worksheet)
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
-  const table = tableNameOf(worksheet)
-  const database = await getDatabase()
-
-  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${table}`)
-  const latestByIdBatch = new Map<string, Record<string, unknown>>()
-  for (const row of rows) {
-    const idCard = normalizeIdCard(row[idCardCol])
-    if (!idCard) continue
-    const key = integratedCurrentRowKey(idCard, row, batchColumn)
-    const previous = latestByIdBatch.get(key)
-    if (!previous || num(row.id) > num(previous.id)) latestByIdBatch.set(key, row)
+function missingSourceMessage(input: MonthlyPayrollWorkflowInput | undefined): string | null {
+  if (!input) return '月度工资报账需要先选择处理月份和数据来源。'
+  if (input.processScope === 'social') {
+    return input.socialSecurityWorkbookPath ? null : '只处理社保时需要放入社保未申报汇总文件。'
   }
-
-  const rowsByIdCard = new Map<string, Record<string, unknown>[]>()
-  for (const row of latestByIdBatch.values()) {
-    const idCard = normalizeIdCard(row[idCardCol])
-    const grouped = rowsByIdCard.get(idCard) ?? []
-    grouped.push(row)
-    rowsByIdCard.set(idCard, grouped)
-  }
-
-  let taxApplied = 0
-  let taxMissing = 0
-  for (const idCard of Object.keys(taxByIdCard)) {
-    if (!rowsByIdCard.has(idCard)) taxMissing += 1
-  }
-
-  let payableTotal = 0
-  let actualPayTotal = 0
-  const now = new Date().toISOString()
-
-  await run(database, 'BEGIN TRANSACTION')
-  try {
-    for (const [idCard, personRows] of rowsByIdCard.entries()) {
-      const overrideTax = taxByIdCard[idCard]
-      if (overrideTax !== undefined) taxApplied += 1
-
-      const taxCarrier = selectIntegratedRepresentativeRow(personRows, batchColumn)
-      for (const row of personRows) {
-        const receivesOverrideTax = overrideTax !== undefined && num(row.id) === num(taxCarrier.id)
-        const deductAmount = overrideTax !== undefined
-          ? (receivesOverrideTax ? overrideTax : 0)
-          : num(row[deductCol])
-        const payable = payCols.reduce((sum, col) => sum + num(row[col]), 0)
-        const deductionsSum = deductionCols.reduce((sum, col) => sum + num(row[col]), 0)
-        const actual = roundMoney(payable - deductionsSum - deductAmount)
-        const payableRounded = roundMoney(payable)
-
-        await run(
-          database,
-          `UPDATE ${table}
-             SET ${quoteIdentifier(deductCol)} = ?,
-                 ${quoteIdentifier(payableCol)} = ?,
-                 ${quoteIdentifier(actualCol)} = ?,
-                 "md_updated_at" = ?
-           WHERE "id" = ?`,
-          [deductAmount, payableRounded, actual, now, row.id]
-        )
-
-        payableTotal = roundMoney(payableTotal + payableRounded)
-        actualPayTotal = roundMoney(actualPayTotal + actual)
-      }
+  if (isIntegratedDataSource(input)) {
+    if (input.processScope === 'salary-social' && !input.socialSecurityWorkbookPath) {
+      return '工资+社保模式需要放入社保未申报汇总文件；如本月只生成工资报表，请选择“只报工资”。'
     }
-    await run(database, 'COMMIT')
-  } catch (error) {
-    await run(database, 'ROLLBACK')
-    throw error
+    return null
   }
-
-  return {
-    rowCount: rowsByIdCard.size,
-    taxApplied,
-    taxMissing,
-    payableTotal,
-    actualPayTotal
+  if (!input.salaryWorkbookPath) {
+    return '工资表 Excel 兼容模式需要放入本月工资表；如改用三张表，请切换主数据来源。'
   }
+  if (input.processScope === 'salary-social' && !input.socialSecurityWorkbookPath) {
+    return '工资+社保模式需要同时放入工资表和社保未申报汇总文件。'
+  }
+  return null
 }
 
-async function summarizeIntegratedActive(
-  taxByIdCard: Record<string, number>
-): Promise<IntegratedActiveRecomputeResult> {
-  const rows = await loadIntegratedRows('一体化在职')
-  const idCards = new Set(rows.map((row) => row.idCard))
-  let taxApplied = 0
-  let taxMissing = 0
-  for (const idCard of Object.keys(taxByIdCard)) {
-    if (idCards.has(idCard)) taxApplied += 1
-    else taxMissing += 1
-  }
-  return {
-    rowCount: rows.length,
-    taxApplied,
-    taxMissing,
-    payableTotal: roundMoney(rows.reduce((sum, row) => sum + num(row.values['应发工资']), 0)),
-    actualPayTotal: roundMoney(rows.reduce((sum, row) => sum + num(row.values['实发合计']), 0))
-  }
+function currentPayrollPeriod(): { year: number; month: number } {
+  const now = new Date()
+  return { year: now.getFullYear(), month: now.getMonth() + 1 }
 }
 
-async function recomputeIntegratedOtherLikeWorksheet(
-  worksheetName: '一体化其他' | '一体化退休'
-): Promise<IntegratedSimplePaySummary> {
-  try {
-    const worksheet = getWorksheetByName(worksheetName)
-    const columns = getWorksheetLocalColumns(worksheet)
-    const colByName = (name: string): string | undefined =>
-      columns.find((column) => column.field.name === name)?.columnName
-    const idColumn = colByName('证件号码')
-    const actualPayColumn = colByName('实发合计')
-    if (!idColumn || !actualPayColumn) return { rowCount: 0, actualPayTotal: 0 }
-
-    const database = await getDatabase()
-    const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
-    const latestById = new Map<string, Record<string, unknown>>()
-    for (const row of rows) {
-      const idCard = normalizeIdCard(row[idColumn])
-      if (!idCard) continue
-      const previous = latestById.get(idCard)
-      if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
-    }
-
-    const latest = Array.from(latestById.values())
-    return {
-      rowCount: latest.length,
-      actualPayTotal: roundMoney(
-        latest.reduce((sum, row) => sum + num(row[actualPayColumn]), 0)
-      )
-    }
-  } catch {
-    return { rowCount: 0, actualPayTotal: 0 }
+function assertCurrentPayrollPeriod(
+  input: MonthlyPayrollWorkflowInput | undefined
+): { year: number; month: number } {
+  const target = resolvePayrollPeriod(input)
+  const current = currentPayrollPeriod()
+  if (target.year !== current.year || target.month !== current.month) {
+    throw new Error(`工资报账只能处理当月业务，请切回${current.year}年${current.month}月。`)
   }
+  return target
 }
 
 function buildTaxByIdCardFromSummary(tax: TaxSummary | undefined): Record<string, number> {
@@ -464,6 +221,70 @@ function buildBusinessSummary(input: {
   }
 }
 
+function buildSalaryWorkbookBusinessSummary(
+  salary: SalarySummary | undefined,
+  retired: RetiredSummary
+): MonthlyPayrollBusinessSummary {
+  return {
+    activeCount: salary?.activePeople.length ?? 0,
+    activePayableTotal: salary ? num(salary.active['应发工资合计']) : 0,
+    activeActualPay: salary ? num(salary.active['实发工资合计']) : 0,
+    survivorCount: salary ? num(salary.survivor['人数']) || salary.survivorPeople.length : 0,
+    survivorActualPay: salary ? num(salary.survivor['合计']) : 0,
+    retiredHousingCount: retired.count,
+    retiredHousingActualPay: retired.housing
+  }
+}
+
+function buildSalarySummaryFromIntegratedAggregates(
+  active: IntegratedActiveAggregates,
+  other: IntegratedSimpleAggregates
+): SalarySummary {
+  return {
+    active: {
+      人数: active.count,
+      岗位工资: active.基本工资,
+      薪级工资: 0,
+      基本补发: 0,
+      应发基础工资: active.基本工资,
+      教龄津贴: active.教龄津贴,
+      岗位津贴: active.基础性绩效,
+      生活补贴: 0,
+      绩效补发: 0,
+      基础性绩效: active.基础性绩效,
+      乡镇补贴: active.其他一,
+      边远乡镇补贴: 0,
+      住房补贴: active.住房补贴,
+      交通补贴: active.交通补贴,
+      应发工资合计: active.应发工资,
+      养老保险: active.养老保险,
+      职业年金: active.职业年金,
+      医保大病统筹: active.医疗保险,
+      失业保险: active.失业保险,
+      住房公积金: active.公积金,
+      个税: active.个税,
+      扣款补发: 0,
+      补扣工资: active.个税,
+      五险一金: active.五险一金合计,
+      实发工资合计: active.实发合计
+    },
+    survivor: {
+      人数: other.count,
+      遗属补助: other.住房补贴,
+      补发数: other.补发工资,
+      合计: other.应发工资小计
+    },
+    activePeople: [],
+    survivorPeople: Array.from({ length: other.count }, (_, index) => ({
+      idCard: '',
+      name: '',
+      account: '',
+      rowNumber: index + 1,
+      values: {}
+    }))
+  }
+}
+
 function buildBusinessSummaryMessages(summary: MonthlyPayrollBusinessSummary): string[] {
   return [
     `在职 ${summary.activeCount} 人，应发 ${formatMoney(summary.activePayableTotal)} 元，实发 ${formatMoney(summary.activeActualPay)} 元`,
@@ -477,7 +298,7 @@ export async function preprocessMonthlyPayroll(
 ): Promise<RuleResult> {
   try {
     const input = normalizeMonthlyPayrollInput(payload?.monthlyPayroll)
-    const targetDate = resolvePayrollPeriod(input)
+    const targetDate = assertCurrentPayrollPeriod(input)
     if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
       return {
         ok: false,
@@ -486,14 +307,13 @@ export async function preprocessMonthlyPayroll(
         warnings: [`${targetDate.year}年${targetDate.month}月工资已月结，不能再次开始预处理。请在历史报表中查看月结记录。`]
       }
     }
-    if (!input?.salaryWorkbookPath && !input?.socialSecurityWorkbookPath) {
+    const sourceError = missingSourceMessage(input)
+    if (sourceError) {
       return {
         ok: false,
         affectedRows: 0,
         messages: [],
-        warnings: [
-          '月度工资报账需要先在监控文件夹中放入本月工资表或社保未申报汇总。社保每月都要处理；个税按单位实际情况处理。'
-        ]
+        warnings: [sourceError]
       }
     }
 
@@ -506,6 +326,8 @@ export async function preprocessMonthlyPayroll(
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
     const taxByIdCard = buildTaxByIdCardFromSummary(tax)
+    const monthlyPayrollSettings = await readMonthlyPayrollSettings()
+    const taxField = monthlyPayrollSettings.taxField
 
     const salary = input.salaryWorkbookPath
       ? applyTaxToSalarySummary(
@@ -533,8 +355,14 @@ export async function preprocessMonthlyPayroll(
         loadIntegratedActivePersonalInsuranceTotals(),
         loadIntegratedActiveHousingFund()
       ])
-      const activePaySummary = salary ? await summarizeIntegratedActive(taxByIdCard) : undefined
-      const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
+      const activePaySummary = isIntegratedDataSource(input)
+        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard)
+        : salary ? await summarizeIntegratedActive(taxByIdCard) : undefined
+      const insuranceCheck = buildPersonalInsuranceCheck(
+        socialSecurity,
+        isIntegratedDataSource(input) ? undefined : salary,
+        integratedPersonalInsurance
+      )
       const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
       const detailMessages = [
         `报账模式：只处理社保${tax ? '，包含个税扣款' : '，不处理个税'}`,
@@ -544,7 +372,7 @@ export async function preprocessMonthlyPayroll(
         `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`,
         `住房公积金：按${salary ? '工资表/一体化在职' : '一体化在职'}当前公积金合计 ${formatMoney(salary ? resolveHousingFund(salary, integratedActiveHousingFund) : integratedActiveHousingFund)} 生成个人和单位公积金`,
         tax
-          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}`
+          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}${isIntegratedDataSource(input) && activePaySummary ? `，已写入一体化在职「${taxField}」 ${activePaySummary.taxApplied} 人` : ''}`
           : '个税：未检测到个税文件，本次不报个税',
         ...insuranceCheck.messages
       ]
@@ -560,6 +388,64 @@ export async function preprocessMonthlyPayroll(
         (salary?.activePeople.length ?? 0) + (salary?.survivorPeople.length ?? 0) + socialSecurity.rowCount + (tax?.rows.length ?? 0),
         messages,
         insuranceCheck.warnings
+      )
+    }
+
+    if (isIntegratedDataSource(input)) {
+      const [integratedActiveRecompute, integratedPersonalInsurance, integratedActiveHousingFund] = await Promise.all([
+        applyTaxAndRecomputeIntegratedActive(taxByIdCard),
+        loadIntegratedActivePersonalInsuranceTotals(),
+        loadIntegratedActiveHousingFund()
+      ])
+      const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, undefined, integratedPersonalInsurance)
+      const socialTotal = socialSecurity
+        ? roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
+        : 0
+      const mode = socialSecurity ? '工资+社保' : '只报工资'
+      const detailMessages = [
+        `主数据来源：工资数据三张表；工资表 Excel${salary ? '仅作为附件、页数统计和辅助核对' : '未参与本次金额计算'}`,
+        `报账模式：${mode}${tax ? '，包含个税扣款' : '，不处理个税'}`,
+        `一体化在职已按公式重算 ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
+        `一体化其他 ${integratedOtherPaySummary.rowCount} 人：实发 ${formatMoney(integratedOtherPaySummary.actualPayTotal)}`,
+        `一体化退休 ${integratedRetiredPaySummary.rowCount} 人：实发 ${formatMoney(integratedRetiredPaySummary.actualPayTotal)}`,
+        socialSecurity
+          ? `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`
+          : '社保：未检测到社保文件，本次不生成社保相关报账；社保属于每月必办，请补齐文件后单独处理社保',
+        `住房公积金：按一体化在职当前公积金合计 ${formatMoney(integratedActiveHousingFund)} 生成个人和单位公积金`,
+        tax
+          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，已写入一体化在职「${taxField}」 ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
+          : '个税：未检测到个税文件，本次按一体化在职现有个税字段重算',
+        ...insuranceCheck.messages
+      ]
+      const warnings = [
+        ...(tax?.missingIdCards.length
+          ? [`个税表有 ${tax.missingIdCards.length} 行缺少身份证号，需要人工核对`]
+          : []),
+        ...(integratedActiveRecompute.taxMissing > 0
+          ? [`个税表有 ${integratedActiveRecompute.taxMissing} 人在一体化在职中找不到对应记录，未回写`]
+          : []),
+        ...insuranceCheck.warnings
+      ]
+      const messages = warnings.length === 0
+        ? [
+            '主数据来源：工资数据三张表',
+            ...buildBusinessSummaryMessages(buildBusinessSummary({
+              active: integratedActiveRecompute,
+              survivor: integratedOtherPaySummary,
+              retiredHousing: integratedRetiredPaySummary
+            }))
+          ]
+        : detailMessages
+
+      return okRule(
+        workflowName,
+        integratedActiveRecompute.rowCount +
+          integratedOtherPaySummary.rowCount +
+          integratedRetiredPaySummary.rowCount +
+          (socialSecurity?.rowCount ?? 0) +
+          (tax?.rows.length ?? 0),
+        messages,
+        warnings
       )
     }
 
@@ -635,7 +521,7 @@ export async function preprocessMonthlyPayroll(
     }
 
     const [activeCompare, survivorCompare, integratedPersonalInsurance] = await Promise.all([
-      comparePayrollPeople('公办在职', salary.activePeople, '一体化在职', activeCompareFields),
+      comparePayrollPeople('公办在职', salary.activePeople, '一体化在职', getActiveCompareFields(taxField)),
       comparePayrollPeople('遗补', salary.survivorPeople, '一体化其他', survivorCompareFields),
       loadIntegratedActivePersonalInsuranceTotals()
     ])
@@ -655,7 +541,7 @@ export async function preprocessMonthlyPayroll(
         ? `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类`
         : '社保：未检测到社保文件，本次不生成社保相关报账；社保属于每月必办，请补齐文件后单独处理社保',
       tax
-        ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，${writeBackPreview.applied ? '已回写到' : '已核对到'}一体化在职 ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
+        ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，${writeBackPreview.applied ? `已回写到一体化在职「${taxField}」` : `已按一体化在职「${taxField}」核对`} ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
         : '个税：未检测到个税文件，本次跳过个税扣款和补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
       ...(writeBackPreview.applied
         ? [`工资表金额差异已自动回写 ${writeBackPreview.syncableCount} 项，复核后${activeCompare.changed === 0 ? '一体化在职已一致' : `仍有 ${activeCompare.changed} 人存在差异`}`]
@@ -713,7 +599,7 @@ export async function generateMonthlyPayrollReports(
 ): Promise<RuleResult> {
   try {
     const input = normalizeMonthlyPayrollInput(payload?.monthlyPayroll)
-    const targetDate = resolvePayrollPeriod(input)
+    const targetDate = assertCurrentPayrollPeriod(input)
     if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
       return {
         ok: false,
@@ -722,12 +608,13 @@ export async function generateMonthlyPayrollReports(
         warnings: [`${targetDate.year}年${targetDate.month}月工资已月结，不能重新生成报表。请在历史报表中查看月结记录。`]
       }
     }
-    if (!input?.salaryWorkbookPath && !input?.socialSecurityWorkbookPath) {
+    const sourceError = missingSourceMessage(input)
+    if (sourceError) {
       return {
         ok: false,
         affectedRows: 0,
         messages: [],
-        warnings: ['请先在监控文件夹中放入本月工资表或社保未申报汇总，并完成预处理校验。']
+        warnings: [sourceError]
       }
     }
 
@@ -743,15 +630,21 @@ export async function generateMonthlyPayrollReports(
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
     const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
+    const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
+    const useIntegratedDataSource = dataSourceMode === 'integrated'
     const integratedPersonalInsurance = await loadIntegratedActivePersonalInsuranceTotals()
-    const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
+    const insuranceCheck = buildPersonalInsuranceCheck(
+      socialSecurity,
+      useIntegratedDataSource ? undefined : salary,
+      integratedPersonalInsurance
+    )
     const socialTotal = socialSecurity
       ? roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
       : 0
     const taxTotal = tax?.totalTax ?? 0
-    const salaryBackpayRows = salary?.activePeople.filter(
+    const salaryBackpayRows = !useIntegratedDataSource ? salary?.activePeople.filter(
       (person) => num(person.values['基本补发']) !== 0 || num(person.values['绩效补发']) !== 0
-    ) ?? []
+    ) ?? [] : []
     const socialItems = socialSecurity
       ? Object.entries(socialSecurity.byItem)
           .sort((left, right) => right[1] - left[1])
@@ -761,13 +654,17 @@ export async function generateMonthlyPayrollReports(
 
     const messages = [
       input.processScope === 'social'
-        ? salary
+        ? useIntegratedDataSource
+          ? '社保报账汇总已生成预览：工资凭证按工资数据三张表生成，本次不生成工资打印报表'
+          : salary
           ? '社保报账汇总已生成预览：工资表仅用于同时生成工资凭证，本次不生成工资打印报表'
           : '社保报账汇总已生成预览：本次只生成五险一金相关凭证'
+        : useIntegratedDataSource
+        ? '工资报账汇总已生成预览：主数据来源为工资数据三张表'
         : salary
         ? `工资报账汇总已生成预览：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`
         : '社保报账汇总已生成预览：本次只处理五险一金',
-      ...(salary && input.processScope !== 'social'
+      ...(salary && !useIntegratedDataSource && input.processScope !== 'social'
         ? [
             `工资汇总：岗位工资 ${formatMoney(salary.active['岗位工资'])}，薪级工资 ${formatMoney(salary.active['薪级工资'])}，岗位津贴 ${formatMoney(salary.active['岗位津贴'])}，生活补贴 ${formatMoney(salary.active['生活补贴'])}`,
             `补贴汇总：乡镇补贴 ${formatMoney(salary.active['乡镇补贴'])}，住房补贴 ${formatMoney(salary.active['住房补贴'])}，交通补贴 ${formatMoney(salary.active['交通补贴'])}`,
@@ -779,8 +676,12 @@ export async function generateMonthlyPayrollReports(
         : '社保汇总：未检测到社保文件，本次不生成社保报账；社保属于每月必办，请补齐文件后单独处理社保',
       tax
         ? `个税汇总：${tax.rows.length} 人，合计 ${formatMoney(taxTotal)}，扣税金额将在补发工资文件中按人写入岗位工资列为负数`
+        : useIntegratedDataSource
+        ? '个税汇总：未检测到个税文件，本次按一体化在职现有个税字段生成'
         : '个税汇总：未检测到个税文件，本次不生成扣税补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
-      salaryBackpayRows.length
+      useIntegratedDataSource
+        ? '补发工资：按一体化在职当前补发工资和个税字段生成'
+        : salaryBackpayRows.length
         ? `工资表补发：${salaryBackpayRows.length} 人，基本补发写入岗位工资列，绩效补发写入薪级工资列`
         : '工资表补发：未检测到基本补发或绩效补发',
       ...insuranceCheck.messages
@@ -801,10 +702,11 @@ export async function generateMonthlyPayrollReportView(
   input?: MonthlyPayrollWorkflowInput
 ): Promise<MonthlyPayrollReportResult> {
   input = normalizeMonthlyPayrollInput(input)
-  if (!input?.salaryWorkbookPath && !input?.socialSecurityWorkbookPath) {
-    throw new Error('请先在监控文件夹中放入本月工资表或社保未申报汇总')
+  const sourceError = missingSourceMessage(input)
+  if (sourceError) {
+    throw new Error(sourceError)
   }
-  const targetDate = resolvePayrollPeriod(input)
+  const targetDate = assertCurrentPayrollPeriod(input)
   if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
     throw new Error(`${targetDate.year}年${targetDate.month}月工资已月结，不能重新生成报表。请在历史报表中查看月结记录。`)
   }
@@ -820,6 +722,10 @@ export async function generateMonthlyPayrollReportView(
       ? parseTaxWorkbook(input.taxWorkbookPath)
       : Promise.resolve<TaxSummary | undefined>(undefined)
   ])
+  const monthlyPayrollSettings = await readMonthlyPayrollSettings()
+  const taxField = monthlyPayrollSettings.taxField
+  const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
+  const useIntegratedDataSource = dataSourceMode === 'integrated'
   const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
   const taxByIdCard = buildTaxByIdCardFromSummary(tax)
   const [integratedActiveSummary, integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
@@ -852,47 +758,57 @@ export async function generateMonthlyPayrollReportView(
     retired: integratedRetiredAggregates,
     other: integratedOtherAggregates
   }
-  const sheets = salary
-    ? input.processScope === 'social'
-      ? buildSocialOnlyReportSheets(
-          socialSecurity,
-          tax,
-          unit,
-          integratedActiveHousingFund,
-          salary,
-          retired
-        )
-      : buildReportSheets(
-          salary,
-          socialSecurity,
-          tax,
-          retired,
-          unit,
-          integratedActiveHousingFund,
-          retiredHousingPeople,
-          integratedAggregates,
-          integratedBackpayRows
-        )
-    : buildSocialOnlyReportSheets(
+  const reportSalary = useIntegratedDataSource
+    ? buildSalarySummaryFromIntegratedAggregates(integratedActiveAggregates, integratedOtherAggregates)
+    : salary
+  const reportRetired = useIntegratedDataSource
+    ? { count: integratedRetiredAggregates.count, housing: integratedRetiredAggregates.应发工资小计 }
+    : retired
+  const sheets = input.processScope === 'social'
+    ? buildSocialOnlyReportSheets(
         socialSecurity,
         tax,
         unit,
-        integratedActiveHousingFund
+        integratedActiveHousingFund,
+        reportSalary,
+        reportRetired
       )
+    : buildReportSheets(
+        reportSalary!,
+        socialSecurity,
+        tax,
+        reportRetired,
+        unit,
+        integratedActiveHousingFund,
+        retiredHousingPeople,
+        useIntegratedDataSource ? integratedAggregates : undefined,
+        useIntegratedDataSource ? integratedBackpayRows : undefined
+    )
+  const voucherPageCounts = await buildVoucherPageCounts(input, sheets)
+  applyVoucherPageCounts(sheets, voucherPageCounts)
   const reportFingerprint = fingerprintReportSheets(sheets)
-  const period = resolvePayrollPeriod(input)
+  const period = targetDate
+  const shouldGenerateSalaryImport = Boolean(
+    salary && !useIntegratedDataSource && input.processScope !== 'social' && salary.activePeople.length > 0
+  )
   const previousRun = await findSameMonthlyPayrollRun(
     period.year,
     period.month,
-    reportFingerprint
+    reportFingerprint,
+    dataSourceMode
   )
-  if (previousRun) {
+  if (previousRun && (!shouldGenerateSalaryImport || previousRun.salaryImportPath)) {
     return {
       ok: true,
       message: '本次报表内容无变化，未重新生成文件，已沿用上次输出结果',
       insuranceImportPath: previousRun.insuranceImportPath ?? undefined,
+      salaryImportPath: previousRun.salaryImportPath ?? undefined,
       payrollBackpayPath: previousRun.payrollBackpayPath ?? undefined,
       voucherImportPath: previousRun.voucherImportPath ?? undefined,
+      taxField,
+      processScope: input.processScope,
+      dataSourceMode,
+      voucherPageCounts,
       sheets
     }
   }
@@ -901,6 +817,7 @@ export async function generateMonthlyPayrollReportView(
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
   const insuranceImportPath = socialSecurity ? join(outputDir, `保险导入_${stamp}.xlsx`) : undefined
+  const salaryImportPath = shouldGenerateSalaryImport ? join(outputDir, `工资导入_${stamp}.xls`) : undefined
   const backpaySheet = sheets.find((sheet) => sheet.name === '补发工资')
   const hasBackpayRows = Boolean(backpaySheet?.rows.length)
   const payrollBackpayPath = hasBackpayRows ? join(outputDir, `补发工资_${stamp}.xls`) : undefined
@@ -913,6 +830,9 @@ export async function generateMonthlyPayrollReportView(
   }
   if (voucherImportPath && voucherSheet) {
     writeWorkbook(voucherImportPath, [voucherSheet])
+  }
+  if (salaryImportPath && salary) {
+    await writeSalaryImportWorkbook(salaryImportPath, salary)
   }
   if (payrollBackpayPath) {
     if (backpaySheet) {
@@ -934,14 +854,17 @@ export async function generateMonthlyPayrollReportView(
 
   const outputMessages = [
     insuranceImportPath ? '保险导入文件' : '',
+    salaryImportPath ? '工资导入文件' : '',
     payrollBackpayPath ? '补发工资文件' : '',
     voucherImportPath ? '凭证导入文件' : ''
   ].filter(Boolean)
-  const businessSummary = buildBusinessSummary({
-    active: integratedActiveSummary,
-    survivor: integratedOtherPaySummary,
-    retiredHousing: integratedRetiredPaySummary
-  })
+  const businessSummary = useIntegratedDataSource
+    ? buildBusinessSummary({
+        active: integratedActiveSummary,
+        survivor: integratedOtherPaySummary,
+        retiredHousing: integratedRetiredPaySummary
+      })
+    : buildSalaryWorkbookBusinessSummary(reportSalary, reportRetired)
 
   await persistMonthlyPayrollRun({
     year: period.year,
@@ -950,31 +873,45 @@ export async function generateMonthlyPayrollReportView(
     activeCount: businessSummary.activeCount,
     survivorCount: businessSummary.survivorCount,
     retiredHousingCount: businessSummary.retiredHousingCount,
-    salaryTotal: salary ? num(salary.active['应发工资合计']) : 0,
-    withholdingTotal: salary ? num(salary.active['五险一金']) : 0,
-    taxTotal: tax?.totalTax ?? (salary ? num(salary.active['个税']) : 0),
-    actualPay: salary
-      ? roundMoney(
-          num(salary.active['实发工资合计']) + num(salary.survivor['合计']) + retired.housing
-        )
-      : 0,
+    salaryTotal: useIntegratedDataSource
+      ? integratedActiveAggregates.应发工资
+      : reportSalary ? num(reportSalary.active['应发工资合计']) : 0,
+    withholdingTotal: useIntegratedDataSource
+      ? integratedActiveAggregates.五险一金合计
+      : reportSalary ? num(reportSalary.active['五险一金']) : 0,
+    taxTotal: useIntegratedDataSource
+      ? integratedActiveAggregates.个税
+      : tax?.totalTax ?? (reportSalary ? num(reportSalary.active['个税']) : 0),
+    actualPay: roundMoney(
+      businessSummary.activeActualPay +
+        businessSummary.survivorActualPay +
+        businessSummary.retiredHousingActualPay
+    ),
     activeActualPay: businessSummary.activeActualPay,
     survivorActualPay: businessSummary.survivorActualPay,
     retiredHousingActualPay: businessSummary.retiredHousingActualPay,
-    retiredHousing: salary ? retired.housing : 0,
+    retiredHousing: reportRetired.housing,
     sourceSalaryPath: input.salaryWorkbookPath ?? null,
     sourceSocialPath: input.socialSecurityWorkbookPath ?? null,
     sourceTaxPath: input.taxWorkbookPath ?? null,
     insuranceImportPath: insuranceImportPath ?? null,
     voucherImportPath: voucherImportPath ?? null,
+    salaryImportPath: salaryImportPath ?? null,
     payrollBackpayPath: payrollBackpayPath ?? null,
     reportFingerprint,
+    taxField,
+    dataSourceMode,
     reportSnapshot: {
       ok: true,
       message: `已生成 ${sheets.length} 张报表预览${outputMessages.length ? `，并输出${outputMessages.join('、')}` : ''}`,
       insuranceImportPath,
+      salaryImportPath,
       payrollBackpayPath,
       voucherImportPath,
+      taxField,
+      processScope: input.processScope,
+      dataSourceMode,
+      voucherPageCounts,
       sheets
     }
   })
@@ -983,690 +920,15 @@ export async function generateMonthlyPayrollReportView(
     ok: true,
     message: `已生成 ${sheets.length} 张报表预览${outputMessages.length ? `，并输出${outputMessages.join('、')}` : ''}`,
     insuranceImportPath,
+    salaryImportPath,
     payrollBackpayPath,
     voucherImportPath,
+    taxField,
+    processScope: input.processScope,
+    dataSourceMode,
+    voucherPageCounts,
     sheets
   }
-}
-
-type MonthlyPayrollRunInput = Omit<
-  MonthlyPayrollRun,
-  'id' | 'createdAt' | 'archivedAt' | 'archiveDir' | 'archiveManifest'
->
-
-async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput): Promise<void> {
-  const database = await getDatabase()
-  await run(
-    database,
-    `INSERT INTO monthly_payroll_runs (
-      year, month, unit_full_name,
-      active_count, survivor_count, retired_housing_count,
-      salary_total, withholding_total, tax_total, actual_pay,
-      active_actual_pay, survivor_actual_pay, retired_housing_actual_pay, retired_housing,
-      source_salary_path, source_social_path, source_tax_path,
-      insurance_import_path, voucher_import_path, payroll_backpay_path, report_fingerprint, report_snapshot
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      payload.year,
-      payload.month,
-      payload.unitFullName,
-      payload.activeCount,
-      payload.survivorCount,
-      payload.retiredHousingCount,
-      payload.salaryTotal,
-      payload.withholdingTotal,
-      payload.taxTotal,
-      payload.actualPay,
-      payload.activeActualPay,
-      payload.survivorActualPay,
-      payload.retiredHousingActualPay,
-      payload.retiredHousing,
-      payload.sourceSalaryPath,
-      payload.sourceSocialPath,
-      payload.sourceTaxPath,
-      payload.insuranceImportPath,
-      payload.voucherImportPath,
-      payload.payrollBackpayPath,
-      payload.reportFingerprint,
-      payload.reportSnapshot ? JSON.stringify(payload.reportSnapshot) : null
-    ]
-  )
-}
-
-export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(
-    database,
-    `SELECT id, year, month, unit_full_name, active_count, survivor_count, retired_housing_count,
-      salary_total, withholding_total, tax_total, actual_pay,
-      active_actual_pay, survivor_actual_pay, retired_housing_actual_pay, retired_housing,
-      source_salary_path, source_social_path, source_tax_path,
-      insurance_import_path, voucher_import_path, payroll_backpay_path,
-      report_fingerprint, archived_at, archive_dir, archive_manifest, created_at
-     FROM monthly_payroll_runs ORDER BY created_at DESC`
-  )
-  return rows.map(mapRunRow)
-}
-
-export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayrollArchiveResult> {
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
-  )
-  const runRow = rows[0]
-  if (!runRow) throw new Error('未找到要月结的工资报账记录')
-
-  const existingRun = mapRunRow(runRow)
-  if (existingRun.archivedAt && existingRun.archiveDir) {
-    return {
-      run: existingRun,
-      archiveDir: existingRun.archiveDir,
-      files: existingRun.archiveManifest
-    }
-  }
-
-  const archiveDir = monthlyPayrollArchiveDir(existingRun)
-  mkdirSync(archiveDir, { recursive: true })
-  const archiveDate = dateStamp()
-  const monthRows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs
-     WHERE year = ? AND month = ? AND archived_at IS NULL`,
-    [existingRun.year, existingRun.month]
-  )
-  const monthRuns = monthRows.map(mapRunRow)
-
-  const archivedFiles = (
-    await Promise.all(
-      monthRuns.flatMap((run) => [
-        moveArchiveFile(run.sourceSalaryPath, archiveDir, '工资表', archiveDate),
-        moveArchiveFile(run.sourceSocialPath, archiveDir, '社保', archiveDate),
-        moveArchiveFile(run.sourceTaxPath, archiveDir, '个税', archiveDate),
-        copyArchiveFile(run.insuranceImportPath, archiveDir, '保险导入', archiveDate),
-        copyArchiveFile(run.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
-        copyArchiveFile(run.voucherImportPath, archiveDir, '凭证', archiveDate)
-      ])
-    )
-  ).filter((item): item is string => Boolean(item))
-
-  const archivedAt = new Date().toISOString()
-  const manifestPath = uniqueArchivePath(archiveDir, `月结清单_${archiveDate}.json`)
-  await writeFile(
-    manifestPath,
-    JSON.stringify(
-      {
-        year: existingRun.year,
-        month: existingRun.month,
-        unitFullName: existingRun.unitFullName,
-        archivedAt,
-        archiveDir,
-        files: archivedFiles,
-        totals: {
-          activeCount: existingRun.activeCount,
-          survivorCount: existingRun.survivorCount,
-          retiredHousingCount: existingRun.retiredHousingCount,
-          salaryTotal: existingRun.salaryTotal,
-          withholdingTotal: existingRun.withholdingTotal,
-          taxTotal: existingRun.taxTotal,
-          actualPay: existingRun.actualPay,
-          activeActualPay: existingRun.activeActualPay,
-          survivorActualPay: existingRun.survivorActualPay,
-          retiredHousingActualPay: existingRun.retiredHousingActualPay,
-          retiredHousing: existingRun.retiredHousing
-        }
-      },
-      null,
-      2
-    ),
-    'utf8'
-  )
-  archivedFiles.push(manifestPath)
-
-  await run(
-    database,
-    `UPDATE monthly_payroll_runs
-       SET archived_at = ?, archive_dir = ?, archive_manifest = ?
-     WHERE year = ? AND month = ? AND archived_at IS NULL`,
-    [archivedAt, archiveDir, JSON.stringify(archivedFiles), existingRun.year, existingRun.month]
-  )
-
-  const updatedRows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
-  )
-  return {
-    run: mapRunRow(updatedRows[0]),
-    archiveDir,
-    files: archivedFiles
-  }
-}
-
-export async function cancelMonthlyPayrollMonthClose(id: number): Promise<MonthlyPayrollRun> {
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
-  )
-  if (!rows[0]) throw new Error('未找到要取消月结的工资报账记录')
-  const targetRun = mapRunRow(rows[0])
-  const monthRows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs
-     WHERE year = ? AND month = ? AND archived_at IS NOT NULL`,
-    [targetRun.year, targetRun.month]
-  )
-  const monthRunList = monthRows.map(mapRunRow)
-  await restoreMonthlyPayrollSourceFiles(monthRunList)
-  await cleanupMonthlyPayrollGeneratedFiles(monthRunList)
-
-  await run(
-    database,
-    `UPDATE monthly_payroll_runs
-       SET archived_at = NULL, archive_dir = NULL, archive_manifest = NULL,
-           insurance_import_path = NULL, payroll_backpay_path = NULL, voucher_import_path = NULL
-     WHERE year = ? AND month = ?`,
-    [targetRun.year, targetRun.month]
-  )
-
-  const updatedRows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
-  )
-  return mapRunRow(updatedRows[0])
-}
-
-export async function deleteMonthlyPayrollRun(id: number): Promise<boolean> {
-  const database = await getDatabase()
-  const rows = await all<{ id: number }>(
-    database,
-    `SELECT id FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
-  )
-  if (!rows.length) return false
-  await run(database, `DELETE FROM monthly_payroll_runs WHERE id = ?`, [id])
-  return true
-}
-
-export async function getMonthlyPayrollRunReport(
-  id: number
-): Promise<MonthlyPayrollReportResult | null> {
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
-  )
-  const run = rows[0] ? mapRunRow(rows[0]) : null
-  if (!run) return null
-  if (run.reportSnapshot) return run.reportSnapshot
-
-  const sheets = loadHistoryExportSheets(run)
-  if (sheets.length === 0) return null
-  return {
-    ok: true,
-    message: '该历史记录没有完整报表快照，已从已导出的文件恢复可查看表格',
-    insuranceImportPath: run.insuranceImportPath ?? undefined,
-    payrollBackpayPath: run.payrollBackpayPath ?? undefined,
-    voucherImportPath: run.voucherImportPath ?? undefined,
-    sheets
-  }
-}
-
-function loadHistoryExportSheets(run: MonthlyPayrollRun): MonthlyPayrollReportSheet[] {
-  const sheets: MonthlyPayrollReportSheet[] = []
-  if (run.voucherImportPath) sheets.push(...readExportWorkbookSheets(run.voucherImportPath, '凭证'))
-  if (run.insuranceImportPath) sheets.push(...readExportWorkbookSheets(run.insuranceImportPath, '保险导入'))
-  if (run.payrollBackpayPath) sheets.push(...readExportWorkbookSheets(run.payrollBackpayPath, '补发工资'))
-  return sheets
-}
-
-function readExportWorkbookSheets(filePath: string, fallbackName: string): MonthlyPayrollReportSheet[] {
-  if (!existsSync(filePath)) return []
-  try {
-    const workbook = XLSX.readFile(filePath, { cellDates: false })
-    return workbook.SheetNames.flatMap((name, index) => {
-      const worksheet = workbook.Sheets[name]
-      if (!worksheet) return []
-      const rows = XLSX.utils.sheet_to_json<Array<string | number>>(worksheet, {
-        header: 1,
-        defval: '',
-        raw: false
-      })
-      if (rows.length === 0) return []
-      const columns = rows[0].map((cell, columnIndex) => text(cell) || columnLabel(columnIndex))
-      return [{
-        name: index === 0 ? fallbackName : name,
-        columns,
-        rows: rows.slice(1).map((row) => row.map((cell) => {
-          const value = text(cell)
-          const numberText = value.replace(/,/g, '')
-          return /^-?\d+(\.\d+)?$/.test(numberText) ? Number(numberText) : value
-        }))
-      }]
-    })
-  } catch {
-    return []
-  }
-}
-
-function mapRunRow(row: Record<string, unknown>): MonthlyPayrollRun {
-  return {
-    id: Number(row.id),
-    year: Number(row.year),
-    month: Number(row.month),
-    unitFullName: String(row.unit_full_name ?? ''),
-    activeCount: Number(row.active_count ?? 0),
-    survivorCount: Number(row.survivor_count ?? 0),
-    retiredHousingCount: Number(row.retired_housing_count ?? 0),
-    salaryTotal: Number(row.salary_total ?? 0),
-    withholdingTotal: Number(row.withholding_total ?? 0),
-    taxTotal: Number(row.tax_total ?? 0),
-    actualPay: Number(row.actual_pay ?? 0),
-    activeActualPay: Number(row.active_actual_pay ?? 0) || Math.max(0, Number(row.actual_pay ?? 0) - Number(row.retired_housing ?? 0)),
-    survivorActualPay: Number(row.survivor_actual_pay ?? 0),
-    retiredHousingActualPay: Number(row.retired_housing_actual_pay ?? 0) || Number(row.retired_housing ?? 0),
-    retiredHousing: Number(row.retired_housing ?? 0),
-    sourceSalaryPath: (row.source_salary_path as string) ?? null,
-    sourceSocialPath: (row.source_social_path as string) ?? null,
-    sourceTaxPath: (row.source_tax_path as string) ?? null,
-    insuranceImportPath: (row.insurance_import_path as string) ?? null,
-    voucherImportPath: (row.voucher_import_path as string) ?? null,
-    payrollBackpayPath: (row.payroll_backpay_path as string) ?? null,
-    reportFingerprint: (row.report_fingerprint as string) ?? null,
-    archivedAt: (row.archived_at as string) ?? null,
-    archiveDir: (row.archive_dir as string) ?? null,
-    archiveManifest: parseArchiveManifest(row.archive_manifest),
-    reportSnapshot: parseReportSnapshot(row.report_snapshot),
-    createdAt: String(row.created_at ?? '')
-  }
-}
-
-function parseArchiveManifest(value: unknown): string[] {
-  if (!value || typeof value !== 'string') return []
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-function parseReportSnapshot(value: unknown): MonthlyPayrollReportResult | null {
-  if (!value || typeof value !== 'string') return null
-  try {
-    return JSON.parse(value) as MonthlyPayrollReportResult
-  } catch {
-    return null
-  }
-}
-
-function resolvePayrollPeriod(input?: MonthlyPayrollWorkflowInput): { year: number; month: number } {
-  const today = new Date()
-  return {
-    year: input?.year ?? today.getFullYear(),
-    month: input?.month ?? today.getMonth() + 1
-  }
-}
-
-async function isMonthlyPayrollMonthArchived(year: number, month: number): Promise<boolean> {
-  const database = await getDatabase()
-  const rows = await all<{ count: number }>(
-    database,
-    `SELECT COUNT(*) AS count
-       FROM monthly_payroll_runs
-      WHERE year = ? AND month = ? AND archived_at IS NOT NULL`,
-    [year, month]
-  )
-  return (rows[0]?.count ?? 0) > 0
-}
-
-function monthlyPayrollArchiveDir(run: MonthlyPayrollRun): string {
-  const yearDir = join(monthlyPayrollArchiveRoot(), String(run.year))
-  return join(yearDir, `${run.year}-${String(run.month).padStart(2, '0')}_工资报账月结`)
-}
-
-function monthlyPayrollArchiveRoot(): string {
-  return archiveRoot
-}
-
-async function copyArchiveFile(
-  sourcePath: string | null,
-  targetDir: string,
-  label: string,
-  archiveDate: string
-): Promise<string | null> {
-  if (!sourcePath || !existsSync(sourcePath)) return null
-  mkdirSync(targetDir, { recursive: true })
-  const targetPath = uniqueArchivePath(targetDir, archiveFileName(label, archiveDate, sourcePath))
-  await copyFile(sourcePath, targetPath)
-  return targetPath
-}
-
-async function moveArchiveFile(
-  sourcePath: string | null,
-  targetDir: string,
-  label: string,
-  archiveDate: string
-): Promise<string | null> {
-  if (!sourcePath || !existsSync(sourcePath)) return null
-  mkdirSync(targetDir, { recursive: true })
-  const targetPath = uniqueArchivePath(targetDir, archiveFileName(label, archiveDate, sourcePath))
-  try {
-    await rename(sourcePath, targetPath)
-  } catch {
-    await copyFile(sourcePath, targetPath)
-    await unlink(sourcePath)
-  }
-  return targetPath
-}
-
-function archiveFileName(label: string, archiveDate: string, sourcePath: string): string {
-  return `${label}_${archiveDate}_${basename(sourcePath)}`
-}
-
-async function cleanupMonthlyPayrollGeneratedFiles(runs: MonthlyPayrollRun[]): Promise<void> {
-  const removedDirs = new Set<string>()
-  for (const run of runs) {
-    // 1. 删除原 outputDir 中生成的 保险导入 / 补发工资 / 凭证（撤销月结代表数据有误，需重生成）
-    for (const filePath of [run.insuranceImportPath, run.payrollBackpayPath, run.voucherImportPath]) {
-      if (!filePath) continue
-      if (existsSync(filePath)) {
-        try {
-          await unlink(filePath)
-        } catch (error) {
-          console.warn(`删除生成文件失败：${filePath}`, error)
-        }
-      }
-    }
-    // 2. 删除归档目录里的副本（依据 archiveManifest，但已恢复的源文件不在归档目录里了，跳过）
-    for (const archivedPath of run.archiveManifest) {
-      if (!archivedPath || !existsSync(archivedPath)) continue
-      try {
-        await unlink(archivedPath)
-      } catch (error) {
-        console.warn(`删除归档副本失败：${archivedPath}`, error)
-      }
-    }
-    // 3. 如果归档目录已空，清掉空目录
-    if (run.archiveDir && existsSync(run.archiveDir) && !removedDirs.has(run.archiveDir)) {
-      removedDirs.add(run.archiveDir)
-      try {
-        const remaining = await readdir(run.archiveDir)
-        if (remaining.length === 0) {
-          await rmdir(run.archiveDir)
-        }
-      } catch (error) {
-        console.warn(`清理归档目录失败：${run.archiveDir}`, error)
-      }
-    }
-  }
-}
-
-async function restoreMonthlyPayrollSourceFiles(runs: MonthlyPayrollRun[]): Promise<void> {
-  const restoredTargets = new Set<string>()
-  for (const run of runs) {
-    await restoreArchiveSourceFile(run, run.sourceSalaryPath, '工资表', restoredTargets)
-    await restoreArchiveSourceFile(run, run.sourceSocialPath, '社保', restoredTargets)
-    await restoreArchiveSourceFile(run, run.sourceTaxPath, '个税', restoredTargets)
-  }
-}
-
-async function restoreArchiveSourceFile(
-  run: MonthlyPayrollRun,
-  originalPath: string | null,
-  label: string,
-  restoredTargets: Set<string>
-): Promise<void> {
-  if (!originalPath || restoredTargets.has(originalPath) || existsSync(originalPath)) return
-  const archivedPath = findArchivedSourcePath(run, originalPath, label)
-  if (!archivedPath || !existsSync(archivedPath)) return
-
-  mkdirSync(dirname(originalPath), { recursive: true })
-  const targetPath = uniqueArchivePath(dirname(originalPath), basename(originalPath))
-  try {
-    await rename(archivedPath, targetPath)
-  } catch {
-    await copyFile(archivedPath, targetPath)
-    await unlink(archivedPath)
-  }
-  restoredTargets.add(originalPath)
-}
-
-function findArchivedSourcePath(
-  run: MonthlyPayrollRun,
-  originalPath: string,
-  label: string
-): string | null {
-  const originalName = basename(originalPath)
-  const match = run.archiveManifest.find((filePath) => {
-    const name = basename(filePath)
-    return (
-      name === `${label}_${originalName}` ||
-      (name.startsWith(`${label}_`) && name.endsWith(`_${originalName}`))
-    )
-  })
-  return match ?? null
-}
-
-function uniqueArchivePath(targetDir: string, fileName: string): string {
-  let candidate = join(targetDir, fileName)
-  if (!existsSync(candidate)) return candidate
-
-  const dotIndex = fileName.lastIndexOf('.')
-  const stem = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName
-  const extension = dotIndex > 0 ? fileName.slice(dotIndex) : ''
-  for (let index = 2; ; index += 1) {
-    candidate = join(targetDir, `${stem}_${index}${extension}`)
-    if (!existsSync(candidate)) return candidate
-  }
-}
-
-const FINGERPRINT_SKIP_SHEETS = new Set(['一体化退休'])
-
-function fingerprintReportSheets(sheets: MonthlyPayrollReportSheet[]): string {
-  const stable = sheets
-    .filter((sheet) => !FINGERPRINT_SKIP_SHEETS.has(sheet.name))
-    .map((sheet) => ({
-      name: sheet.name,
-      columns: sheet.columns,
-      rows: sheet.rows,
-      showColumnHeader: sheet.showColumnHeader ?? true,
-      merges: sheet.merges ?? [],
-      columnWidths: sheet.columnWidths ?? [],
-      rowHeights: sheet.rowHeights ?? []
-    }))
-  return createHash('sha256').update(JSON.stringify(stable)).digest('hex')
-}
-
-async function findSameMonthlyPayrollRun(
-  year: number,
-  month: number,
-  reportFingerprint: string
-): Promise<MonthlyPayrollRun | null> {
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(
-    database,
-    `SELECT * FROM monthly_payroll_runs
-     WHERE year = ? AND month = ? AND report_fingerprint = ?
-     ORDER BY created_at DESC LIMIT 1`,
-    [year, month, reportFingerprint]
-  )
-  return rows[0] ? mapRunRow(rows[0]) : null
-}
-
-export async function parseSalaryWorkbook(filePath: string): Promise<SalarySummary> {
-  const workbook = await readWorkbook(filePath)
-  const activeSheet = workbook.Sheets['公办在职']
-  if (!activeSheet) throw new Error('工资表缺少“公办在职”工作表')
-
-  const survivorSheet = workbook.Sheets['遗补'] ?? workbook.Sheets['遗属补助']
-  const activeRows = sheetToAoa(activeSheet)
-  const survivorRows = survivorSheet ? sheetToAoa(survivorSheet) : []
-
-  return {
-    active: parseActiveSummary(activeRows),
-    survivor: survivorRows.length ? parseSurvivorSummary(survivorRows) : {},
-    activePeople: parseActivePeople(activeRows),
-    survivorPeople: survivorRows.length ? parseSurvivorPeople(survivorRows) : []
-  }
-}
-
-export async function parseSocialSecurityWorkbook(filePath: string): Promise<SocialSecuritySummary> {
-  const workbook = await readWorkbook(filePath)
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
-  if (!sheet) throw new Error('社保文件没有可读取的工作表')
-
-  const rows = sheetToAoa(sheet)
-  const headerIndex = findSocialSecurityHeaderRow(rows)
-  if (headerIndex < 0) throw new Error('社保文件缺少“征收品目/征收项目”或“应补（退）费额(元)”表头')
-
-  const headers = rows[headerIndex].map((cell) => normalizeHeader(text(cell)))
-  const itemIndexes = findSocialSecurityItemIndexes(headers)
-  const amountIndex = findHeaderIndex(headers, [
-    '应补（退）费额(元)',
-    '应补(退)费额(元)',
-    '应补（退）费额',
-    '应补(退)费额',
-    '应缴费额(元)',
-    '应缴费额'
-  ])
-  if (itemIndexes.some((index) => index < 0) || amountIndex < 0) {
-    throw new Error('社保文件缺少可识别的征收项目或金额列')
-  }
-  const byItem = new Map<string, number>()
-  let rowCount = 0
-
-  for (let index = headerIndex + 1; index < rows.length; index += 1) {
-    const row = rows[index]
-    const item = itemIndexes.map((itemIndex) => text(row[itemIndex])).filter(Boolean).join(' ')
-    if (!item) continue
-    byItem.set(item, roundMoney((byItem.get(item) ?? 0) + num(row[amountIndex])))
-    rowCount += 1
-  }
-
-  return { byItem: Object.fromEntries(byItem), rowCount }
-}
-
-export async function parseTaxWorkbook(filePath: string): Promise<TaxSummary> {
-  const workbook = await readWorkbook(filePath)
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
-  if (!sheet) throw new Error('个税文件没有可读取的工作表')
-
-  const rows = sheetToAoa(sheet)
-  const headerIndex = findHeaderRow(rows, ['姓名', '证件号码'])
-  if (headerIndex < 0) throw new Error('个税文件缺少“姓名”或“证件号码”表头')
-
-  const headers = rows[headerIndex].map((cell) => normalizeHeader(text(cell)))
-  const nameIndex = headers.indexOf(normalizeHeader('姓名'))
-  const idIndex = headers.indexOf(normalizeHeader('证件号码'))
-  const amountIndex = findTaxAmountColumn(headers)
-  const taxRows: TaxPerson[] = []
-  const missingIdCards: TaxPerson[] = []
-
-  for (let index = headerIndex + 1; index < rows.length; index += 1) {
-    const row = rows[index]
-    const taxAmount = num(row[amountIndex])
-    if (taxAmount === 0) continue
-    const item = {
-      idCard: normalizeIdCard(row[idIndex]),
-      name: text(row[nameIndex]),
-      taxAmount: roundMoney(taxAmount),
-      rowNumber: index + 1
-    }
-    taxRows.push(item)
-    if (!item.idCard) missingIdCards.push(item)
-  }
-
-  return {
-    totalTax: roundMoney(taxRows.reduce((sum, row) => sum + row.taxAmount, 0)),
-    rows: taxRows,
-    missingIdCards
-  }
-}
-
-function parseActiveSummary(rows: CellValue[][]): Record<string, number> {
-  const totalRow = findTotalRow(rows, 4)
-  if (!totalRow) throw new Error('公办在职表未找到“合计”行')
-
-  const result: Record<string, number> = {}
-  activeSalaryFields.forEach((field, offset) => {
-    result[field] = num(totalRow[5 + offset])
-  })
-  result['人数'] = num(totalRow[0])
-  return result
-}
-
-function parseSurvivorSummary(rows: CellValue[][]): Record<string, number> {
-  const totalRow = findTotalRow(rows, 4)
-  if (!totalRow) throw new Error('遗补表未找到“合计”行')
-  return {
-    人数: num(totalRow[16]) || num(totalRow[0]),
-    遗属补助: num(totalRow[17]),
-    补发数: num(totalRow[18]),
-    合计: num(totalRow[28])
-  }
-}
-
-function parseActivePeople(rows: CellValue[][]): PayrollPerson[] {
-  return rows
-    .map((row, index) => ({ row, index }))
-    .filter(({ row }) => text(row[4]) && !text(row[4]).includes('合计') && isValidIdCard(row[2]))
-    .map(({ row, index }) => ({
-      idCard: normalizeIdCard(row[2]),
-      name: text(row[4]),
-      account: text(row[3]),
-      rowNumber: index + 1,
-      values: {
-        岗位工资: num(row[5]),
-        薪级工资: num(row[6]),
-        岗位津贴: num(row[10]),
-        生活补贴: num(row[11]),
-        基本补发: num(row[7]),
-        绩效补发: num(row[12]),
-        基础性绩效工资: num(row[13]),
-        '教（工）龄补贴': num(row[9]),
-        乡镇补贴: num(row[14]),
-        农村教师补贴: num(row[14]),
-        住房补贴: num(row[16]),
-        边远补贴: num(row[15]),
-        边远乡镇补贴: num(row[15]),
-        其他一: roundMoney(num(row[14]) + num(row[15])),
-        交通费: num(row[17]),
-        应发工资: num(row[18]),
-        养老保险缴费: num(row[19]),
-        职业年金缴费: num(row[20]),
-        医疗保险: num(row[21]),
-        失业保险: num(row[22]),
-        公积金: num(row[23]),
-        当月个人所得税: num(row[24]),
-        代扣合计: num(row[27]),
-        实发合计: num(row[28])
-      }
-    }))
-}
-
-function parseSurvivorPeople(rows: CellValue[][]): PayrollPerson[] {
-  return rows
-    .map((row, index) => ({ row, index }))
-    .filter(({ row }) => text(row[4]) && !text(row[4]).includes('合计') && isValidIdCard(row[2]))
-    .map(({ row, index }) => ({
-      idCard: normalizeIdCard(row[2]),
-      name: text(row[4]),
-      account: text(row[3]),
-      rowNumber: index + 1,
-      values: {
-        人数: num(row[16]),
-        遗属补助: num(row[17]),
-        补发数: num(row[18]),
-        应发工资小计: num(row[28]),
-        实发合计: num(row[28])
-      }
-    }))
 }
 
 function buildReportSheets(
@@ -2147,6 +1409,74 @@ function buildReportSheets(
   return sheets
 }
 
+async function buildVoucherPageCounts(
+  input: MonthlyPayrollWorkflowInput,
+  sheets: MonthlyPayrollReportSheet[]
+): Promise<MonthlyPayrollVoucherPageCounts> {
+  const salaryPrintSummary = await getGeneratedSalaryPrintSummary(input)
+  const salaryWorkbookPages =
+    salaryPrintSummary?.items.find((item) => item.label === '工资表')?.pages ?? 0
+  const survivorWorkbookPages = salaryPrintSummary?.items
+    .filter((item) => item.label === '遗补')
+    .reduce((sum, item) => sum + item.pages, 0) ?? 0
+  const retiredHousingPages = countRetiredHousingPrintPages(sheets)
+  return {
+    insuranceAttachmentPages: INSURANCE_VOUCHER_ATTACHMENT_PAGES,
+    salaryWorkbookPages,
+    survivorWorkbookPages,
+    retiredHousingPages,
+    salaryAttachmentPages: salaryWorkbookPages + survivorWorkbookPages + retiredHousingPages
+  }
+}
+
+async function getGeneratedSalaryPrintSummary(
+  input: MonthlyPayrollWorkflowInput
+) {
+  if (!input.salaryWorkbookPath || input.processScope === 'social') return null
+  try {
+    const printSettings = await readMonthlyPayrollPrintSettings()
+    return await getSalaryWorkbookPrintPageSummary({
+      salaryWorkbookPath: input.salaryWorkbookPath,
+      taxWorkbookPath: input.taxWorkbookPath,
+      printerName: printSettings.reportPrinterName
+    })
+  } catch (error) {
+    console.warn('生成报表时统计工资表页数失败：', error)
+    return null
+  }
+}
+
+function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): number {
+  const sheet = sheets.find((item) => item.name === '一体化退休')
+  if (!sheet) return 0
+  if (sheet.rows.length === 0) return 0
+  if (sheet.rows.length <= 3) return 1
+  const dataCount = Math.max(0, sheet.rows.length - 3)
+  return Math.max(1, Math.ceil(dataCount / 18))
+}
+
+function applyVoucherPageCounts(
+  sheets: MonthlyPayrollReportSheet[],
+  counts: MonthlyPayrollVoucherPageCounts
+): void {
+  const sheet = sheets.find((item) => item.name === '报销凭证')
+  if (!sheet) return
+  let pageColumnIndex = sheet.columns.indexOf(VOUCHER_ATTACHMENT_PAGES_COLUMN)
+  if (pageColumnIndex < 0) {
+    sheet.columns.push(VOUCHER_ATTACHMENT_PAGES_COLUMN)
+    pageColumnIndex = sheet.columns.length - 1
+  }
+  for (const row of sheet.rows) {
+    row[pageColumnIndex] = isSalaryVoucherRow(row)
+      ? counts.salaryAttachmentPages
+      : counts.insuranceAttachmentPages
+  }
+}
+
+function isSalaryVoucherRow(row: Array<string | number>): boolean {
+  return String(row[0] ?? '').includes('工资')
+}
+
 function buildSocialOnlyReportSheets(
   socialSecurity: SocialSecuritySummary | undefined,
   tax: TaxSummary | undefined,
@@ -2568,240 +1898,6 @@ function sumSocialByAnyKeywordGroups(
   )
 }
 
-function sumSocialByCanonicalName(
-  socialSecurity: SocialSecuritySummary,
-  canonicalName: string
-): number {
-  return roundMoney(
-    Object.entries(socialSecurity.byItem).reduce((sum, [item, amount]) => {
-      return canonicalInsuranceItemName(item) === canonicalName ? sum + amount : sum
-    }, 0)
-  )
-}
-
-function canonicalInsuranceItemName(item: string): string {
-  const normalized = item.replace(/\s+/g, '')
-  const candidates: Array<[string[], string]> = [
-    [['养老', '个人'], '养老保险个人'],
-    [['养老', '单位'], '养老保险单位'],
-    [['职业年金', '个人'], '职业年金个人'],
-    [['职业年金', '单位'], '职业年金单位'],
-    [['生育'], '生育保险'],
-    [['医疗', '个人'], '医保个人'],
-    [['医保', '个人'], '医保个人'],
-    [['医疗', '单位'], '医保单位'],
-    [['医保', '单位'], '医保单位'],
-    [['失业', '个人'], '失业保险个人'],
-    [['失业', '单位'], '失业保险单位'],
-    [['工伤'], '工伤保险'],
-    [['公积金', '个人'], '住房公积金个人'],
-    [['公积金', '单位'], '住房公积金单位'],
-    [['个人所得税'], '个人所得税'],
-    [['个税'], '个人所得税']
-  ]
-  return candidates.find(([keywords]) => keywords.every((keyword) => normalized.includes(keyword)))?.[1] ?? item
-}
-
-const VOUCHER_COLUMNS = [
-  '凭证日期', '凭证类型', '凭证号', '会计科目编码', '会计科目名称', '借方金额', '贷方金额',
-  '摘要', '附件数', '结算号', '辅助摘要', '往来编码', '往来名称', '预算项目编码', '预算项目名称',
-  '部门编码', '部门名称', '支出功能分类编码', '支出功能分类名称', '收入功能分类（账务）编码',
-  '收入功能分类（账务）名称', '基建项目编码', '基建项目名称', 'PPP项目编码', 'PPP项目名称',
-  '资金性质编码', '资金性质名称', '往来时间编码', '往来时间名称', '投资对象编码', '投资对象名称',
-  '物品各类编码', '物品各类名称', '开户银行编码', '开户银行名称', '费用用途编码', '费用用途名称',
-  '差异项编码', '差异项名称', '资金往来对象类别编码', '资金往来对象类别名称', '收款账户编码',
-  '收款账户名称', '收款人名称编码', '收款人名称名称', '项目类别编码', '项目类别名称',
-  '单位核算自建项目编码', '单位核算自建项目名称', '部门支出经济分类（账务）编码',
-  '部门支出经济分类（账务）名称'
-]
-
-type VoucherInput = {
-  unit: UnitSettings
-  today: Date
-  active: Record<string, number>
-  socialSecurity?: SocialSecuritySummary
-  activeTax: number
-  actualPay: number
-  basicActual: number
-  teachingAge: number
-  ruralTotal: number
-  housing: number
-  performance: number
-  traffic: number
-  survivorTotal: number
-  retiredHousing: number
-  salaryReimburseTotal: number
-  insuranceVoucherTotal: number
-  withholdingTotal: number
-  activeInsurance: number
-}
-
-type VoucherEntry = {
-  voucherNo: '1' | '2'
-  subjectCode: string
-  subjectName: string
-  debit?: number
-  credit?: number
-  attachmentCount?: number
-  summary: string
-  partyCode?: string | number
-  partyName?: string
-  budgetCode?: string
-  budgetName?: string
-  functionCode?: string
-  functionName?: string
-  fundCode?: string
-  fundName?: string
-  econCode?: string
-  econName?: string
-  hasDifference?: boolean
-}
-
-type VoucherBuildOptions = {
-  includeSalaryVoucher: boolean
-  includeInsuranceVoucher: boolean
-}
-
-const INSURANCE_VOUCHER_ATTACHMENT_COUNT = 7
-
-function lastDayOfPayrollMonth(today: Date): Date {
-  return new Date(today.getFullYear(), today.getMonth() + 1, 0)
-}
-
-function buildVoucherSheet(
-  input: VoucherInput,
-  options: VoucherBuildOptions
-): MonthlyPayrollReportSheet {
-  const { unit, today, active, socialSecurity, activeTax } = input
-  const date = lastDayOfPayrollMonth(today)
-  const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-  const salaryAttachmentCount = options.includeSalaryVoucher ? 14 : 5
-
-  const insurancePersonalPension = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '养老保险个人') : 0
-  const insuranceUnitPension = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '养老保险单位') : 0
-  const insurancePersonalAnnuity = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '职业年金个人') : 0
-  const insuranceUnitAnnuity = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '职业年金单位') : 0
-  const insurancePersonalMedical = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '医保个人') : 0
-  const insuranceUnitMedical = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '医保单位') : 0
-  const insuranceMaternity = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '生育保险') : 0
-  const insurancePersonalUnemployment = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '失业保险个人') : 0
-  const insuranceUnitUnemployment = socialSecurity
-    ? roundMoney(
-        sumSocialByCanonicalName(socialSecurity, '工伤保险') +
-          sumSocialByCanonicalName(socialSecurity, '失业保险单位')
-      )
-    : 0
-  const housingFund = num(active['住房公积金'])
-
-  const entries: VoucherEntry[] = []
-
-  if (options.includeSalaryVoucher) {
-    entries.push(
-    // 凭证 1：本月工资发放
-    { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: roundMoney(input.basicActual + input.teachingAge + input.housing + input.performance + input.activeInsurance), summary: '本月工资', hasDifference: true },
-    { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: input.ruralTotal, summary: '农村补贴', hasDifference: true },
-    { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: input.traffic, summary: '交通补贴', hasDifference: true },
-    { voucherNo: '1', subjectCode: '500103', subjectName: '对个人和家庭的补助费用', debit: input.survivorTotal, summary: '遗补', hasDifference: true },
-    { voucherNo: '1', subjectCode: '500103', subjectName: '对个人和家庭的补助费用', debit: input.retiredHousing, summary: '退休房补', hasDifference: true },
-    { voucherNo: '1', subjectCode: '400101', subjectName: '一般公共预算财政拨款', credit: input.actualPay, summary: '本月工资', hasDifference: true },
-    { voucherNo: '1', subjectCode: '2307', subjectName: '其他应付款', credit: num(active['养老保险']), summary: '代扣养老保险', partyCode: '999', partyName: '新养老保险' },
-    { voucherNo: '1', subjectCode: '2307', subjectName: '其他应付款', credit: num(active['职业年金']), summary: '代扣职业年金', partyCode: '998', partyName: '新职业年金' },
-    { voucherNo: '1', subjectCode: '2307', subjectName: '其他应付款', credit: num(active['医保大病统筹']), summary: '代扣医疗保险', partyCode: '997', partyName: '新四险' },
-    { voucherNo: '1', subjectCode: '2307', subjectName: '其他应付款', credit: num(active['失业保险']), summary: '代扣失业保险', partyCode: '997', partyName: '新四险' },
-    { voucherNo: '1', subjectCode: '2307', subjectName: '其他应付款', credit: housingFund, summary: '代扣住房公积金', partyCode: '996', partyName: '扣住房公积金' },
-    { voucherNo: '1', subjectCode: '2307', subjectName: '其他应付款', credit: activeTax, summary: '代扣个人所得税', partyCode: 994, partyName: '扣个人所得税' },
-    // 平行预算会计 (在职工资)
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.basicActual, summary: '基本工资', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.teachingAge, summary: '教龄津贴', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30102', econName: '津贴补贴', hasDifference: true },
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.ruralTotal, summary: '农村补贴', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30102', econName: '其他对个人和家庭的补助', hasDifference: true },
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.housing, summary: '住房补贴', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30102', econName: '津贴补贴', hasDifference: true },
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.performance, summary: '绩效工资', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30107', econName: '绩效工资', hasDifference: true },
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.traffic, summary: '交通补贴', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30102', econName: '津贴补贴', hasDifference: true },
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.survivorTotal, summary: '遗补', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30305', econName: '生活补助', hasDifference: true },
-    { voucherNo: '1', subjectCode: '60010101', subjectName: '财政拨款预算收入', credit: roundMoney(input.basicActual + input.teachingAge + input.ruralTotal + input.housing + input.performance + input.traffic + input.survivorTotal), summary: '本月工资', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', hasDifference: true },
-    // 平行预算会计 (退休房补)
-    { voucherNo: '1', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: input.retiredHousing, summary: '退休房补', budgetCode: unit.budgetRetiredCode, budgetName: '人员支出', functionCode: unit.retiredFunctionCode, functionName: unit.retiredFunctionName, fundCode: '111', fundName: '一般公共预算资金', econCode: '30302', econName: '退休费', hasDifference: true },
-    { voucherNo: '1', subjectCode: '60010101', subjectName: '财政拨款预算收入', credit: input.retiredHousing, summary: '退休房补', budgetCode: unit.budgetRetiredCode, budgetName: '人员支出', functionCode: unit.retiredFunctionCode, functionName: unit.retiredFunctionName, fundCode: '111', fundName: '一般公共预算资金', hasDifference: true }
-    )
-  }
-
-  if (options.includeInsuranceVoucher && socialSecurity) {
-    entries.push(
-    // 凭证 2：五险一金缴纳
-    { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: insurancePersonalPension, summary: '养老保险（个人）', partyCode: '999', partyName: '新养老保险' },
-    { voucherNo: '2', subjectCode: '500101', subjectName: '工资福利费用', debit: insuranceUnitPension, summary: '养老保险（单位）', hasDifference: true },
-    { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: insurancePersonalAnnuity, summary: '职业年金（个人）', partyCode: '998', partyName: '新职业年金' },
-    { voucherNo: '2', subjectCode: '500101', subjectName: '工资福利费用', debit: insuranceUnitAnnuity, summary: '职业年金（单位）', hasDifference: true },
-    { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: insurancePersonalMedical, summary: '医保（个人）', partyCode: '997', partyName: '新四险' },
-    { voucherNo: '2', subjectCode: '500101', subjectName: '工资福利费用', debit: insuranceUnitMedical, summary: '医保（单位）', hasDifference: true },
-    { voucherNo: '2', subjectCode: '500101', subjectName: '工资福利费用', debit: insuranceMaternity, summary: '生育保险', hasDifference: true },
-    { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: insurancePersonalUnemployment, summary: '工伤失业（个人）', partyCode: '997', partyName: '新四险' },
-    { voucherNo: '2', subjectCode: '500101', subjectName: '工资福利费用', debit: insuranceUnitUnemployment, summary: '工伤失业(单位)', hasDifference: true },
-    { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: housingFund, summary: '住房公积金（个人）', partyCode: '996', partyName: '扣住房公积金' },
-    { voucherNo: '2', subjectCode: '500101', subjectName: '工资福利费用', debit: housingFund, summary: '住房公积金（单位）', hasDifference: true },
-    { voucherNo: '2', subjectCode: '2307', subjectName: '其他应付款', debit: activeTax, summary: '个人所得税', partyCode: 994, partyName: '扣个人所得税' },
-    { voucherNo: '2', subjectCode: '400101', subjectName: '一般公共预算财政拨款', credit: input.insuranceVoucherTotal, summary: '五险一金、个税等', hasDifference: true },
-    // 平行预算会计
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insurancePersonalPension, summary: '养老保险（个人）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insuranceUnitPension, summary: '养老保险（单位）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30108', econName: '机关事业单位基本养老保险缴费', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insurancePersonalAnnuity, summary: '职业年金（个人）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insuranceUnitAnnuity, summary: '职业年金（单位）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30109', econName: '职业年金缴费', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insurancePersonalMedical, summary: '医保（个人）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insuranceUnitMedical, summary: '医保（单位）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30110', econName: '职工基本医疗保险缴费', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insuranceMaternity, summary: '生育保险', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30110', econName: '职工基本医疗保险缴费', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insurancePersonalUnemployment, summary: '工伤失业（个人）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: insuranceUnitUnemployment, summary: '工伤失业(单位)', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30112', econName: '其他社会保障缴费', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: housingFund, summary: '住房公积金（个人）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: housingFund, summary: '住房公积金（单位）', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30113', econName: '住房公积金', hasDifference: true },
-    { voucherNo: '2', subjectCode: '7201010101', subjectName: '财政拨款支出', debit: activeTax, summary: '个人所得税', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', econCode: '30101', econName: '基本工资', hasDifference: true },
-    { voucherNo: '2', subjectCode: '60010101', subjectName: '财政拨款预算收入', credit: input.insuranceVoucherTotal, summary: '五险一金、个税等', budgetCode: unit.budgetActiveCode, budgetName: '人员支出', functionCode: unit.functionCode, functionName: unit.schoolLevel, fundCode: '111', fundName: '一般公共预算资金', hasDifference: true }
-    )
-  }
-
-  const rows = entries.map((e) =>
-    voucherRow(
-      {
-        ...e,
-        attachmentCount:
-          e.attachmentCount ??
-          (e.voucherNo === '2' ? INSURANCE_VOUCHER_ATTACHMENT_COUNT : salaryAttachmentCount)
-      },
-      dateStr
-    )
-  )
-  return { name: '凭证', columns: VOUCHER_COLUMNS, rows }
-}
-
-function voucherRow(e: VoucherEntry, dateStr: string): Array<string | number> {
-  const row: Array<string | number> = new Array(VOUCHER_COLUMNS.length).fill('')
-  row[0] = dateStr
-  row[1] = '记账'
-  row[2] = e.voucherNo
-  row[3] = e.subjectCode
-  row[4] = e.subjectName
-  row[5] = e.debit ?? 0
-  row[6] = e.credit ?? 0
-  row[7] = e.summary
-  row[8] = e.attachmentCount ?? 0
-  row[9] = ''
-  row[10] = e.summary
-  if (e.partyCode !== undefined) row[11] = e.partyCode
-  if (e.partyName) row[12] = e.partyName
-  if (e.budgetCode) row[13] = e.budgetCode
-  if (e.budgetName) row[14] = e.budgetName
-  if (e.functionCode) row[17] = e.functionCode
-  if (e.functionName) row[18] = e.functionName
-  if (e.fundCode) row[25] = e.fundCode
-  if (e.fundName) row[26] = e.fundName
-  if (e.hasDifference) {
-    row[37] = '0'
-    row[38] = '无差异'
-  }
-  if (e.econCode) row[49] = e.econCode
-  if (e.econName) row[50] = e.econName
-  return row
-}
-
 function writeWorkbook(
   filePath: string,
   sheets: MonthlyPayrollReportSheet[],
@@ -2814,335 +1910,6 @@ function writeWorkbook(
     XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheet.name))
   }
   writeFileSync(filePath, XLSX.write(workbook, { bookType, type: 'buffer' }))
-}
-
-async function loadRetiredSummary(): Promise<RetiredSummary> {
-  try {
-    const worksheet = getWorksheetByName('一体化退休')
-    const columns = getWorksheetLocalColumns(worksheet)
-    const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
-    const housingColumn = columns.find((column) => column.field.name === '住房补贴')?.columnName
-    if (!idColumn || !housingColumn) return { count: 0, housing: 0 }
-    const database = await getDatabase()
-    const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
-    const latestById = new Map<string, Record<string, unknown>>()
-    for (const row of rows) {
-      const idCard = normalizeIdCard(row[idColumn])
-      if (!isValidIdCard(idCard)) continue
-      const previous = latestById.get(idCard)
-      if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
-    }
-    const latest = Array.from(latestById.values())
-    return {
-      count: latest.length,
-      housing: roundMoney(latest.reduce((sum, row) => sum + num(row[housingColumn]), 0))
-    }
-  } catch {
-    return { count: 0, housing: 0 }
-  }
-}
-
-async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[]> {
-  try {
-    const worksheet = getWorksheetByName('一体化退休')
-    const columns = getWorksheetLocalColumns(worksheet)
-    const colByName = (name: string): string | undefined =>
-      columns.find((column) => column.field.name === name)?.columnName
-    const idColumn = colByName('证件号码')
-    const nameColumn = colByName('姓名')
-    const unitColumn = colByName('单位名称')
-    const housingColumn = colByName('住房补贴')
-    const backpayColumn = colByName('补发工资')
-    const otherOneColumn = colByName('其他一')
-    const payableColumn = colByName('应发工资小计')
-    const actualPayColumn = colByName('实发合计')
-    if (!idColumn || !housingColumn) return []
-    const database = await getDatabase()
-    const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
-    const latestById = new Map<string, Record<string, unknown>>()
-    for (const row of rows) {
-      const idCard = normalizeIdCard(row[idColumn])
-      if (!isValidIdCard(idCard)) continue
-      const previous = latestById.get(idCard)
-      if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
-    }
-    return Array.from(latestById.values()).map((row) => ({
-      name: nameColumn ? text(row[nameColumn]) : '',
-      idCard: normalizeIdCard(row[idColumn]),
-      unitName: unitColumn ? text(row[unitColumn]) : '',
-      housing: roundMoney(num(row[housingColumn])),
-      backpay: roundMoney(backpayColumn ? num(row[backpayColumn]) : 0),
-      payable: roundMoney(
-        num(row[housingColumn]) +
-          (backpayColumn ? num(row[backpayColumn]) : 0) +
-          (otherOneColumn ? num(row[otherOneColumn]) : 0)
-      ),
-      actualPay: roundMoney(
-        num(row[housingColumn]) +
-          (backpayColumn ? num(row[backpayColumn]) : 0) +
-          (otherOneColumn ? num(row[otherOneColumn]) : 0)
-      )
-    }))
-  } catch {
-    return []
-  }
-}
-
-async function loadIntegratedActiveHousingFund(): Promise<number> {
-  try {
-    const rows = await loadIntegratedRows('一体化在职')
-    return roundMoney(rows.reduce((sum, row) => sum + num(row.values['公积金']), 0))
-  } catch {
-    return 0
-  }
-}
-
-type IntegratedActiveAggregates = {
-  count: number
-  基本工资: number
-  教龄津贴: number
-  其他一: number
-  住房补贴: number
-  基础性绩效: number
-  交通补贴: number
-  绩效工资: number
-  工作性津贴: number
-  特岗性津补贴: number
-  补发工资: number
-  其他二: number
-  其他三: number
-  应发工资: number
-  个税: number
-  实发合计: number
-  养老保险: number
-  职业年金: number
-  医疗保险: number
-  失业保险: number
-  公积金: number
-  五险一金合计: number
-}
-
-const integratedActivePayableFields = [
-  '岗位工资',
-  '薪级工资',
-  '岗位津贴',
-  '生活补贴',
-  '绩效工资',
-  '工作性津贴',
-  '教（工）龄补贴',
-  '特岗性津补贴',
-  '交通费',
-  '公车补贴',
-  '住房补贴',
-  '基础绩效奖',
-  '补发工资',
-  '其他一',
-  '其他二',
-  '其他三'
-]
-
-async function loadIntegratedActiveAggregates(): Promise<IntegratedActiveAggregates> {
-  const empty: IntegratedActiveAggregates = {
-    count: 0,
-    基本工资: 0,
-    教龄津贴: 0,
-    其他一: 0,
-    住房补贴: 0,
-    基础性绩效: 0,
-    交通补贴: 0,
-    绩效工资: 0,
-    工作性津贴: 0,
-    特岗性津补贴: 0,
-    补发工资: 0,
-    其他二: 0,
-    其他三: 0,
-    应发工资: 0,
-    个税: 0,
-    实发合计: 0,
-    养老保险: 0,
-    职业年金: 0,
-    医疗保险: 0,
-    失业保险: 0,
-    公积金: 0,
-    五险一金合计: 0
-  }
-  try {
-    const rows = await loadIntegratedRows('一体化在职')
-    const sumField = (name: string): number =>
-      rows.reduce((sum, row) => sum + num(row.values[name]), 0)
-    const result: IntegratedActiveAggregates = {
-      count: rows.length,
-      基本工资: roundMoney(sumField('岗位工资') + sumField('薪级工资')),
-      教龄津贴: roundMoney(sumField('教（工）龄补贴')),
-      其他一: roundMoney(sumField('其他一')),
-      住房补贴: roundMoney(sumField('住房补贴')),
-      基础性绩效: roundMoney(sumField('岗位津贴') + sumField('生活补贴')),
-      交通补贴: roundMoney(sumField('交通费') + sumField('公车补贴')),
-      绩效工资: roundMoney(sumField('绩效工资')),
-      工作性津贴: roundMoney(sumField('工作性津贴')),
-      特岗性津补贴: roundMoney(sumField('特岗性津补贴')),
-      补发工资: roundMoney(sumField('补发工资')),
-      其他二: roundMoney(sumField('其他二')),
-      其他三: roundMoney(sumField('其他三')),
-      应发工资: roundMoney(
-        integratedActivePayableFields.reduce((sum, name) => sum + sumField(name), 0)
-      ),
-      // 当月个税写在"补扣工资"列；fallback 到"当月个人所得税"以兼容上游已填充的场景
-      个税: roundMoney(sumField('补扣工资') || sumField('当月个人所得税')),
-      实发合计: roundMoney(sumField('实发合计')),
-      养老保险: roundMoney(sumField('养老保险缴费')),
-      职业年金: roundMoney(sumField('职业年金缴费')),
-      医疗保险: roundMoney(sumField('医疗保险')),
-      失业保险: roundMoney(sumField('失业保险')),
-      公积金: roundMoney(sumField('公积金')),
-      五险一金合计: roundMoney(
-        sumField('养老保险缴费') +
-          sumField('职业年金缴费') +
-          sumField('医疗保险') +
-          sumField('失业保险') +
-          sumField('公积金')
-      )
-    }
-    return result
-  } catch {
-    return empty
-  }
-}
-
-type IntegratedSimpleAggregates = {
-  count: number
-  住房补贴: number
-  补发工资: number
-  应发工资小计: number
-  实发合计: number
-}
-
-async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<string | number>>> {
-  try {
-    const rows = await loadIntegratedRows('一体化在职')
-    const year = new Date().getFullYear()
-    const month = new Date().getMonth() + 1
-    return rows
-      .filter((row) => {
-        const backpay = num(row.values['补发工资'])
-        // 一体化在职 实际上把当月个税写入"补扣工资"列；当月个人所得税列由上游维护
-        const tax = num(row.values['补扣工资']) || num(row.values['当月个人所得税'])
-        return backpay !== 0 || tax !== 0
-      })
-      .map((row) => {
-        const tax = num(row.values['补扣工资']) || num(row.values['当月个人所得税'])
-        const out: Array<string | number> = [
-          row.idCard,
-          month,
-          row.name,
-          '事业',
-          year,
-          '', '', '', '', '', '', '', '', '', '', '',
-          roundMoney(num(row.values['补发工资'])), // 补发工资
-          0, // 补扣工资
-          '', '', '',
-          roundMoney(tax), // 当月个人所得税
-          ''
-        ]
-        return out
-      })
-  } catch {
-    return []
-  }
-}
-
-async function loadIntegratedSimpleAggregates(
-  worksheetName: '一体化退休' | '一体化其他'
-): Promise<IntegratedSimpleAggregates> {
-  const empty: IntegratedSimpleAggregates = {
-    count: 0,
-    住房补贴: 0,
-    补发工资: 0,
-    应发工资小计: 0,
-    实发合计: 0
-  }
-  try {
-    const rows = await loadIntegratedRows(worksheetName)
-    const sumField = (name: string): number =>
-      rows.reduce((sum, row) => sum + num(row.values[name]), 0)
-    return {
-      count: rows.length,
-      住房补贴: roundMoney(sumField('住房补贴')),
-      补发工资: roundMoney(sumField('补发工资')),
-      应发工资小计: roundMoney(sumField('应发工资小计')),
-      实发合计: roundMoney(sumField('实发合计'))
-    }
-  } catch {
-    return empty
-  }
-}
-
-async function runDetailImports(
-  input: MonthlyPayrollWorkflowInput,
-  salary: SalarySummary | undefined
-): Promise<void> {
-  const unit = await readUnitSettings()
-  const unitCode = text(unit.unitImportCode)
-  const unitName = text(unit.unitFullName)
-
-  if (input.socialSecurityWorkbookPath) {
-    try {
-      await importSocialSecurityDetail(input.socialSecurityWorkbookPath, unitCode, unitName)
-    } catch (error) {
-      console.warn('社保明细入库失败：', error)
-    }
-  }
-  if (input.taxWorkbookPath) {
-    try {
-      await importTaxDetail(input.taxWorkbookPath, unitCode, unitName)
-    } catch (error) {
-      console.warn('个税明细入库失败：', error)
-    }
-  }
-  if (salary && input.salaryWorkbookPath) {
-    try {
-      const period = resolvePayrollPeriod(input)
-      const detailRows: HousingFundDetailRow[] = salary.activePeople
-        .filter((person) => person.idCard)
-        .map((person) => ({
-          idCard: person.idCard,
-          name: person.name,
-          personal: num(person.values['公积金']),
-          unitAmount: num(person.values['公积金'])
-        }))
-      await importHousingFundDetail(
-        detailRows,
-        period.year,
-        period.month,
-        unitCode,
-        unitName,
-        input.salaryWorkbookPath ? input.salaryWorkbookPath.split(/[/\\]/).pop() ?? '' : ''
-      )
-    } catch (error) {
-      console.warn('公积金明细入库失败：', error)
-    }
-  }
-}
-
-async function loadIntegratedActivePersonalInsuranceTotals(): Promise<PersonalInsuranceTotals> {
-  try {
-    const rows = await loadIntegratedRows('一体化在职')
-    return personalInsuranceTotals({
-      pension: roundMoney(rows.reduce((sum, row) => sum + num(row.values['养老保险缴费']), 0)),
-      annuity: roundMoney(rows.reduce((sum, row) => sum + num(row.values['职业年金缴费']), 0)),
-      medical: roundMoney(rows.reduce((sum, row) => sum + num(row.values['医疗保险']), 0)),
-      unemployment: roundMoney(rows.reduce((sum, row) => sum + num(row.values['失业保险']), 0)),
-      housing: roundMoney(rows.reduce((sum, row) => sum + num(row.values['公积金']), 0))
-    })
-  } catch {
-    return personalInsuranceTotals({
-      pension: 0,
-      annuity: 0,
-      medical: 0,
-      unemployment: 0,
-      housing: 0
-    })
-  }
 }
 
 function gridColumns(count: number): string[] {
@@ -3165,158 +1932,6 @@ function columnLabel(index: number): string {
   return label
 }
 
-function sumSocialByKeyword(
-  socialSecurity: SocialSecuritySummary,
-  keywordGroups: string[]
-): number {
-  const keywords = keywordGroups.map((item) => item.replace(/\s+/g, ''))
-  return roundMoney(
-    Object.entries(socialSecurity.byItem).reduce((sum, [item, amount]) => {
-      const normalized = item.replace(/\s+/g, '')
-      if (keywords.every((keyword) => normalized.includes(keyword))) return sum + amount
-      return sum
-    }, 0)
-  )
-}
-
-function departmentEconomicSubjectForSocialItem(item: string): { code: string; name: string } {
-  const normalized = canonicalInsuranceItemName(item).replace(/\s+/g, '')
-  const isPersonal = normalized.includes('个人')
-  if (isPersonal) return { code: '30101', name: '基本工资' }
-  if (normalized.includes('公积金')) return { code: '30113', name: '住房公积金' }
-  if (normalized.includes('职业年金')) return { code: '30109', name: '职业年金缴费' }
-  if (normalized.includes('养老')) return { code: '30108', name: '机关事业单位基本养老保险缴费' }
-  if (normalized.includes('医疗') || normalized.includes('医保') || normalized.includes('大额') || normalized.includes('生育')) {
-    return { code: '30110', name: '职工基本医疗保险缴费' }
-  }
-  if (normalized.includes('失业') || normalized.includes('工伤')) {
-    return { code: '30112', name: '其他社会保障缴费' }
-  }
-  return { code: '', name: item }
-}
-
-function buildInsuranceVoucherUsage(
-  active: Record<string, number>,
-  socialSecurity: SocialSecuritySummary | undefined,
-  activeTax: number,
-  total: number
-): string {
-  const social = socialSecurity ?? { byItem: {}, rowCount: 0 }
-  return [
-    ['职业年金（单位）', sumSocialByCanonicalName(social, '职业年金单位')],
-    ['职业年金（个人）', sumSocialByCanonicalName(social, '职业年金个人')],
-    ['养老保险费（单位）', sumSocialByCanonicalName(social, '养老保险单位')],
-    ['养老保险费（个人）', sumSocialByCanonicalName(social, '养老保险个人')],
-    ['医疗保险（个人）', sumSocialByCanonicalName(social, '医保个人')],
-    ['医疗保险（单位）', sumSocialByCanonicalName(social, '医保单位')],
-    ['生育保险', sumSocialByCanonicalName(social, '生育保险')],
-    ['失业保险（单位）', sumSocialByCanonicalName(social, '失业保险单位')],
-    ['失业保险（个人）', sumSocialByCanonicalName(social, '失业保险个人')],
-    ['工伤保险', sumSocialByCanonicalName(social, '工伤保险')],
-    ['公积金（个人）', num(active['住房公积金'])],
-    ['公积金（单位）', num(active['住房公积金'])],
-    ['个税', activeTax],
-    ['合计', total],
-    ['补缴养老保险', 0],
-    ['补缴职业年金', 0],
-    ['补缴医保、工伤失业等', 0]
-  ].map(([label, amount]) => `${label}${formatVoucherAmount(Number(amount))}`).join('\n')
-}
-
-function buildSalaryVoucherUsage(
-  active: Record<string, number>,
-  survivorTotal: number,
-  retiredHousing: number,
-  basicActual: number,
-  activeInsurance: number,
-  total: number
-): string {
-  return [
-    ['退休房补', retiredHousing],
-    ['遗属补助', survivorTotal],
-    ['基本工资', basicActual],
-    ['基础性绩效', num(active['基础性绩效'])],
-    ['农村教师补贴', num(active['乡镇补贴'])],
-    ['边远补贴', num(active['边远乡镇补贴'])],
-    ['交通补贴', num(active['交通补贴'])],
-    ['教龄津贴', num(active['教龄津贴'])],
-    ['住房补贴', num(active['住房补贴'])],
-    ['五险一金', activeInsurance],
-    ['合计', total]
-  ].map(([label, amount]) => `${label}${formatVoucherAmount(Number(amount))}`).join('\n')
-}
-
-function formatVoucherAmount(value: number): string {
-  return Number.isInteger(value) ? String(value) : formatMoney(value).replace(/,/g, '')
-}
-
-function toChineseRmb(value: number): string {
-  if (value === 0) return '零元整'
-  const digits = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖']
-  const units = ['', '拾', '佰', '仟']
-  const bigUnits = ['', '万', '亿', '兆']
-  const integer = Math.floor(Math.abs(value))
-  const cents = Math.round((Math.abs(value) - integer) * 100)
-  const integerText = integerToChinese(integer, digits, units, bigUnits)
-  const jiao = Math.floor(cents / 10)
-  const fen = cents % 10
-  const decimalText = jiao || fen
-    ? `${jiao ? `${digits[jiao]}角` : ''}${fen ? `${digits[fen]}分` : ''}`
-    : '整'
-  return `${value < 0 ? '负' : ''}${integerText}元${decimalText}`
-}
-
-function integerToChinese(
-  value: number,
-  digits: string[],
-  units: string[],
-  bigUnits: string[]
-): string {
-  if (value === 0) return digits[0]
-  const groups: number[] = []
-  let current = value
-  while (current > 0) {
-    groups.push(current % 10000)
-    current = Math.floor(current / 10000)
-  }
-  let result = ''
-  let pendingZero = false
-  for (let index = groups.length - 1; index >= 0; index -= 1) {
-    const group = groups[index]
-    if (group === 0) {
-      pendingZero = result.length > 0
-      continue
-    }
-    if (pendingZero || (result && group < 1000)) result += digits[0]
-    result += smallIntegerToChinese(group, digits, units) + bigUnits[index]
-    pendingZero = group < 1000
-  }
-  return result.replace(/零+/g, '零').replace(/零$/g, '')
-}
-
-function smallIntegerToChinese(value: number, digits: string[], units: string[]): string {
-  let result = ''
-  let pendingZero = false
-  const values = [
-    Math.floor(value / 1000) % 10,
-    Math.floor(value / 100) % 10,
-    Math.floor(value / 10) % 10,
-    value % 10
-  ]
-  for (let index = 0; index < values.length; index += 1) {
-    const digit = values[index]
-    const unit = units[values.length - 1 - index]
-    if (digit === 0) {
-      pendingZero = result.length > 0
-      continue
-    }
-    if (pendingZero) result += digits[0]
-    result += digits[digit] + unit
-    pendingZero = false
-  }
-  return result
-}
-
 function safeSheetName(name: string): string {
   return name.replace(/[:\\/?*[\]]/g, '').slice(0, 31) || 'Sheet1'
 }
@@ -3331,603 +1946,4 @@ function dateStamp(): string {
   const date = new Date()
   const pad = (value: number): string => String(value).padStart(2, '0')
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
-}
-
-async function comparePayrollPeople(
-  sourceName: string,
-  sourcePeople: PayrollPerson[],
-  targetWorksheetName: string,
-  compareFields: Array<[string, string]>
-): Promise<CompareSummary> {
-  const targetRows = await loadIntegratedRows(targetWorksheetName)
-  const sourceById = new Map(sourcePeople.map((person) => [person.idCard, person]))
-  const targetById = new Map(targetRows.map((row) => [row.idCard, row]))
-  let added = 0
-  let removed = 0
-  let changed = 0
-  const changedExamples: string[] = []
-
-  for (const person of sourcePeople) {
-    const target = targetById.get(person.idCard)
-    if (!target) {
-      added += 1
-      continue
-    }
-    const changes = getPayrollPersonChanges(person, target, compareFields)
-    if (changes.length > 0) {
-      changed += 1
-      if (changedExamples.length < 5) {
-        changedExamples.push(`${person.name || person.idCard}：${changes.slice(0, 3).join('；')}`)
-      }
-    }
-  }
-
-  for (const target of targetRows) {
-    if (!sourceById.has(target.idCard)) removed += 1
-  }
-
-  return {
-    sourceName,
-    targetName: targetWorksheetName,
-    sourceRows: sourcePeople.length,
-    targetRows: targetRows.length,
-    added,
-    removed,
-    changed,
-    changedExamples
-  }
-}
-
-async function buildIntegratedActiveWriteBackPlan(
-  sourcePeople: PayrollPerson[]
-): Promise<IntegratedWriteBackPlan> {
-  return buildIntegratedWorksheetWriteBackPlan(
-    sourcePeople,
-    '一体化在职',
-    activeCompareFields,
-    '一体化在职 缺少证件号码字段',
-    (targetFieldName) => targetFieldName === '补扣工资' ? '001' : undefined
-  )
-}
-
-async function buildIntegratedOtherWriteBackPlan(
-  sourcePeople: PayrollPerson[]
-): Promise<IntegratedWriteBackPlan> {
-  return buildIntegratedWorksheetWriteBackPlan(
-    sourcePeople,
-    '一体化其他',
-    survivorCompareFields,
-    '一体化其他 缺少证件号码字段'
-  )
-}
-
-async function buildIntegratedWorksheetWriteBackPlan(
-  sourcePeople: PayrollPerson[],
-  worksheetName: string,
-  compareFields: Array<[string, string]>,
-  missingIdCardMessage: string,
-  fallbackBatchHint?: (targetFieldName: string) => string | undefined
-): Promise<IntegratedWriteBackPlan> {
-  const worksheet = getWorksheetByName(worksheetName)
-  const columns = getWorksheetLocalColumns(worksheet)
-  const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
-  const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
-  if (!idColumn) throw new Error(missingIdCardMessage)
-
-  const fieldColumns = new Map(columns.map((column) => [column.field.name, column]))
-  const writableFields = compareFields.flatMap(([targetFieldName, sourceFieldName]) => {
-    if (sourceFieldName === 'name') return []
-    const column = fieldColumns.get(targetFieldName)
-    if (!column || !shouldAggregateIntegratedField(column.field)) return []
-    return [{ targetFieldName, sourceFieldName, column }]
-  })
-
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
-  const latestByIdBatch = new Map<string, Record<string, unknown>>()
-  for (const row of rows) {
-    const idCard = normalizeIdCard(row[idColumn])
-    if (!idCard) continue
-    const key = integratedCurrentRowKey(idCard, row, batchColumn)
-    const previous = latestByIdBatch.get(key)
-    if (!previous || num(row.id) > num(previous.id)) latestByIdBatch.set(key, row)
-  }
-
-  const rowsByIdCard = new Map<string, Record<string, unknown>[]>()
-  for (const row of latestByIdBatch.values()) {
-    const idCard = normalizeIdCard(row[idColumn])
-    const grouped = rowsByIdCard.get(idCard) ?? []
-    grouped.push(row)
-    rowsByIdCard.set(idCard, grouped)
-  }
-
-  const batchHintByField = new Map<string, string>()
-  for (const item of writableFields) {
-    const hint = inferIntegratedFieldBatch(rowsByIdCard, item.column.columnName, batchColumn)
-    if (hint) batchHintByField.set(item.targetFieldName, hint)
-  }
-
-  const changes: IntegratedWriteBackChange[] = []
-  const manual: IntegratedManualDifference[] = []
-  for (const person of sourcePeople) {
-    const personRows = rowsByIdCard.get(person.idCard)
-    if (!personRows) continue
-
-    for (const item of writableFields) {
-      const sourceValue = roundMoney(num(person.values[item.sourceFieldName]))
-      const targetValue = roundMoney(
-        personRows.reduce((sum, row) => sum + num(row[item.column.columnName]), 0)
-      )
-      if (roundMoney(sourceValue - targetValue) === 0) continue
-
-      const decision = decideIntegratedFieldWriteBack({
-        personRows,
-        fieldColumn: item.column.columnName,
-        sourceValue,
-        targetValue,
-        batchColumn,
-        batchHint: batchHintByField.get(item.targetFieldName) ?? fallbackBatchHint?.(item.targetFieldName)
-      })
-      if (decision.ok) {
-        changes.push({
-          worksheetName,
-          idCard: person.idCard,
-          name: person.name || (nameColumn ? text(personRows[0]?.[nameColumn]) : ''),
-          fieldName: item.targetFieldName,
-          sourceValue,
-          targetValue,
-          batchCode: decision.batchCode,
-          reason: decision.reason,
-          updates: decision.updates
-        })
-      } else {
-        manual.push({
-          worksheetName,
-          idCard: person.idCard,
-          name: person.name || (nameColumn ? text(personRows[0]?.[nameColumn]) : ''),
-          fieldName: item.targetFieldName,
-          sourceValue,
-          targetValue,
-          reason: decision.reason
-        })
-      }
-    }
-  }
-
-  return { changes, manual }
-}
-
-function mergeIntegratedWriteBackPlans(...plans: IntegratedWriteBackPlan[]): IntegratedWriteBackPlan {
-  return {
-    changes: plans.flatMap((plan) => plan.changes),
-    manual: plans.flatMap((plan) => plan.manual)
-  }
-}
-
-async function applyIntegratedWriteBackPlan(plan: IntegratedWriteBackPlan): Promise<void> {
-  if (plan.changes.length === 0) return
-  const worksheetCache = new Map<string, {
-    table: string
-    fieldColumns: Map<string, string>
-  }>()
-  const resolveTarget = (worksheetName: string): { table: string; fieldColumns: Map<string, string> } => {
-    const existing = worksheetCache.get(worksheetName)
-    if (existing) return existing
-    const worksheet = getWorksheetByName(worksheetName)
-    const columns = getWorksheetLocalColumns(worksheet)
-    const target = {
-      table: tableNameOf(worksheet),
-      fieldColumns: new Map(columns.map((column) => [column.field.name, column.columnName]))
-    }
-    worksheetCache.set(worksheetName, target)
-    return target
-  }
-  const database = await getDatabase()
-  const now = new Date().toISOString()
-
-  await run(database, 'BEGIN TRANSACTION')
-  try {
-    for (const change of plan.changes) {
-      const target = resolveTarget(change.worksheetName)
-      const columnName = target.fieldColumns.get(change.fieldName)
-      if (!columnName) continue
-      for (const update of change.updates) {
-        await run(
-          database,
-          `UPDATE ${target.table}
-             SET ${quoteIdentifier(columnName)} = ?,
-                 "md_updated_at" = ?
-           WHERE "id" = ?`,
-          [update.value, now, update.rowId]
-        )
-      }
-    }
-    await run(database, 'COMMIT')
-  } catch (error) {
-    await run(database, 'ROLLBACK')
-    throw error
-  }
-}
-
-function buildMonthlyPayrollWriteBackPreview(
-  plan: IntegratedWriteBackPlan,
-  state: { requiresConfirmation: boolean; applied: boolean }
-): MonthlyPayrollWriteBackPreview {
-  return {
-    requiresConfirmation: state.requiresConfirmation,
-    applied: state.applied,
-    syncableCount: plan.changes.length,
-    manualCount: plan.manual.length,
-    personCount: new Set(plan.changes.map((item) => item.idCard)).size,
-    examples: plan.changes.slice(0, 5).map(formatIntegratedWriteBackChange),
-    manualExamples: plan.manual.slice(0, 5).map(formatIntegratedManualDifference)
-  }
-}
-
-function mergeAppliedWriteBackPreview(
-  appliedPlan: IntegratedWriteBackPlan,
-  remainingPlan: IntegratedWriteBackPlan
-): MonthlyPayrollWriteBackPreview {
-  return {
-    ...buildMonthlyPayrollWriteBackPreview(appliedPlan, {
-      requiresConfirmation: false,
-      applied: true
-    }),
-    manualCount: remainingPlan.manual.length,
-    manualExamples: remainingPlan.manual.slice(0, 5).map(formatIntegratedManualDifference)
-  }
-}
-
-function formatIntegratedWriteBackChange(change: IntegratedWriteBackChange): string {
-  const batch = change.batchCode ? `批次 ${change.batchCode}` : '当前行'
-  return `${change.worksheetName} ${change.name || change.idCard} ${change.fieldName} ${formatMoney(change.targetValue)} -> ${formatMoney(change.sourceValue)}（${batch}，${change.reason}）`
-}
-
-function formatIntegratedManualDifference(change: IntegratedManualDifference): string {
-  return `${change.worksheetName} ${change.name || change.idCard} ${change.fieldName} 工资表=${formatMoney(change.sourceValue)} / 一体化=${formatMoney(change.targetValue)}（${change.reason}）`
-}
-
-function inferIntegratedFieldBatch(
-  rowsByIdCard: Map<string, Record<string, unknown>[]>,
-  fieldColumn: string,
-  batchColumn: string | undefined
-): string | undefined {
-  if (!batchColumn) return undefined
-  const counts = new Map<string, number>()
-  for (const personRows of rowsByIdCard.values()) {
-    for (const row of personRows) {
-      if (num(row[fieldColumn]) === 0) continue
-      const batchCode = text(row[batchColumn])
-      if (!batchCode) continue
-      counts.set(batchCode, (counts.get(batchCode) ?? 0) + 1)
-    }
-  }
-  const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])
-  if (ranked.length === 0) return undefined
-  if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return undefined
-  return ranked[0][0]
-}
-
-function decideIntegratedFieldWriteBack(input: {
-  personRows: Record<string, unknown>[]
-  fieldColumn: string
-  sourceValue: number
-  targetValue: number
-  batchColumn: string | undefined
-  batchHint: string | undefined
-}): { ok: true; batchCode: string; reason: string; updates: IntegratedWriteBackUpdate[] } | { ok: false; reason: string } {
-  const nonZeroRows = input.personRows.filter((row) => num(row[input.fieldColumn]) !== 0)
-
-  if (input.sourceValue === 0) {
-    return {
-      ok: true,
-      batchCode: '',
-      reason: '工资表为 0，清空该字段现有批次金额',
-      updates: input.personRows.map((row) => ({ rowId: num(row.id), value: 0 }))
-    }
-  }
-
-  if (nonZeroRows.length === 1) {
-    const row = nonZeroRows[0]
-    return {
-      ok: true,
-      batchCode: batchCodeOf(row, input.batchColumn),
-      reason: '沿用该字段已有承载批次',
-      updates: [{ rowId: num(row.id), value: input.sourceValue }]
-    }
-  }
-
-  if (nonZeroRows.length > 1) {
-    return {
-      ok: false,
-      reason: '该字段在多个批次都有金额，无法自动判断拆分方式'
-    }
-  }
-
-  const hintedRow = input.batchHint
-    ? input.personRows.find((row) => batchCodeOf(row, input.batchColumn) === input.batchHint)
-    : undefined
-  if (hintedRow) {
-    return {
-      ok: true,
-      batchCode: input.batchHint ?? '',
-      reason: '按该字段在一体化中的常用批次写入',
-      updates: [{ rowId: num(hintedRow.id), value: input.sourceValue }]
-    }
-  }
-
-  if (input.personRows.length === 1) {
-    const row = input.personRows[0]
-    return {
-      ok: true,
-      batchCode: batchCodeOf(row, input.batchColumn),
-      reason: '该人员只有一个批次行',
-      updates: [{ rowId: num(row.id), value: input.sourceValue }]
-    }
-  }
-
-  return {
-    ok: false,
-    reason: input.batchHint
-      ? `推断该字段常用批次为 ${input.batchHint}，但该人员没有对应批次行`
-      : '该字段当前为 0，且无法推断应写入 001 还是 002'
-  }
-}
-
-function batchCodeOf(row: Record<string, unknown>, batchColumn: string | undefined): string {
-  return batchColumn ? text(row[batchColumn]) : ''
-}
-
-async function loadIntegratedRows(worksheetName: string): Promise<IntegratedRow[]> {
-  const worksheet = getWorksheetByName(worksheetName)
-  const columns = getWorksheetLocalColumns(worksheet)
-  const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
-  const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
-  if (!idColumn) throw new Error(`${worksheetName} 缺少证件号码字段`)
-
-  const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
-  const latestByIdBatch = new Map<string, Record<string, unknown>>()
-  for (const row of rows) {
-    const idCard = normalizeIdCard(row[idColumn])
-    if (!idCard) continue
-    const key = integratedCurrentRowKey(idCard, row, batchColumn)
-    const previous = latestByIdBatch.get(key)
-    if (!previous || num(row.id) > num(previous.id)) latestByIdBatch.set(key, row)
-  }
-
-  const rowsByIdCard = new Map<string, Record<string, unknown>[]>()
-  for (const row of latestByIdBatch.values()) {
-    const idCard = normalizeIdCard(row[idColumn])
-    const grouped = rowsByIdCard.get(idCard) ?? []
-    grouped.push(row)
-    rowsByIdCard.set(idCard, grouped)
-  }
-
-  return Array.from(rowsByIdCard.entries()).map(([idCard, personRows]) => {
-    const representative = selectIntegratedRepresentativeRow(personRows, batchColumn)
-    return {
-      idCard,
-      name: nameColumn ? text(representative[nameColumn]) : '',
-      rowId: num(representative.id),
-      values: Object.fromEntries(
-        columns.map((column) => {
-          const value = shouldAggregateIntegratedField(column.field)
-            ? roundMoney(personRows.reduce((sum, row) => sum + num(row[column.columnName]), 0))
-            : coerceComparableValue(representative[column.columnName])
-          return [column.field.name, value]
-        })
-      )
-    }
-  })
-}
-
-function integratedCurrentRowKey(
-  idCard: string,
-  row: Record<string, unknown>,
-  batchColumn: string | undefined
-): string {
-  return batchColumn ? `${idCard}\u0000${text(row[batchColumn])}` : idCard
-}
-
-function selectIntegratedRepresentativeRow(
-  rows: Record<string, unknown>[],
-  batchColumn: string | undefined
-): Record<string, unknown> {
-  return rows.reduce((best, row) => {
-    const currentRank = integratedBatchRank(row, batchColumn)
-    const bestRank = integratedBatchRank(best, batchColumn)
-    if (currentRank !== bestRank) return currentRank > bestRank ? row : best
-    return num(row.id) > num(best.id) ? row : best
-  })
-}
-
-function integratedBatchRank(row: Record<string, unknown>, batchColumn: string | undefined): number {
-  if (!batchColumn) return 0
-  const code = text(row[batchColumn])
-  if (code === '001') return 2
-  if (code === '002') return 1
-  return 0
-}
-
-function shouldAggregateIntegratedField(field: { name: string; controlType: number }): boolean {
-  return [6, 31].includes(field.controlType) && !INTEGRATED_NUMERIC_REPRESENTATIVE_FIELDS.has(field.name)
-}
-
-function getPayrollPersonChanges(
-  source: PayrollPerson,
-  target: IntegratedRow,
-  compareFields: Array<[string, string]>
-): string[] {
-  const changes: string[] = []
-  for (const [targetFieldName, sourceFieldName] of compareFields) {
-    const sourceValue = sourceFieldName === 'name' ? source.name : source.values[sourceFieldName]
-    const targetValue = targetFieldName === '姓名' ? target.name : target.values[targetFieldName]
-    if (sourceValue === undefined || targetValue === undefined) continue
-    if (targetFieldName === '交通费' && num(targetValue) === 0) {
-      continue
-    }
-    if (typeof sourceValue === 'number' || typeof targetValue === 'number') {
-      if (roundMoney(num(sourceValue) - num(targetValue)) !== 0) {
-        changes.push(`${targetFieldName} 工资表=${formatCompareValue(sourceValue)} / 系统=${formatCompareValue(targetValue)}`)
-      }
-    } else if (text(sourceValue) !== text(targetValue)) {
-      changes.push(`${targetFieldName} 工资表=${formatCompareValue(sourceValue)} / 系统=${formatCompareValue(targetValue)}`)
-    }
-  }
-  return changes
-}
-
-function formatCompareMessage(summary: CompareSummary): string {
-  const totalDiff = summary.added + summary.removed + summary.changed
-  if (totalDiff === 0) {
-    return `${summary.sourceName} -> ${summary.targetName}：${summary.sourceRows} 人，按映射字段核对未发现差异`
-  }
-  if (summary.added === 0 && summary.removed === 0) {
-    return `${summary.sourceName} -> ${summary.targetName}：人员一致，映射字段变化 ${summary.changed} 人`
-  }
-  return `${summary.sourceName} -> ${summary.targetName}：新增 ${summary.added} 人，减少 ${summary.removed} 人，映射字段变化 ${summary.changed} 人`
-}
-
-function formatCompareWarning(summary: CompareSummary): string {
-  const hasPersonDiff = summary.added > 0 || summary.removed > 0
-  const lead = hasPersonDiff
-    ? `${summary.sourceName}与${summary.targetName}按身份证匹配存在找不到的人员`
-    : `${summary.sourceName}与${summary.targetName}人员一致，但映射字段有变化`
-  const counts = `新增 ${summary.added} 人，减少 ${summary.removed} 人，字段变化 ${summary.changed} 人`
-  const examples = summary.changedExamples.length > 0
-    ? `。示例：${summary.changedExamples.join('；')}`
-    : ''
-  return `${lead}（${counts}）${examples}`
-}
-
-function formatCompareValue(value: unknown): string {
-  if (typeof value === 'number') return formatMoney(value)
-  return text(value) || '空'
-}
-
-function findTaxAmountColumn(headers: string[]): number {
-  const candidates = [
-    '应补（退）税额',
-    '应补(退)税额',
-    '本期应补（退）税额',
-    '本期应补(退)税额'
-  ].map(normalizeHeader)
-  const matched = headers.findIndex((header) => candidates.includes(header))
-  if (matched >= 0) return matched
-
-  throw new Error('个税文件缺少“应补(退)税额”列')
-}
-
-function findSocialSecurityHeaderRow(rows: CellValue[][]): number {
-  const itemCandidates = [
-    '征收品目',
-    '征收项目',
-    '征收品目名称',
-    '征收项目名称',
-    '征收子目',
-    '征收子目名称'
-  ].map(normalizeHeader)
-  const amountCandidates = [
-    '应补（退）费额(元)',
-    '应补(退)费额(元)',
-    '应补（退）费额',
-    '应补(退)费额',
-    '应缴费额(元)',
-    '应缴费额'
-  ].map(normalizeHeader)
-  return rows.findIndex((row) => {
-    const normalized = row.map((cell) => normalizeHeader(text(cell)))
-    return normalized.some((header) => itemCandidates.includes(header)) &&
-      normalized.some((header) => amountCandidates.includes(header))
-  })
-}
-
-function findSocialSecurityItemIndexes(headers: string[]): number[] {
-  const indexes = [
-    findHeaderIndex(headers, ['征收品目', '征收品目名称']),
-    findHeaderIndex(headers, ['征收项目', '征收项目名称', '征收子目', '征收子目名称'])
-  ].filter((index, position, values) => index >= 0 && values.indexOf(index) === position)
-  return indexes.length ? indexes : [findHeaderIndex(headers, ['征收品目', '征收项目'])]
-}
-
-function findHeaderIndex(headers: string[], candidates: string[]): number {
-  const normalized = candidates.map(normalizeHeader)
-  return headers.findIndex((header) => normalized.includes(header))
-}
-
-function findHeaderRow(rows: CellValue[][], requiredHeaders: string[]): number {
-  const normalizedRequired = requiredHeaders.map(normalizeHeader)
-  return rows.findIndex((row) => {
-    const normalized = new Set(row.map((cell) => normalizeHeader(text(cell))))
-    return normalizedRequired.every((header) => normalized.has(header))
-  })
-}
-
-function findTotalRow(rows: CellValue[][], nameColumnIndex: number): CellValue[] | undefined {
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    if (text(rows[index][nameColumnIndex]).replace(/\s+/g, '').includes('合计')) {
-      return rows[index]
-    }
-  }
-  return undefined
-}
-
-async function readWorkbook(filePath: string): Promise<XLSX.WorkBook> {
-  const buffer = await readFile(filePath)
-  return XLSX.read(buffer, { cellDates: false, type: 'buffer' })
-}
-
-function sheetToAoa(sheet: XLSX.WorkSheet): CellValue[][] {
-  return XLSX.utils.sheet_to_json<CellValue[]>(sheet, {
-    header: 1,
-    defval: null,
-    raw: false
-  })
-}
-
-function num(value: unknown): number {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
-  const raw = text(value).replace(/,/g, '')
-  if (!raw) return 0
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function coerceComparableValue(value: unknown): string | number {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
-  const raw = text(value)
-  if (!raw) return ''
-  const numberText = raw.replace(/,/g, '')
-  if (/^-?\d+(\.\d+)?$/.test(numberText)) return Number(numberText)
-  return raw
-}
-
-function text(value: unknown): string {
-  return value === null || value === undefined ? '' : String(value).trim()
-}
-
-function normalizeHeader(value: string): string {
-  return value.replace(/\s+/g, '').replace(/[()]/g, (match) => (match === '(' ? '（' : '）')).toLowerCase()
-}
-
-function normalizeIdCard(value: unknown): string {
-  return text(value).replace(/[\s,]/g, '').toUpperCase()
-}
-
-function isValidIdCard(value: unknown): boolean {
-  return /^\d{17}[\dX]$/.test(normalizeIdCard(value))
-}
-
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100
-}
-
-function formatMoney(value: number): string {
-  return value.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })
 }

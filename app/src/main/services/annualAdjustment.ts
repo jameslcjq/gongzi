@@ -9,6 +9,8 @@ import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import { readUnitSettings } from './unitSettings'
 import { getWorksheetByName, tableNameOf } from './worksheetTable'
 import { getDataPath } from '../config/paths'
+import { parseSalaryWorkbook } from './monthly-payroll/monthlyPayrollParsers'
+import { writeSalaryImportWorkbook } from './monthly-payroll/salaryImportWorkbook'
 import type {
   AnnualAdjustmentApplyInput,
   AnnualAdjustmentApplyResult,
@@ -193,6 +195,19 @@ export async function applyAnnualAdjustment(
     people: prepared.people
   })
 
+  let salaryImportPath: string | undefined
+  const salaryImportWarnings: string[] = []
+  try {
+    const salaryImportSource = await parseSalaryWorkbook(salaryOutputPath)
+    const candidatePath = join(outputDir, `工资导入_年初调整_${stamp}.xls`)
+    await writeSalaryImportWorkbook(candidatePath, salaryImportSource)
+    salaryImportPath = candidatePath
+  } catch (error) {
+    salaryImportWarnings.push(
+      `工资导入文件生成失败：${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+
   let housingDeclarationPath: string | undefined
   let housingMissingLogPath: string | undefined
   if (input.housingAccountWorkbookPath) {
@@ -217,6 +232,7 @@ export async function applyAnnualAdjustment(
     ok: true,
     message: `已生成年初调整工资表，工资表写回 ${salaryApplied} 人${integratedApplied ? `，一体化在职回写 ${integratedApplied} 项` : ''}`,
     salaryOutputPath,
+    salaryImportPath,
     housingDeclarationPath,
     housingMissingLogPath,
     salaryApplied,
@@ -224,6 +240,7 @@ export async function applyAnnualAdjustment(
     integratedManualCount: integratedPlan.manual.length,
     warnings: [
       ...prepared.warnings,
+      ...salaryImportWarnings,
       ...buildMissingIntegratedWarnings(integratedPlan.missing),
       ...(integratedPlan.manual.length
         ? [`一体化在职有 ${integratedPlan.manual.length} 项需要人工判断，未自动回写`]

@@ -6,6 +6,11 @@ import {
   isPersonnelStatusSourceWorksheet,
   isPersonnelStatusTargetWorksheet
 } from './personnelStatus'
+import { readMonthlyPayrollSettings } from './monthly-payroll/monthlyPayrollSettings'
+import {
+  applyIntegratedComputedFieldsForUpdate,
+  applyIntegratedComputedFieldsToRows
+} from './monthly-payroll/integratedPayrollRules'
 import type {
   WorksheetMeta,
   WorksheetMutationResult,
@@ -23,6 +28,8 @@ export async function createRecord(
   const tableName = quoteIdentifier(worksheet.name)
   const sanitized = sanitizeValues(worksheet, values)
   applyManualBudgetStatusCreateValues(worksheet, sanitized)
+  const monthlyPayrollSettings = await readMonthlyPayrollSettings()
+  applyIntegratedComputedFieldsToRows(worksheet, [sanitized], monthlyPayrollSettings.taxField)
 
   if (Object.keys(sanitized).length === 0) {
     throw new Error('没有可写入的字段')
@@ -64,6 +71,14 @@ export async function updateRecord(
   const sanitized = sanitizeValues(worksheet, values)
   const database = await getDatabase()
   await applyManualBudgetStatusUpdateValues(database, worksheet, recordId, sanitized)
+  const monthlyPayrollSettings = await readMonthlyPayrollSettings()
+  await applyIntegratedComputedFieldsForUpdate(
+    database,
+    worksheet,
+    recordId,
+    sanitized,
+    monthlyPayrollSettings.taxField
+  )
 
   if (Object.keys(sanitized).length === 0) {
     throw new Error('没有可更新的字段')

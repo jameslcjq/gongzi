@@ -42,6 +42,9 @@ export type WorkflowRunPayload = {
   monthlyPayroll?: MonthlyPayrollWorkflowInput
 }
 
+export type MonthlyPayrollProcessScope = 'auto' | 'salary' | 'social' | 'salary-social'
+export type MonthlyPayrollDataSourceMode = 'integrated' | 'salary-workbook'
+
 export type MonthlyPayrollWorkflowInput = {
   salaryWorkbookPath?: string
   socialSecurityWorkbookPath?: string
@@ -49,7 +52,14 @@ export type MonthlyPayrollWorkflowInput = {
   year?: number
   month?: number
   confirmWriteBack?: boolean
-  processScope?: 'auto' | 'salary' | 'social' | 'salary-social'
+  processScope?: MonthlyPayrollProcessScope
+  dataSourceMode?: MonthlyPayrollDataSourceMode
+}
+
+export type MonthlyPayrollTaxField = '补扣工资' | '当月个人所得税'
+
+export type MonthlyPayrollSettings = {
+  taxField: MonthlyPayrollTaxField
 }
 
 export type MonthlyPayrollWriteBackPreview = {
@@ -232,6 +242,23 @@ export type PersonnelExpensePlanPrefillResult = {
   message?: string
 }
 
+export type SalaryQuotaMatchLocalSummary = {
+  ok: boolean
+  activeOtherOneTotal: number
+  activeBasicPerformanceTotal: number
+  retiredHousingTotal: number
+  retiredActualPayTotal: number
+  otherActualPayTotal: number
+  message?: string
+}
+
+export type LocalFileBase64 = {
+  filePath: string
+  fileName: string
+  base64: string
+  size: number
+}
+
 export type SalaryExportTarget = {
   saltype_id: string
   saltype_name: string
@@ -362,8 +389,11 @@ export type MonthlyPayrollRun = {
   sourceTaxPath: string | null
   insuranceImportPath: string | null
   voucherImportPath: string | null
+  salaryImportPath: string | null
   payrollBackpayPath: string | null
   reportFingerprint: string | null
+  taxField: MonthlyPayrollTaxField | null
+  dataSourceMode: MonthlyPayrollDataSourceMode | null
   archivedAt: string | null
   archiveDir: string | null
   archiveManifest: string[]
@@ -382,9 +412,22 @@ export type MonthlyPayrollReportResult = {
   message: string
   outputWorkbookPath?: string
   insuranceImportPath?: string
+  salaryImportPath?: string
   payrollBackpayPath?: string
   voucherImportPath?: string
+  taxField?: MonthlyPayrollTaxField
+  processScope?: MonthlyPayrollProcessScope
+  dataSourceMode?: MonthlyPayrollDataSourceMode
+  voucherPageCounts?: MonthlyPayrollVoucherPageCounts
   sheets: MonthlyPayrollReportSheet[]
+}
+
+export type MonthlyPayrollVoucherPageCounts = {
+  insuranceAttachmentPages: number
+  salaryWorkbookPages: number
+  survivorWorkbookPages: number
+  retiredHousingPages: number
+  salaryAttachmentPages: number
 }
 
 export type PrinterSummary = {
@@ -488,6 +531,7 @@ export type AnnualAdjustmentApplyResult = {
   ok: boolean
   message: string
   salaryOutputPath: string
+  salaryImportPath?: string
   housingDeclarationPath?: string
   housingMissingLogPath?: string
   salaryApplied: number

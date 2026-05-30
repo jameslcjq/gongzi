@@ -9,6 +9,11 @@ import type {
   PersonalTaxImportGenerateResult,
   SocialInsuranceBaseExportResult
 } from '@shared/types'
+import {
+  pendingPushQueue,
+  requestSwitchToIntegration,
+  type PushStep
+} from '../integration/insurancePushQueue'
 
 const props = defineProps<{
   importWatcher?: ImportWatcherStatus | null
@@ -29,6 +34,7 @@ const socialBaseResult = ref<SocialInsuranceBaseExportResult | null>(null)
 const adjustmentLoading = ref(false)
 const taxLoading = ref(false)
 const socialBaseLoading = ref(false)
+const pushingAnnualAdjustment = ref(false)
 
 const incomeFieldOptions = [
   '岗位工资',
@@ -215,6 +221,50 @@ async function generateSocialInsuranceBase() {
 async function openPath(path?: string) {
   if (!path) return
   await window.salaryApi.openLocalPath(path)
+}
+
+async function pushAnnualAdjustmentToIntegrated() {
+  if (!result.value?.salaryImportPath) {
+    ElMessage.warning('没有可推送的年初调整工资导入文件')
+    return
+  }
+  pushingAnnualAdjustment.value = true
+  try {
+    const monthPrompt = await ElMessageBox.prompt(
+      '请输入年初调整导入对应的一体化月份，例如 1',
+      '年初调整导入月份',
+      {
+        confirmButtonText: '开始推送',
+        cancelButtonText: '取消',
+        inputValue: '1',
+        inputPattern: /^(1[0-2]|[1-9])$/,
+        inputErrorMessage: '请输入 1-12 的月份'
+      }
+    )
+    const month = String(monthPrompt.value || '').trim()
+    const file = await window.salaryApi.readLocalFileBase64(result.value.salaryImportPath)
+    const steps: PushStep[] = [
+      {
+        kind: 'salary-system-import',
+        mode: 'salary',
+        fileBase64: file.base64,
+        fileName: file.fileName,
+        fileSize: file.size,
+        month,
+        label: `年初调整 ${result.value.salaryApplied} 人`
+      }
+    ]
+    pendingPushQueue.value = steps
+    ElMessage.info('已准备年初调整推送，正在跳转到“一体化对接”...')
+    requestSwitchToIntegration()
+  } catch (error) {
+    const action = (error as { action?: string; message?: string } | undefined)?.action
+    const message = (error as { message?: string } | undefined)?.message
+    if (error === 'cancel' || action === 'cancel' || action === 'close' || message === 'cancel') return
+    ElMessage.error(error instanceof Error ? error.message : '年初调整推送失败')
+  } finally {
+    pushingAnnualAdjustment.value = false
+  }
 }
 </script>
 
@@ -407,6 +457,17 @@ async function openPath(path?: string) {
       <h2>输出</h2>
       <div class="output-list">
         <button @click="openPath(result.salaryOutputPath)">工资表：{{ result.salaryOutputPath }}</button>
+        <button v-if="result.salaryImportPath" @click="openPath(result.salaryImportPath)">
+          工资导入：{{ result.salaryImportPath }}
+        </button>
+        <el-button
+          v-if="result.salaryImportPath"
+          type="success"
+          :loading="pushingAnnualAdjustment"
+          @click="pushAnnualAdjustmentToIntegrated"
+        >
+          推送年初调整
+        </el-button>
         <button v-if="result.housingDeclarationPath" @click="openPath(result.housingDeclarationPath)">
           公积金申报：{{ result.housingDeclarationPath }}
         </button>

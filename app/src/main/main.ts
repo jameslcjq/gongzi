@@ -3,6 +3,7 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDatabase } from './db/connection'
 import { registerAppIpc } from './ipc/appApi'
+import { registerLicenseIpc } from './ipc/licenseApi'
 import { registerMailIpc } from './ipc/mailApi'
 import { startAutoCheck } from './services/mail/mailImapService'
 import { appDisplayName, ensureBusinessFolders, ensureImportFolderDesktopShortcut } from './config/paths'
@@ -192,6 +193,7 @@ app.whenReady().then(async () => {
     console.error('数据库初始化失败', error)
   }
   registerAppIpc()
+  registerLicenseIpc()
   registerMailIpc()
   createWindow()
 

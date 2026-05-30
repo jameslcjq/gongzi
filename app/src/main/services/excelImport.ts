@@ -27,6 +27,8 @@ import {
   type RankResumeImportAdjustment
 } from './rankResumeImport'
 import { readUnitSettings } from './unitSettings'
+import { readMonthlyPayrollSettings } from './monthly-payroll/monthlyPayrollSettings'
+import { applyIntegratedComputedFieldsToRows } from './monthly-payroll/integratedPayrollRules'
 import {
   getIdentityColumnName,
   getPersonnelStatusColumnName,
@@ -277,6 +279,8 @@ export async function previewExcelFile(
   await applyTownshipUnitFullNames(database, worksheet, columns, sanitizedRows)
   sanitizeBudgetDraftRows(worksheet, columns, sanitizedRows)
   await applyPersonnelStatusToRows(database, worksheet, sanitizedRows)
+  const monthlyPayrollSettings = await readMonthlyPayrollSettings()
+  applyIntegratedComputedFieldsToRows(worksheet, sanitizedRows, monthlyPayrollSettings.taxField)
   const diff = await buildImportDiff(database, worksheet, columns, sanitizedRows, uniqueColumnName, partitionColumnNames)
 
   return {
@@ -558,6 +562,12 @@ async function insertRowsAsBatch(
   const budgetDraftCleanup = sanitizeBudgetDraftRows(worksheet, columns, sanitizedRows)
   const budgetAlignmentMessages = await buildBudgetAlignmentMessages(database, worksheet, sanitizedRows)
   await applyPersonnelStatusToRows(database, worksheet, sanitizedRows)
+  const monthlyPayrollSettings = await readMonthlyPayrollSettings()
+  const integratedComputedSummary = applyIntegratedComputedFieldsToRows(
+    worksheet,
+    sanitizedRows,
+    monthlyPayrollSettings.taxField
+  )
   const importPlan = await buildImportPlan(database, worksheet, columns, sanitizedRows, uniqueColumnName, partitionColumnNames)
   const diff = summarizeImportPlan(worksheet, columns, uniqueColumnName, importPlan)
   if (diff.missingKeyRows > 0 && uniqueColumnName) {
@@ -688,7 +698,10 @@ async function insertRowsAsBatch(
     townshipAdjustment,
     rankResumeAdjustment,
     budgetDraftCleanup,
-    budgetAlignmentMessages
+    [
+      ...budgetAlignmentMessages,
+      ...buildIntegratedComputedMessages(integratedComputedSummary)
+    ]
   )
   const finalMessage = [
     message,
@@ -1204,6 +1217,22 @@ function buildImportMessage(
 
   parts.push(...budgetAlignmentMessages)
   return parts.join('\uff1b')
+}
+
+function buildIntegratedComputedMessages(summary: {
+  recalculatedRows: number
+  mismatchRows: number
+  mismatchExamples: string[]
+}): string[] {
+  if (summary.recalculatedRows === 0) return []
+  const messages = [`按工资明细重算合计字段 ${summary.recalculatedRows} 行`]
+  if (summary.mismatchRows > 0) {
+    const examples = summary.mismatchExamples.length
+      ? `，示例：${summary.mismatchExamples.join('；')}`
+      : ''
+    messages.push(`源文件合计与系统重算值不一致 ${summary.mismatchRows} 行${examples}`)
+  }
+  return messages
 }
 
 export async function listImportBatches(limit = 50): Promise<ImportBatchSummary[]> {

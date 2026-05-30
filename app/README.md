@@ -21,6 +21,7 @@ npm run dev
 ## 重要说明
 
 - 目前不采集、不导入真实工资业务数据。
-- SQLite 数据库默认创建在 Electron `userData` 目录。
+- 程序默认安装到 `D:\laojiu\gzxt`，业务数据固定保存到 `D:\laojiu\gzdata`，SQLite 数据库为 `D:\laojiu\gzdata\salary-system.sqlite`。
+- 升级或重复安装只覆盖程序文件，不覆盖 `D:\laojiu\gzdata` 数据目录。
 - `更新工资信息` 和工资年报的 `更新信息` 旧流程依赖已删除的“局工资表”，需要补充新取数规则后再开放。
-
+- 一体化对接里的“开始录制/停止录制”只作为开发调试工具使用，仅在 `npm run dev` 开发版显示；正式安装包不得开放录制入口。

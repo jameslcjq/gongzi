@@ -5,21 +5,15 @@ import {
   Close,
   Download,
   Link,
+  Money,
   Plus,
-  Refresh,
-  VideoCamera,
-  VideoPause
+  Refresh
 } from '@element-plus/icons-vue'
 import { buildVoucherMergeScript } from '../integration/voucherMergeScript'
 import {
   buildSalaryExportScript,
   buildSalaryExportFeedbackScript
 } from '../integration/salaryExportScript'
-import {
-  buildRecorderDrainScript,
-  buildRecorderInstallScript,
-  buildRecorderStopScript
-} from '../integration/recorderScript'
 import {
   buildOpenSalaryPlanInputScript,
   buildSalaryPlanInputScript
@@ -28,12 +22,19 @@ import {
   buildAutoVoucherEntryScript,
   buildStartAutoVoucherEntryScript
 } from '../integration/autoVoucherEntryScript'
+import {
+  buildSalaryQuotaMatchScript,
+  buildStartSalaryQuotaMatchScript
+} from '../integration/salaryQuotaMatchScript'
+import { buildSalarySystemImportScript } from '../integration/salarySystemImportScript'
 // 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 自动入库
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
 import { buildPushVoucherScript } from '../integration/pushVoucherScript'
 import { pendingPushQueue, type PushStep } from '../integration/insurancePushQueue'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
+const salaryGiveOutUrl =
+  'http://172.24.147.202/salary-pro-web/grp/salaryNanJ/html/audit/salaryGiveOut/salSalaryAuditSCZF.html?menuid=c2745ee50aba4be1a31742d37274990d&moduleid=c2745ee50aba4be1a31742d37274990d&myMenuid=2020120628499'
 
 type SalaryExportFile = {
   filename: string
@@ -107,134 +108,6 @@ const autoVoucherEntryRunning = ref(false)
 // 用户在内网手动点系统的导出按钮 → main 进程 will-download 按文件名 "人员信息"
 // 判定为预算文件 → 落入 预算导出/ 子目录 → 立即调 budgetExcelImport 入库。
 
-// ---------------------------------------------------------------------------
-// 录制模式
-// ---------------------------------------------------------------------------
-type RecordingEvent = {
-  t: number
-  frameUrl: string
-  kind: 'fetch' | 'xhr' | 'click' | 'navigation'
-  [key: string]: unknown
-}
-const recording = ref(false)
-const recordingEvents = ref<RecordingEvent[]>([])
-const recordingStart = ref<number>(0)
-let recordingPollTimer: number | null = null
-
-async function startRecording(): Promise<void> {
-  if (recording.value) return
-  const wv = activeWebview()
-  if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
-    return
-  }
-  let wcId: number
-  try {
-    wcId = wv.getWebContentsId()
-  } catch (error) {
-    ElMessage.error('获取 webContentsId 失败')
-    return
-  }
-  const installRes = await window.salaryApi.execInAllPortalFrames(
-    wcId,
-    buildRecorderInstallScript()
-  )
-  if (!installRes.ok) {
-    ElMessage.error('录制安装失败：' + installRes.reason)
-    return
-  }
-  recording.value = true
-  recordingEvents.value = []
-  recordingStart.value = Date.now()
-  ElMessage.success(`🔴 已开始录制（已注入 ${installRes.count} 个 frame）`)
-
-  const drainCode = buildRecorderDrainScript()
-  const installCode = buildRecorderInstallScript()
-  recordingPollTimer = window.setInterval(async () => {
-    if (!recording.value) return
-    const cur = activeWebview()
-    if (!cur) return
-    let cid: number
-    try {
-      cid = cur.getWebContentsId()
-    } catch {
-      return
-    }
-    // 持续 install —— 新打开的 frame 也覆盖到
-    try {
-      await window.salaryApi.execInAllPortalFrames(cid, installCode)
-    } catch {}
-    // drain
-    try {
-      const res = await window.salaryApi.drainAllPortalFrames(cid, drainCode)
-      if (res.ok) {
-        for (const r of res.results) {
-          const v = r.value as { events?: RecordingEvent[] } | undefined
-          if (v && Array.isArray(v.events) && v.events.length) {
-            recordingEvents.value.push(...v.events)
-          }
-        }
-      }
-    } catch {}
-  }, 1500)
-}
-
-async function stopRecording(): Promise<void> {
-  if (!recording.value) return
-  recording.value = false
-  if (recordingPollTimer !== null) {
-    window.clearInterval(recordingPollTimer)
-    recordingPollTimer = null
-  }
-
-  // 最后再 drain 一次，吃干净缓冲
-  const wv = activeWebview()
-  if (wv) {
-    try {
-      const cid = wv.getWebContentsId()
-      const res = await window.salaryApi.drainAllPortalFrames(cid, buildRecorderDrainScript())
-      if (res.ok) {
-        for (const r of res.results) {
-          const v = r.value as { events?: RecordingEvent[] } | undefined
-          if (v && Array.isArray(v.events) && v.events.length) {
-            recordingEvents.value.push(...v.events)
-          }
-        }
-      }
-      // 清空缓冲（但保留 hook，下次录制不用再装）
-      await window.salaryApi.execInAllPortalFrames(cid, buildRecorderStopScript())
-    } catch {}
-  }
-
-  if (!recordingEvents.value.length) {
-    ElMessage.warning('录制已停止，但没有捕获到事件')
-    return
-  }
-
-  // 按时间排序
-  recordingEvents.value.sort((a, b) => (a.t as number) - (b.t as number))
-  const summary = {
-    startedAt: new Date(recordingStart.value).toISOString(),
-    durationMs: Date.now() - recordingStart.value,
-    totalEvents: recordingEvents.value.length,
-    byKind: recordingEvents.value.reduce(
-      (acc, e) => {
-        acc[e.kind] = (acc[e.kind] || 0) + 1
-        return acc
-      },
-      {} as Record<string, number>
-    ),
-    events: recordingEvents.value
-  }
-  const json = JSON.stringify(summary, null, 2)
-  const save = await window.salaryApi.savePortalRecording(json)
-  if (save.ok) {
-    ElMessage.success(`录制已保存：${save.path}（${summary.totalEvents} 条事件）`)
-  } else if (!save.canceled) {
-    ElMessage.error('保存失败：' + save.reason)
-  }
-}
-
 const activeTab = computed<Tab | undefined>(() =>
   tabs.value.find((t) => t.id === activeTabId.value)
 )
@@ -297,6 +170,7 @@ function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
 let stopOpenTabListener: (() => void) | null = null
 let stopDownloadDoneListener: (() => void) | null = null
 let stopBudgetImportListener: (() => void) | null = null
+let stopRecorderDevTools: (() => void) | null = null
 // 保险/凭证推送队列：MonthlyPayrollPage 把多步任务塞进 pendingPushQueue，
 // 这里串行处理，每步在 active webview 上跑对应注入脚本
 const processingPushQueue = ref(false)
@@ -323,6 +197,33 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
       ElMessage.success(`✅ 凭证已导入 / ${step.label}`)
     } else {
       ElMessage.error(`❌ 凭证推送失败：${r?.reason || '未知错误'}`)
+    }
+  } else if (step.kind === 'salary-system-import') {
+    const name = step.mode === 'backpay' ? '补发工资' : '工资导入'
+    ElMessage.info(`【${name}】开始：${step.label}（${step.fileName}）`)
+    let filterUnitName = ''
+    try {
+      const unit = await window.salaryApi.getUnitSettings()
+      filterUnitName = (unit.unitFullName || '').trim()
+    } catch (error) {
+      console.warn('读取单位设置失败，继续由一体化单位列表判断', error)
+    }
+    const r = (await wv.executeJavaScript(
+      buildSalarySystemImportScript({
+        mode: step.mode,
+        file: {
+          fileName: step.fileName,
+          base64: step.fileBase64,
+          size: step.fileSize
+        },
+        filterUnitName,
+        month: step.month
+      })
+    )) as SalarySystemImportResult | undefined
+    if (r?.ok) {
+      ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
+    } else {
+      ElMessage.error(`❌ ${name}失败：${r?.message || '未知错误'}`)
     }
   }
 }
@@ -365,6 +266,18 @@ watch(
 )
 
 onMounted(() => {
+  if (import.meta.env.DEV) {
+    void nextTick(async () => {
+      const actions = document.querySelector<HTMLElement>('.portal-actions')
+      if (!actions) return
+      const mod = await import('../integration/recorderDevTools')
+      stopRecorderDevTools = mod.mountPortalRecorderDevTools({
+        target: actions,
+        activeWebview,
+        api: window.salaryApi
+      })
+    })
+  }
   if (pendingPushQueue.value.length > 0) {
     void nextTick(() => {
       window.setTimeout(() => void processPushQueue(), 800)
@@ -459,6 +372,10 @@ onBeforeUnmount(() => {
   if (stopBudgetImportListener) {
     stopBudgetImportListener()
     stopBudgetImportListener = null
+  }
+  if (stopRecorderDevTools) {
+    stopRecorderDevTools()
+    stopRecorderDevTools = null
   }
 })
 
@@ -596,6 +513,53 @@ async function startAutoVoucherEntry(): Promise<void> {
   }
 }
 
+async function startSalaryQuotaMatch(): Promise<void> {
+  const wv = activeWebview()
+  if (!wv) {
+    ElMessage.warning('一体化页面尚未就绪')
+    return
+  }
+
+  await installPortalAutomationScripts(activeTabId.value)
+
+  try {
+    const localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
+    const quotaScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
+    try {
+      const webContentsId = wv.getWebContentsId()
+      await window.salaryApi.execInAllPortalFrames(webContentsId, quotaScript)
+    } catch (error) {
+      console.warn('额度匹配本地汇总跨 frame 更新失败，回退到顶层注入', error)
+    }
+    await wv.executeJavaScript(quotaScript)
+
+    const result = (await wv.executeJavaScript(buildStartSalaryQuotaMatchScript())) as {
+      ok?: boolean
+      code?: string
+      message?: string
+      matchedCount?: number
+    }
+    if (result?.ok) {
+      ElMessage.success(`额度匹配完成${result.matchedCount ? `：${result.matchedCount} 项` : ''}`)
+      return
+    }
+
+    if (result?.code === 'not-page') {
+      openNewTab(salaryGiveOutUrl)
+      ElMessage.info('已打开工资发放页面；页面加载后选中工资批次，再点“额度匹配”')
+      return
+    }
+
+    ElMessage.warning(result?.message || '请先进入“工资发放/生成支付”的额度匹配页面')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '额度匹配脚本执行失败')
+  }
+}
+
+type SalarySystemImportResult =
+  | { ok: true; response?: unknown; agency?: { agency_name?: string }; batchId?: string }
+  | { ok: false; message?: string }
+
 // ---------------------------------------------------------------------------
 // 一体化页面脚本注入（跨 frame）
 // ---------------------------------------------------------------------------
@@ -606,6 +570,7 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
   const scripts = [
     { name: '凭证按钮', code: buildVoucherMergeScript({ autoStart: false }) },
     { name: '自动录入', code: buildAutoVoucherEntryScript({ autoStart: false }) },
+    { name: '额度匹配', code: buildSalaryQuotaMatchScript({ autoStart: false }) },
     { name: '人员经费录入', code: buildSalaryPlanInputScript({ showPageButton: false }) }
   ]
 
@@ -769,6 +734,9 @@ void nextTick(() => {
       <span class="portal-url" :title="activeTab?.url">{{ activeTab?.url }}</span>
       <div class="portal-actions">
         <el-button :icon="Refresh" @click="reload">刷新</el-button>
+        <el-button :icon="Money" type="warning" @click="startSalaryQuotaMatch">
+          额度匹配
+        </el-button>
         <el-button type="primary" @click="openSalaryPlanInput">人员经费录入</el-button>
         <el-button
           type="success"
@@ -782,17 +750,6 @@ void nextTick(() => {
           @click="exportSalary"
           >导出工资</el-button
         >
-        <el-button
-          v-if="!recording"
-          :icon="VideoCamera"
-          type="danger"
-          plain
-          @click="startRecording"
-          >开始录制</el-button
-        >
-        <el-button v-else :icon="VideoPause" type="danger" @click="stopRecording">
-          停止录制（{{ recordingEvents.length }} 条）
-        </el-button>
         <el-button :icon="Link" @click="openExternal">外部浏览器</el-button>
       </div>
     </header>

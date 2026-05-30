@@ -1,4 +1,4 @@
-import { ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain as electronIpcMain, shell, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import { getDatabase, getDatabasePath, run } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
 import { createBackup, listBackups, restoreBackup } from '../services/backup'
@@ -45,6 +45,10 @@ import {
   printSalaryWorkbookViaExcel
 } from '../services/monthly-payroll/printSalaryViaExcel'
 import {
+  loadIntegratedActiveAggregates,
+  loadIntegratedSimpleAggregates
+} from '../services/monthly-payroll/monthlyPayrollDataLoaders'
+import {
   applyAnnualAdjustment,
   chooseAnnualAdjustmentFiles,
   exportSocialInsuranceBaseWorkbook,
@@ -62,6 +66,11 @@ import {
   readMonthlyPayrollPrintSettings,
   writeMonthlyPayrollPrintSettings
 } from '../services/printSettings'
+import {
+  readMonthlyPayrollSettings,
+  writeMonthlyPayrollSettings
+} from '../services/monthly-payroll/monthlyPayrollSettings'
+import { getCachedLicenseStatus } from '../services/licenseService'
 import { getPersonnelStatusViews } from '../services/personnelStatus'
 import { exportWorksheetToExcel } from '../services/worksheetExport'
 import { saveWorksheetFields } from '../services/worksheetFields'
@@ -141,6 +150,7 @@ import type {
   MonthlyPayrollRun,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
+  MonthlyPayrollSettings,
   PrintRequest,
   PrinterSummary,
   UnitSettings,
@@ -157,11 +167,51 @@ import type {
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
   PersonnelExpensePlanPrefillResult,
+  LocalFileBase64,
+  SalaryQuotaMatchLocalSummary,
   SocialInsuranceBaseExportInput,
   SocialInsuranceBaseExportResult
 } from '../../shared/types'
 
+const LICENSE_FREE_CHANNELS = new Set([
+  'app:get-version',
+  'app:get-summary',
+  'app:list-workflows',
+  'import-watcher:get-status',
+  'import-watcher:choose-folder',
+  'import-watcher:open-folder',
+  'import-watcher:clear-logs',
+  'unit-settings:get',
+  'unit-settings:lock-state',
+  'unit-settings:set',
+  'unit-settings:resolve-school',
+  'backup:list',
+  'monthly-payroll:list-runs'
+])
+
+async function assertLicenseForChannel(channel: string): Promise<void> {
+  if (LICENSE_FREE_CHANNELS.has(channel)) return
+  const status = await getCachedLicenseStatus()
+  if (status.valid) return
+  throw new Error(status.message || '授权无效，请先完成授权校验')
+}
+
+function createLicensedIpcMain(): Pick<IpcMain, 'handle'> {
+  return {
+    handle(channel, listener) {
+      electronIpcMain.handle(channel, async (event, ...args) => {
+        await assertLicenseForChannel(channel)
+        return listener(event, ...args)
+      })
+    }
+  }
+}
+
 export function registerAppIpc(): void {
+  const ipcMain = createLicensedIpcMain()
+
+  ipcMain.handle('app:get-version', (): string => app.getVersion())
+
   ipcMain.handle('app:get-summary', async (): Promise<AppSummary> => {
     await getDatabase()
     const worksheets = readWorksheetMetadata()
@@ -224,6 +274,58 @@ export function registerAppIpc(): void {
     async (): Promise<PersonnelExpensePlanPrefillResult> => {
       const status = await getImportWatcherStatus()
       return readPersonnelExpensePlanPrefill(status.folderPath)
+    }
+  )
+
+  ipcMain.handle(
+    'salary-quota-match:local-summary',
+    async (): Promise<SalaryQuotaMatchLocalSummary> => {
+      try {
+        const [active, retired, other] = await Promise.all([
+          loadIntegratedActiveAggregates(),
+          loadIntegratedSimpleAggregates('一体化退休'),
+          loadIntegratedSimpleAggregates('一体化其他')
+        ])
+        return {
+          ok: true,
+          activeOtherOneTotal: active.其他一,
+          activeBasicPerformanceTotal: active.基础性绩效,
+          retiredHousingTotal: retired.住房补贴,
+          retiredActualPayTotal: retired.实发合计,
+          otherActualPayTotal: other.实发合计
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          activeOtherOneTotal: 0,
+          activeBasicPerformanceTotal: 0,
+          retiredHousingTotal: 0,
+          retiredActualPayTotal: 0,
+          otherActualPayTotal: 0,
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'local-file:read-base64',
+    async (_event, filePath: string): Promise<LocalFileBase64> => {
+      const { readFileSync, statSync } = await import('node:fs')
+      const { basename, extname } = await import('node:path')
+      if (!filePath) throw new Error('文件路径为空')
+      const ext = extname(filePath).toLowerCase()
+      if (!['.xls', '.xlsx', '.csv'].includes(ext)) {
+        throw new Error('只允许读取 Excel/CSV 导入文件')
+      }
+      const buffer = readFileSync(filePath)
+      const stat = statSync(filePath)
+      return {
+        filePath,
+        fileName: basename(filePath),
+        base64: buffer.toString('base64'),
+        size: stat.size
+      }
     }
   )
 
@@ -568,6 +670,7 @@ export function registerAppIpc(): void {
       _event,
       request: {
         salaryWorkbookPath: string
+        salaryWorkbookFallbackPaths?: string[]
         taxWorkbookPath?: string
         printerName?: string
         invoicePaperName?: string
@@ -583,6 +686,7 @@ export function registerAppIpc(): void {
       _event,
       request: {
         salaryWorkbookPath: string
+        salaryWorkbookFallbackPaths?: string[]
         taxWorkbookPath?: string
         printerName?: string
         invoicePaperName?: string
@@ -657,6 +761,17 @@ export function registerAppIpc(): void {
   ipcMain.handle(
     'unit-settings:set',
     (_event, settings: UnitSettings): Promise<UnitSettings> => writeUnitSettings(settings)
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:settings:get',
+    (): Promise<MonthlyPayrollSettings> => readMonthlyPayrollSettings()
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:settings:set',
+    (_event, settings: MonthlyPayrollSettings): Promise<MonthlyPayrollSettings> =>
+      writeMonthlyPayrollSettings(settings)
   )
 
   ipcMain.handle(

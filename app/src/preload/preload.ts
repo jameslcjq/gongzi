@@ -25,6 +25,7 @@ import type {
   TownshipMasterSyncPreview,
   LookupFailureEntry,
   PersonnelExpensePlanPrefillResult,
+  SalaryQuotaMatchLocalSummary,
   PivotConfig,
   PivotResult,
   WorkflowDefinition,
@@ -40,6 +41,7 @@ import type {
   MonthlyPayrollRun,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
+  MonthlyPayrollSettings,
   PrintRequest,
   PrinterSummary,
   UnitSettings,
@@ -64,7 +66,8 @@ import type {
   MailDownloadLog,
   MailDownloadRecord,
   MailCheckProgress,
-  MailCheckResult
+  MailCheckResult,
+  LocalFileBase64
 } from '../shared/types'
 
 type PivotConfigSummary = {
@@ -85,6 +88,19 @@ type LookupFailureQuery = {
 }
 
 const salaryApi = {
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
+  licenseStatus: () => ipcRenderer.invoke('license:status'),
+  licenseCheck: (licenseKey?: string) => ipcRenderer.invoke('license:check', licenseKey),
+  licenseClaimTrial: (customerName: string, customerCode?: string) =>
+    ipcRenderer.invoke('license:claimTrial', customerName, customerCode),
+  licenseGetKey: () => ipcRenderer.invoke('license:getKey'),
+  licenseSaveKey: (licenseKey: string) => ipcRenderer.invoke('license:saveKey', licenseKey),
+  licenseGetServerUrl: () => ipcRenderer.invoke('license:getServerUrl'),
+  licenseSetServerUrl: (serverUrl: string) => ipcRenderer.invoke('license:setServerUrl', serverUrl),
+  licenseDeviceInfo: (licenseKey?: string) => ipcRenderer.invoke('license:deviceInfo', licenseKey),
+  licenseExportMachineRequest: (licenseKey?: string) =>
+    ipcRenderer.invoke('license:exportMachineRequest', licenseKey),
+  licenseImportOffline: () => ipcRenderer.invoke('license:importOffline'),
   getSummary: (): Promise<AppSummary> => ipcRenderer.invoke('app:get-summary'),
   runConsistencyAudit: (): Promise<ConsistencyAuditResult> =>
     ipcRenderer.invoke('consistency-audit:run'),
@@ -104,6 +120,10 @@ const salaryApi = {
     ipcRenderer.invoke('import-watcher:clear-logs'),
   getPersonnelExpensePlanPrefill: (): Promise<PersonnelExpensePlanPrefillResult> =>
     ipcRenderer.invoke('personnel-expense-plan:prefill'),
+  getSalaryQuotaMatchLocalSummary: (): Promise<SalaryQuotaMatchLocalSummary> =>
+    ipcRenderer.invoke('salary-quota-match:local-summary'),
+  readLocalFileBase64: (filePath: string): Promise<LocalFileBase64> =>
+    ipcRenderer.invoke('local-file:read-base64', filePath),
 
   listWorkflows: (): Promise<WorkflowDefinition[]> => ipcRenderer.invoke('app:list-workflows'),
   runWorkflow: (workflowKey: string, payload?: WorkflowRunPayload): Promise<WorkflowRunResult> =>
@@ -217,6 +237,10 @@ const salaryApi = {
     ipcRenderer.invoke('unit-settings:resolve-school', budgetUnitCode),
   setUnitSettings: (settings: UnitSettings): Promise<UnitSettings> =>
     ipcRenderer.invoke('unit-settings:set', settings),
+  getMonthlyPayrollSettings: (): Promise<MonthlyPayrollSettings> =>
+    ipcRenderer.invoke('monthly-payroll:settings:get'),
+  setMonthlyPayrollSettings: (settings: MonthlyPayrollSettings): Promise<MonthlyPayrollSettings> =>
+    ipcRenderer.invoke('monthly-payroll:settings:set', settings),
   listMonthlyPayrollRuns: (): Promise<MonthlyPayrollRun[]> =>
     ipcRenderer.invoke('monthly-payroll:list-runs'),
   deleteMonthlyPayrollRun: (id: number): Promise<boolean> =>
@@ -229,12 +253,14 @@ const salaryApi = {
     ipcRenderer.invoke('monthly-payroll:get-run-report', id),
   printSalaryWorkbookViaExcel: (request: {
     salaryWorkbookPath: string
+    salaryWorkbookFallbackPaths?: string[]
     taxWorkbookPath?: string
     printerName?: string
     invoicePaperName?: string
   }): Promise<void> => ipcRenderer.invoke('monthly-payroll:print-salary-via-excel', request),
   getSalaryWorkbookPrintPageSummary: (request: {
     salaryWorkbookPath: string
+    salaryWorkbookFallbackPaths?: string[]
     taxWorkbookPath?: string
     printerName?: string
     invoicePaperName?: string

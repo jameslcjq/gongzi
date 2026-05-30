@@ -32,8 +32,12 @@
         ]
       },
       {
-        "from": "installer/resources/lookup-seeds.json",
-        "to": "lookup-seeds.json"
+        "from": "installer/resources",
+        "to": ".",
+        "filter": [
+          "lookup-seeds.json",
+          "license_public_key.pem"
+        ]
       }
     ],
     "asarUnpack": [

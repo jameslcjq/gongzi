@@ -1,9 +1,11 @@
 import { spawn } from 'node:child_process'
-import { parseSalaryWorkbook, parseTaxWorkbook } from './monthlyPayroll'
+import { existsSync } from 'node:fs'
+import { parseSalaryWorkbook, parseTaxWorkbook } from './monthlyPayrollParsers'
 import type { MonthlyPayrollSalaryPrintPageSummary } from '../../../shared/types'
 
 export type PrintSalaryViaExcelRequest = {
   salaryWorkbookPath: string
+  salaryWorkbookFallbackPaths?: string[]
   taxWorkbookPath?: string
   printerName?: string
   invoicePaperName?: string
@@ -21,6 +23,7 @@ export async function writeTaxToSalaryWorkbookViaExcel(
   request: WriteTaxToSalaryRequest
 ): Promise<void> {
   if (Object.keys(request.taxByIdCard).length === 0) return
+  ensureFileExists(request.salaryWorkbookPath, '工资表文件不存在，无法回写个税')
   const script = buildWriteTaxScript({
     salaryWorkbookPath: request.salaryWorkbookPath,
     taxByIdCard: request.taxByIdCard
@@ -31,12 +34,14 @@ export async function writeTaxToSalaryWorkbookViaExcel(
 export async function printSalaryWorkbookViaExcel(
   request: PrintSalaryViaExcelRequest
 ): Promise<void> {
+  const salaryWorkbookPath = resolveSalaryWorkbookPath(request)
+  ensureFileExists(salaryWorkbookPath, '工资表文件不存在，无法打印工资表')
   const taxByIdCard = request.taxWorkbookPath
-    ? await buildTaxByIdCardMap(request.salaryWorkbookPath, request.taxWorkbookPath)
+    ? await buildTaxByIdCardMap(salaryWorkbookPath, request.taxWorkbookPath)
     : {}
 
   const script = buildPowerShellScript({
-    salaryWorkbookPath: request.salaryWorkbookPath,
+    salaryWorkbookPath,
     printerName: request.printerName ?? '',
     invoicePaperName: request.invoicePaperName ?? DEFAULT_INVOICE_PAPER_NAME,
     taxByIdCard,
@@ -48,8 +53,10 @@ export async function printSalaryWorkbookViaExcel(
 export async function getSalaryWorkbookPrintPageSummary(
   request: PrintSalaryViaExcelRequest
 ): Promise<MonthlyPayrollSalaryPrintPageSummary> {
+  const salaryWorkbookPath = resolveSalaryWorkbookPath(request)
+  if (!salaryWorkbookPath || !existsSync(salaryWorkbookPath)) return emptySalaryPrintPageSummary()
   const script = buildPageSummaryScript({
-    salaryWorkbookPath: request.salaryWorkbookPath,
+    salaryWorkbookPath,
     printerName: request.printerName ?? '',
     invoicePaperName: request.invoicePaperName ?? DEFAULT_INVOICE_PAPER_NAME,
     salarySheetNames: SALARY_SHEETS
@@ -60,12 +67,30 @@ export async function getSalaryWorkbookPrintPageSummary(
   return JSON.parse(jsonLine) as MonthlyPayrollSalaryPrintPageSummary
 }
 
+function resolveSalaryWorkbookPath(request: PrintSalaryViaExcelRequest): string {
+  const candidates = [
+    request.salaryWorkbookPath,
+    ...(request.salaryWorkbookFallbackPaths ?? [])
+  ].filter((item): item is string => Boolean(item))
+  return candidates.find((item) => existsSync(item)) ?? request.salaryWorkbookPath
+}
+
+function ensureFileExists(filePath: string, message: string): void {
+  if (!filePath || !existsSync(filePath)) {
+    throw new Error(`${message}：${filePath || '未提供路径'}`)
+  }
+}
+
+function emptySalaryPrintPageSummary(): MonthlyPayrollSalaryPrintPageSummary {
+  return { items: [], totalPages: 0 }
+}
+
 async function runPowerShellScript(script: string, errorPrefix: string): Promise<string> {
-  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  const encoded = Buffer.from(buildPowerShellPreamble() + script, 'utf16le').toString('base64')
   return new Promise<string>((resolve, reject) => {
     const child = spawn(
       'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', encoded],
       { windowsHide: true }
     )
     let stdout = ''
@@ -84,10 +109,48 @@ async function runPowerShellScript(script: string, errorPrefix: string): Promise
         resolve(stdout)
         return
       }
-      const message = stderr.trim() || `PowerShell 退出码 ${code}`
+      const message = cleanPowerShellError(stderr) || `PowerShell 退出码 ${code}`
       reject(new Error(`${errorPrefix}：${message}`))
     })
   })
+}
+
+function buildPowerShellPreamble(): string {
+  return `
+$ProgressPreference = 'SilentlyContinue'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+`
+}
+
+function cleanPowerShellError(stderr: string): string {
+  const trimmed = stderr.trim()
+  if (!trimmed) return ''
+  if (!trimmed.startsWith('#< CLIXML')) return trimmed
+
+  const errorParts = Array.from(trimmed.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g))
+    .map((match) => decodePowerShellXmlText(match[1]))
+    .join('')
+  const lines = errorParts
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.includes('_x000D__x000A_'))
+    .filter((line) => !line.startsWith('+ '))
+    .filter((line) => !line.startsWith('CategoryInfo'))
+    .filter((line) => !line.startsWith('FullyQualifiedErrorId'))
+  return lines.slice(-3).join('\n') || trimmed
+}
+
+function decodePowerShellXmlText(value: string): string {
+  return value
+    .replace(/_x000D__x000A_/g, '\n')
+    .replace(/_x000D_/g, '\r')
+    .replace(/_x000A_/g, '\n')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
 }
 
 function buildWriteTaxScript(input: {

@@ -32,6 +32,7 @@ const monthCloseRuns = ref<MonthlyPayrollRun[]>([])
 const monthCloseLoading = ref(false)
 const cancelingMonthCloseId = ref<number | null>(null)
 const activeTab = ref('unit')
+const appVersion = ref('dev')
 
 const defaultSalaryExportSaltypes: SalaryExportSaltype[] = [
   { saltype_id: '2', saltype_name: '002事业' },
@@ -92,9 +93,18 @@ watch(
       void refreshBackups()
       void refreshMonthCloseRuns()
       void loadUnitSettings()
+      void loadAppVersion()
     }
   }
 )
+
+async function loadAppVersion() {
+  try {
+    appVersion.value = await window.salaryApi.getAppVersion()
+  } catch {
+    appVersion.value = 'dev'
+  }
+}
 
 async function loadUnitSettings() {
   const [settings, lockState] = await Promise.all([
@@ -117,12 +127,36 @@ async function saveUnitSettings() {
   try {
     const next = await window.salaryApi.setUnitSettings(buildUnitSettingsPayload())
     Object.assign(unitForm, next)
-    ElMessage.success('单位设置已保存')
+    const trial = await claimTrialAfterUnitSave(next)
+    ElMessage.success(trial ? '单位设置已保存，试用授权已自动开通' : '单位设置已保存')
+    emit('changed')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
   } finally {
     unitSaving.value = false
   }
+}
+
+async function claimTrialAfterUnitSave(settings: UnitSettings): Promise<boolean> {
+  const unitName = settings.unitFullName.trim()
+  if (!unitName) return false
+
+  try {
+    const response = await window.salaryApi.licenseClaimTrial(unitName, settings.unitImportCode)
+    if (!response?.success) {
+      ElMessage.warning(response?.error || '单位设置已保存，但自动领取试用授权失败')
+      return false
+    }
+
+    const status = response.data
+    if (status?.valid) return true
+    ElMessage.warning(status?.message || '单位设置已保存，但自动领取试用授权失败')
+  } catch (error) {
+    ElMessage.warning(
+      error instanceof Error ? `单位设置已保存，但自动授权失败：${error.message}` : '单位设置已保存，但自动授权失败'
+    )
+  }
+  return false
 }
 
 function buildUnitSettingsPayload(): UnitSettings {
@@ -588,6 +622,36 @@ function formatMoney(value: number): string {
         <MailAttachmentPage />
       </el-tab-pane>
 
+      <el-tab-pane label="关于" name="about">
+        <div class="about-panel">
+          <div class="about-brand">
+            <div class="about-mark">资</div>
+            <div>
+              <h2>工资系统</h2>
+              <p>工资业务与数据管理工作台</p>
+            </div>
+          </div>
+          <div class="about-meta">
+            <div>
+              <span>版权人</span>
+              <strong>老九</strong>
+            </div>
+            <div>
+              <span>版权声明</span>
+              <strong>© 2026 老九 版权所有</strong>
+            </div>
+            <div>
+              <span>使用授权</span>
+              <strong>仅限授权单位内部工资业务使用</strong>
+            </div>
+            <div>
+              <span>当前版本</span>
+              <strong>v{{ appVersion }}</strong>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane label="危险操作" name="danger">
         <div class="settings-section danger-section">
           <h4>危险操作</h4>
@@ -659,5 +723,69 @@ function formatMoney(value: number): string {
 
 .settings-audit-pane :deep(.audit-header h2) {
   font-size: 18px;
+}
+
+.about-panel {
+  display: grid;
+  gap: 22px;
+}
+
+.about-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.about-brand h2 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 22px;
+}
+
+.about-brand p {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.about-meta {
+  display: grid;
+  gap: 12px;
+  max-width: 620px;
+}
+
+.about-meta > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 16px;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-meta span {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.about-meta strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
 }
 </style>

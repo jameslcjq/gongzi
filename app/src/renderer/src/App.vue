@@ -53,6 +53,38 @@ type ModuleGroup = {
   hidden?: boolean
 }
 
+type IpcResponse<T> = {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+type LicenseStatus = {
+  valid: boolean
+  source?: 'online' | 'offline' | 'cache'
+  product_key?: string
+  product_name?: string
+  license_key?: string
+  customer_name?: string
+  expires_at?: string
+  seats?: number
+  used_seats?: number
+  reason?: string
+  message?: string
+  cached?: boolean
+  checkedAt?: string
+  device_id?: string
+}
+
+type LicenseDeviceInfo = {
+  product_key: string
+  license_key?: string
+  device_id: string
+  device_name: string
+  app_version: string
+  hardware: string
+}
+
 const modules: ModuleGroup[] = [
   { key: 'integration', label: '一体化对接', tables: [] },
   { key: 'integrated', label: '工资数据', tables: ['一体化在职', '一体化退休', '一体化其他'] },
@@ -95,12 +127,20 @@ function displayWorksheetName(name: string) {
 const summary = ref<AppSummary | null>(null)
 const error = ref('')
 const loginStorageKey = 'salary-system:logged-in'
-const isLoggedIn = ref(localStorage.getItem(loginStorageKey) === '1')
+const loginStorageValue = 'admin-auth-v1'
+const loginUsername = 'admin'
+const loginPassword = '123456'
+const isLoggedIn = ref(localStorage.getItem(loginStorageKey) === loginStorageValue)
 const loginForm = ref({
-  username: 'admin',
+  username: loginUsername,
   password: ''
 })
 const loginRemember = ref(true)
+const licenseStatus = ref<LicenseStatus | null>(null)
+const licenseDevice = ref<LicenseDeviceInfo | null>(null)
+const licenseKey = ref('')
+const licenseLoading = ref(false)
+const appVersion = ref('dev')
 const activeModuleKey = ref(modules[0].key)
 const selectedWorksheetId = ref('')
 const worksheetRecords = ref<WorksheetRecordsResult | null>(null)
@@ -176,6 +216,8 @@ const activeModule = computed(
   () => modules.find((item) => item.key === activeModuleKey.value) ?? visibleModules[0]
 )
 
+const isLicenseValid = computed(() => licenseStatus.value?.valid === true)
+
 const tablesInModule = computed(() => {
   const all = summary.value?.worksheets ?? []
   const inModule = activeModule.value.tables
@@ -248,6 +290,14 @@ watch(activeView, () => {
   void loadRecords()
 })
 
+watch(isLicenseValid, (valid) => {
+  if (!valid) {
+    worksheetRecords.value = null
+    return
+  }
+  void loadRecords()
+})
+
 async function loadSummary() {
   try {
     const next = await window.salaryApi.getSummary()
@@ -265,6 +315,7 @@ async function loadSummary() {
 const sortState = ref<{ column: string; order: 'asc' | 'desc' } | null>(null)
 
 async function loadRecords() {
+  if (!isLicenseValid.value) return
   if (!selectedWorksheetId.value) return
   recordsLoading.value = true
   try {
@@ -907,24 +958,184 @@ async function handleTownshipImported() {
   }
 }
 
+function unwrapIpc<T>(response: IpcResponse<T>): T {
+  if (!response?.success) throw new Error(response?.error || '授权操作失败')
+  return response.data as T
+}
+
+function getLicenseReasonText(status: LicenseStatus | null): string {
+  if (!status) return '正在读取授权状态'
+  if (status.valid) return '授权有效'
+  const reasonMap: Record<string, string> = {
+    not_found: '授权码不存在',
+    expired: '授权已过期',
+    disabled: '授权已停用',
+    product_disabled: '产品授权已停用',
+    missing_product_or_license: '请输入授权码',
+    network_error: '无法连接授权中心',
+    seats_exceeded: '授权电脑数量已达上限',
+    device_mismatch: '授权文件不属于当前电脑',
+    license_mismatch: '离线授权文件与当前授权码不一致',
+    offline_invalid: '离线授权文件无效',
+    offline_key_missing: '缺少离线授权公钥',
+    clock_rollback: '检测到本机时间异常'
+  }
+  return status.message || reasonMap[status.reason || ''] || '授权无效'
+}
+
+function getLicenseSourceText(source?: string): string {
+  if (source === 'online') return '在线校验'
+  if (source === 'offline') return '离线授权'
+  if (source === 'cache') return '本地缓存'
+  return '未校验'
+}
+
+async function refreshLicenseStatus() {
+  const status = unwrapIpc<LicenseStatus>(await window.salaryApi.licenseStatus())
+  licenseStatus.value = status
+  if (status.license_key && !licenseKey.value) licenseKey.value = status.license_key
+}
+
+async function refreshLicenseDevice() {
+  licenseDevice.value = unwrapIpc<LicenseDeviceInfo>(
+    await window.salaryApi.licenseDeviceInfo(licenseKey.value)
+  )
+}
+
+async function bootstrapLicense() {
+  if (!isLoggedIn.value) return
+  licenseLoading.value = true
+  try {
+    licenseKey.value = unwrapIpc<string>(await window.salaryApi.licenseGetKey()) || ''
+    await refreshLicenseStatus()
+    await refreshLicenseDevice()
+    if (licenseStatus.value?.valid !== true) {
+      await claimTrialFromSavedUnitSettings(false)
+    }
+  } catch (error) {
+    licenseStatus.value = {
+      valid: false,
+      reason: 'license_bootstrap_failed',
+      message: error instanceof Error ? error.message : '读取授权状态失败'
+    }
+  } finally {
+    licenseLoading.value = false
+  }
+}
+
+async function claimTrialFromSavedUnitSettings(showMessage: boolean) {
+  try {
+    const settings = await window.salaryApi.getUnitSettings()
+    const unitName = settings.unitFullName.trim()
+    if (!unitName) return
+
+    const status = unwrapIpc<LicenseStatus>(
+      await window.salaryApi.licenseClaimTrial(unitName, settings.unitImportCode)
+    )
+    licenseStatus.value = status
+    if (status.license_key) licenseKey.value = status.license_key
+    await refreshLicenseDevice()
+    if (status.valid && showMessage) {
+      ElMessage.success('试用授权已自动开通')
+    }
+  } catch (error) {
+    if (showMessage) {
+      ElMessage.warning(error instanceof Error ? `自动授权失败：${error.message}` : '自动授权失败')
+    }
+  }
+}
+
+async function checkLicenseOnline() {
+  if (!licenseKey.value.trim()) {
+    ElMessage.warning('请输入授权码')
+    return
+  }
+  licenseLoading.value = true
+  try {
+    unwrapIpc<void>(await window.salaryApi.licenseSaveKey(licenseKey.value))
+    const status = unwrapIpc<LicenseStatus>(await window.salaryApi.licenseCheck(licenseKey.value))
+    licenseStatus.value = status
+    await refreshLicenseDevice()
+    if (status.valid) {
+      ElMessage.success('授权校验成功')
+    } else {
+      ElMessage.error(getLicenseReasonText(status))
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '授权校验失败')
+  } finally {
+    licenseLoading.value = false
+  }
+}
+
+async function exportLicenseMachineRequest() {
+  licenseLoading.value = true
+  try {
+    const result = unwrapIpc<{ canceled?: boolean; filePath?: string }>(
+      await window.salaryApi.licenseExportMachineRequest(licenseKey.value)
+    )
+    if (!result.canceled) ElMessage.success('机器码文件已导出')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导出机器码失败')
+  } finally {
+    licenseLoading.value = false
+  }
+}
+
+async function importOfflineLicense() {
+  licenseLoading.value = true
+  try {
+    const result = unwrapIpc<{ canceled?: boolean; status?: LicenseStatus }>(
+      await window.salaryApi.licenseImportOffline()
+    )
+    if (result.canceled) return
+    if (result.status) licenseStatus.value = result.status
+    await refreshLicenseDevice()
+    if (result.status?.valid) {
+      ElMessage.success('离线授权已导入')
+    } else {
+      ElMessage.error(getLicenseReasonText(result.status ?? licenseStatus.value))
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导入离线授权失败')
+  } finally {
+    licenseLoading.value = false
+  }
+}
+
 function handleLogin() {
-  if (!loginForm.value.username.trim() || !loginForm.value.password.trim()) {
+  const username = loginForm.value.username.trim()
+  const password = loginForm.value.password.trim()
+  if (!username || !password) {
     ElMessage.warning('请输入用户名和密码')
+    return
+  }
+  if (username !== loginUsername || password !== loginPassword) {
+    ElMessage.error('用户名或密码错误')
     return
   }
   isLoggedIn.value = true
   if (loginRemember.value) {
-    localStorage.setItem(loginStorageKey, '1')
+    localStorage.setItem(loginStorageKey, loginStorageValue)
   } else {
     localStorage.removeItem(loginStorageKey)
   }
   ElMessage.success('登录成功')
+  void bootstrapLicense()
 }
 
 function handleLogout() {
   localStorage.removeItem(loginStorageKey)
   loginForm.value.password = ''
   isLoggedIn.value = false
+}
+
+async function loadAppVersion() {
+  try {
+    appVersion.value = await window.salaryApi.getAppVersion()
+  } catch {
+    appVersion.value = 'dev'
+  }
 }
 
 function buildTownshipNameIssueMessage(result: TownshipIdCardFillResult): string {
@@ -973,6 +1184,7 @@ async function promptPendingMasterSyncs() {
 async function onSettingsChanged() {
   await refreshImportWatcher()
   monthlyPayrollRefreshKey.value += 1
+  await bootstrapLicense()
   await loadRecords()
 }
 
@@ -995,6 +1207,8 @@ const worksheetOptions = computed(() =>
 )
 
 onMounted(() => {
+  void loadAppVersion()
+  void bootstrapLicense()
   void loadSummary()
   void loadWorkflows()
   void refreshImportWatcher().then(() => promptPendingMasterSyncs())
@@ -1051,17 +1265,19 @@ onUnmounted(() => {
       </el-form>
 
       <div class="login-footer">
+        <p>版本: v{{ appVersion }}</p>
         <p>© 2026 老九 版权所有</p>
+        <p>授权单位内部使用</p>
       </div>
     </div>
   </section>
 
-  <div v-else class="md-shell">
+  <div v-else-if="isLicenseValid" class="md-shell">
     <header class="md-topbar">
       <div class="md-brand">
         <div class="md-brand-mark">资</div>
         <div class="md-brand-text">
-          <strong>工资系统a</strong>
+          <strong>工资系统</strong>
           <small>独立桌面版</small>
         </div>
       </div>
@@ -1412,14 +1628,73 @@ onUnmounted(() => {
       </template>
     </el-dialog>
 
-    <SettingsDialog
-      v-model="settingsDialogVisible"
-      :import-watcher="importWatcher"
-      :database-path="summary?.databasePath ?? ''"
-      @changed="onSettingsChanged"
-      @open-worksheet="openSettingsWorksheet"
-    />
   </div>
+
+  <section v-else class="login-container license-gate">
+    <div class="login-card license-card">
+      <div class="login-header">
+        <div class="login-mark">资</div>
+        <h1>授权校验</h1>
+        <p>当前电脑需要有效授权后才能进入业务模块</p>
+      </div>
+
+      <el-alert
+        class="license-alert"
+        :type="licenseStatus?.reason === 'network_error' ? 'warning' : 'error'"
+        :title="getLicenseReasonText(licenseStatus)"
+        show-icon
+        :closable="false"
+      />
+
+      <el-form label-position="top" @submit.prevent="checkLicenseOnline">
+        <el-form-item label="授权码">
+          <el-input
+            v-model="licenseKey"
+            placeholder="请输入授权码"
+            clearable
+            @keyup.enter="checkLicenseOnline"
+          />
+        </el-form-item>
+
+        <div class="license-actions">
+          <el-button type="primary" :loading="licenseLoading" native-type="submit">
+            在线校验
+          </el-button>
+          <el-button :loading="licenseLoading" @click="importOfflineLicense">
+            导入离线授权
+          </el-button>
+          <el-button :loading="licenseLoading" @click="exportLicenseMachineRequest">
+            导出机器码
+          </el-button>
+          <el-button :loading="licenseLoading" @click="claimTrialFromSavedUnitSettings(true)">
+            自动开通试用
+          </el-button>
+          <el-button @click="settingsDialogVisible = true">
+            单位设置
+          </el-button>
+          <el-button @click="handleLogout">
+            退出登录
+          </el-button>
+        </div>
+      </el-form>
+
+      <div class="license-meta">
+        <span>校验来源：{{ getLicenseSourceText(licenseStatus?.source) }}</span>
+        <span v-if="licenseStatus?.customer_name">授权单位：{{ licenseStatus.customer_name }}</span>
+        <span v-if="licenseStatus?.expires_at">到期日期：{{ licenseStatus.expires_at }}</span>
+        <span v-if="licenseDevice?.device_id">机器码：{{ licenseDevice.device_id }}</span>
+      </div>
+    </div>
+  </section>
+
+  <SettingsDialog
+    v-if="isLoggedIn"
+    v-model="settingsDialogVisible"
+    :import-watcher="importWatcher"
+    :database-path="summary?.databasePath ?? ''"
+    @changed="onSettingsChanged"
+    @open-worksheet="openSettingsWorksheet"
+  />
 </template>
 
 <style scoped>
@@ -1492,6 +1767,45 @@ onUnmounted(() => {
 
 .login-footer p {
   margin: 0;
+}
+
+.login-footer p + p {
+  margin-top: 6px;
+}
+
+.license-gate {
+  padding: 24px;
+}
+
+.license-card {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.license-alert {
+  margin-bottom: 18px;
+}
+
+.license-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.license-actions .el-button {
+  margin-left: 0;
+}
+
+.license-meta {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 12.5px;
 }
 
 .md-shell {

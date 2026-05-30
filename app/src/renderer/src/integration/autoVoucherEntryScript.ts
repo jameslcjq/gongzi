@@ -13,7 +13,7 @@ export function buildAutoVoucherEntryScript(
 ;(function installAutoVoucherEntry() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260522-toolbar-auto-voucher-entry'
+  var VERSION = '20260529-auto-voucher-entry-exclude-salary-payment'
   var BTN_ID = 'auto-voucher-entry-btn'
   var STATUS_ID = 'auto-voucher-entry-status'
   var STORE_KEY = 'autoVoucherEntryState'
@@ -243,6 +243,23 @@ export function buildAutoVoucherEntryScript(
     return partial
   }
 
+  function findExactButton(doc, text) {
+    if (!doc) return null
+    var wanted = normalizeText(text)
+    var nodes = doc.querySelectorAll('a,button,input[type="button"],input[type="submit"],.l-btn,.l-btn-text,span.l-btn-text')
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i]
+      var host = node.classList && node.classList.contains('l-btn-text') ? (node.closest('.l-btn') || node) : node
+      if (!isVisible(host)) continue
+      var textValue =
+        node.tagName === 'INPUT'
+          ? node.value || node.getAttribute('value') || ''
+          : node.innerText || node.textContent || node.title || ''
+      if (normalizeText(textValue) === wanted) return host
+    }
+    return null
+  }
+
   function findButtonAcross(text, preferredDoc) {
     if (preferredDoc) {
       var local = findButton(preferredDoc, text)
@@ -254,6 +271,26 @@ export function buildAutoVoucherEntryScript(
       if (btn) return btn
     }
     return null
+  }
+
+  function isSalaryPaymentPage(doc) {
+    if (!doc) return false
+    try {
+      var href = doc.location && doc.location.href ? doc.location.href : ''
+      if (href.indexOf('/salary-pro-web/') >= 0 || href.indexOf('salSalaryAuditSCZF') >= 0) {
+        return true
+      }
+    } catch (error) {}
+
+    var hasSalaryFields = !!doc.querySelector(
+      '[field="item_name"],[field="saltype_name"],[field="item_rule_type_name"],[field="unalready_matc_amonty"]'
+    )
+    if (!hasSalaryFields) return false
+    return !!(
+      findButton(doc, '额度匹配') ||
+      findButton(doc, '生成支付') ||
+      findButton(doc, '生成支付申请')
+    )
   }
 
   function getCellText(row, field) {
@@ -347,12 +384,19 @@ export function buildAutoVoucherEntryScript(
     var fallback = null
     for (var i = 0; i < docs.length; i++) {
       var doc = docs[i]
+      if (isSalaryPaymentPage(doc)) continue
       if (!doc.querySelector('.datagrid-view1')) continue
-      var generateBtn = findButton(doc, '生成')
+      var generateBtn = findExactButton(doc, '生成')
       if (!generateBtn) continue
       var returnBtn = findButton(doc, '返回')
       var quotaPairs = getQuotaRowPairs(doc)
       if (returnBtn || quotaPairs.length > 0) continue
+      if (
+        !doc.querySelector('[field="' + CONFIG.subjectField + '"]') ||
+        !doc.querySelector('[field="' + CONFIG.listAmountField + '"]')
+      ) {
+        continue
+      }
       var pairs = getListRowPairs(doc)
       var page = { doc: doc, pairs: pairs, generateBtn: generateBtn }
       if (pairs.length > 0) return page
@@ -625,7 +669,7 @@ export function buildAutoVoucherEntryScript(
         status('已勾选 ' + batchCount + ' 条：' + targetSubject + '\\n金额：' + formatAmount(totalAmount))
         await sleep(300)
 
-        var generateBtn = findButton(listPage.doc, '生成') || findButtonAcross('生成', listPage.doc)
+        var generateBtn = findExactButton(listPage.doc, '生成') || listPage.generateBtn
         if (!generateBtn) throw new Error('找不到“生成”按钮')
         clickElement(generateBtn)
 
@@ -732,12 +776,20 @@ export function buildAutoVoucherEntryScript(
         if (existing && existing.parentNode) existing.parentNode.removeChild(existing)
         continue
       }
-      if (existing) continue
-      var page = null
-      if (doc.querySelector('.datagrid-view1') && findButton(doc, '生成') && !findButton(doc, '返回')) {
-        page = { doc: doc }
+      var isTargetPage =
+        !isSalaryPaymentPage(doc) &&
+        doc.querySelector('.datagrid-view1') &&
+        findExactButton(doc, '生成') &&
+        !findButton(doc, '返回') &&
+        !getQuotaRowPairs(doc).length &&
+        doc.querySelector('[field="' + CONFIG.subjectField + '"]') &&
+        doc.querySelector('[field="' + CONFIG.listAmountField + '"]')
+
+      if (!isTargetPage) {
+        if (existing && existing.parentNode) existing.parentNode.removeChild(existing)
+        continue
       }
-      if (!page) continue
+      if (existing) continue
 
       var btn = doc.createElement('a')
       btn.id = BTN_ID
@@ -772,7 +824,7 @@ export function buildAutoVoucherEntryScript(
       if (more && more.parentNode) {
         more.parentNode.insertBefore(btn, more.nextSibling)
       } else {
-        var generate = findButton(doc, '生成')
+        var generate = findExactButton(doc, '生成')
         var anchor = generate && generate.closest ? (generate.closest('a') || generate) : generate
         if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(btn, anchor.nextSibling)
         else doc.body.appendChild(btn)
