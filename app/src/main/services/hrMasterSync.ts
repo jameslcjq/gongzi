@@ -35,7 +35,7 @@ type SheetCtx = {
 
 type DerivedHrValues = Partial<Record<FieldName, string>>
 
-const sourceName = '一体化在职'
+const sourceName = '在职工资'
 const masterName = '人事信息'
 
 export async function previewHrMasterSyncFromIntegrated(): Promise<HrMasterSyncPreview> {

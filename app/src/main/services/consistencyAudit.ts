@@ -63,7 +63,7 @@ const statusCandidates = ['人员状态', '人员状态*', '状态', '状态*']
 const activeStatusTexts = new Set(['在职', '在岗', '正常'])
 const inactiveStatusTexts = ['退休', '其他', '调出', '调出人员', '去世']
 const activeAuditWorksheetNames = new Set([
-  '一体化在职',
+  '在职工资',
   '预算在职',
   '乡镇补贴',
   '工资年报',
@@ -72,12 +72,12 @@ const activeAuditWorksheetNames = new Set([
   '在编教职工基本信息'
 ])
 const inactiveAuditWorksheetNames = new Set([
-  '一体化退休',
+  '退休工资',
   '预算退休',
   '新房补',
   '退休养老金',
   '人事退休',
-  '一体化其他',
+  '其他工资',
   '预算其他',
   '其他人员'
 ])
@@ -312,17 +312,17 @@ const missingMasterRule: FieldRule = {
 
 const sourceRules: SourceRule[] = [
   {
-    worksheetName: '一体化在职',
+    worksheetName: '在职工资',
     identity: identityCandidates,
     fields: [nameRule, unitRule]
   },
   {
-    worksheetName: '一体化退休',
+    worksheetName: '退休工资',
     identity: identityCandidates,
     fields: [nameRule, unitRule]
   },
   {
-    worksheetName: '一体化其他',
+    worksheetName: '其他工资',
     identity: identityCandidates,
     fields: [nameRule, unitRule, statusRule]
   },
@@ -451,7 +451,7 @@ export async function runConsistencyAudit(): Promise<ConsistencyAuditResult> {
     else if (isInactiveStatus(status)) inactiveIdCards.add(idCard)
   }
 
-  await collectWorksheetIdCards(database, worksheets, ['一体化在职'], activeIdCards)
+  await collectWorksheetIdCards(database, worksheets, ['在职工资'], activeIdCards)
   await collectWorksheetIdCards(database, worksheets, [...inactiveAuditWorksheetNames], inactiveIdCards)
 
   const altMasters = await loadAltMasters(database, worksheets, sourceRules)
@@ -699,7 +699,7 @@ function shouldAuditActiveRow(
 
   if (activeIdCards.has(idCard)) return true
   if (isActiveStatus(fieldStatus) || isActiveStatus(row.md_status)) return true
-  return worksheetName === '一体化在职'
+  return worksheetName === '在职工资'
 }
 
 function buildSheetCtx(worksheet: WorksheetMeta): SheetCtx {

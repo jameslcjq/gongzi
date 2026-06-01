@@ -325,7 +325,6 @@ async function loadHistoryReport(row: MonthlyPayrollRun, showMessage: boolean) {
   activeReportSheet.value = firstVisibleSheetName(snapshot.sheets)
   selectedMonth.value = `${row.year}-${String(row.month).padStart(2, '0')}`
   selectedReportRunId.value = row.id
-  selectedDataSourceMode.value = row.dataSourceMode ?? snapshot.dataSourceMode ?? 'salary-workbook'
   if (showMessage) ElMessage.success('已打开历史报表视图')
 }
 
@@ -366,72 +365,7 @@ function formatMoney(value: number): string {
 }
 
 const detected = computed(() => props.importWatcher?.monthlyPayroll)
-type ProcessMode = 'salary' | 'social' | 'salary-social'
-const selectedDataSourceMode = ref<MonthlyPayrollDataSourceMode>('salary-workbook')
-const selectedProcessMode = ref<ProcessMode>('salary')
-const processModeTouched = ref(false)
-
-const availableProcessModes = computed<Array<{ label: string; value: ProcessMode }>>(() => {
-  const hasSalary = Boolean(effectiveSourcePath('salary', detected.value?.salaryWorkbookPath))
-  const hasSocial = Boolean(effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath))
-  if (selectedDataSourceMode.value === 'integrated') {
-    if (hasSocial) {
-      return [
-        { label: '工资+社保', value: 'salary-social' },
-        { label: '只报工资', value: 'salary' },
-        { label: '只报社保', value: 'social' }
-      ]
-    }
-    return [{ label: '只报工资', value: 'salary' }]
-  }
-  if (hasSalary && hasSocial) {
-    return [
-      { label: '工资+社保', value: 'salary-social' },
-      { label: '只报工资', value: 'salary' },
-      { label: '只报社保', value: 'social' }
-    ]
-  }
-  if (hasSalary) return [{ label: '只报工资', value: 'salary' }]
-  if (hasSocial) return [{ label: '只报社保', value: 'social' }]
-  return []
-})
-
-function defaultProcessMode(): ProcessMode {
-  if (selectedDataSourceMode.value === 'integrated') {
-    return effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath) ? 'salary-social' : 'salary'
-  }
-  if (
-    effectiveSourcePath('salary', detected.value?.salaryWorkbookPath) &&
-    effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath)
-  ) {
-    return 'salary-social'
-  }
-  if (effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath)) return 'social'
-  return 'salary'
-}
-
-watch(
-  [detected, selectedDataSourceMode],
-  () => {
-    const available = new Set(availableProcessModes.value.map((item) => item.value))
-    if (!available.has(selectedProcessMode.value) || !processModeTouched.value) {
-      selectedProcessMode.value = defaultProcessMode()
-    }
-  },
-  { immediate: true }
-)
-
-function markProcessModeTouched(): void {
-  processModeTouched.value = true
-}
-
-function markDataSourceModeTouched(): void {
-  processModeTouched.value = false
-  const available = new Set(availableProcessModes.value.map((item) => item.value))
-  if (!available.has(selectedProcessMode.value)) {
-    selectedProcessMode.value = defaultProcessMode()
-  }
-}
+type ProcessMode = 'salary' | 'salary-social'
 
 watch(
   () => report.value,
@@ -511,7 +445,7 @@ const selectedMonthFileCount = computed(() => {
 })
 
 function dataSourceModeText(mode?: MonthlyPayrollDataSourceMode | null): string {
-  return mode === 'integrated' ? '工资数据三张表' : '工资表 Excel'
+  return mode === 'integrated' ? '本地工资数据' : '工资表 Excel 兼容模式'
 }
 
 function dataSourceModeTagType(mode?: MonthlyPayrollDataSourceMode | null): 'success' | 'warning' {
@@ -535,23 +469,23 @@ function pushStatusTagType(
   return 'info'
 }
 
-const selectedDataSourceModeText = computed(() => dataSourceModeText(selectedDataSourceMode.value))
-const canRun = computed(() =>
-  availableProcessModes.value.some((item) => item.value === selectedProcessMode.value) &&
-  !isSelectedMonthArchived.value &&
-  isSelectedMonthCurrent.value
+const salarySourcePath = computed(() => effectiveSourcePath('salary', detected.value?.salaryWorkbookPath))
+const socialSourcePath = computed(() => effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath))
+const taxSourcePath = computed(() => effectiveSourcePath('tax', detected.value?.taxWorkbookPath))
+const effectiveDataSourceMode = computed<MonthlyPayrollDataSourceMode>(() =>
+  salarySourcePath.value ? 'salary-workbook' : 'integrated'
 )
+const effectiveProcessScope = computed<ProcessMode>(() =>
+  socialSourcePath.value ? 'salary-social' : 'salary'
+)
+const selectedDataSourceModeText = computed(() => dataSourceModeText(effectiveDataSourceMode.value))
+const canRun = computed(() => !isSelectedMonthArchived.value && isSelectedMonthCurrent.value)
 
 const modeText = computed(() => {
-  const hasTax = Boolean(effectiveSourcePath('tax', detected.value?.taxWorkbookPath))
-  const sourcePrefix = selectedDataSourceMode.value === 'integrated' ? '三张表' : '工资表'
-  if (selectedProcessMode.value === 'salary-social') {
-    return hasTax ? `${sourcePrefix} + 社保 + 个税` : `${sourcePrefix} + 社保`
-  }
-  if (selectedProcessMode.value === 'social') {
-    return hasTax ? '只报社保 + 个税' : '只报社保'
-  }
-  return hasTax ? `${sourcePrefix}工资 + 个税` : `${sourcePrefix}工资`
+  const scope = ['工资', socialSourcePath.value ? '社保' : '', taxSourcePath.value ? '个税' : '']
+    .filter(Boolean)
+    .join('+')
+  return `${effectiveDataSourceMode.value === 'salary-workbook' ? 'Excel' : '本地'}：${scope}`
 })
 
 function currentSourceVersion(kind: MonthlyPayrollSourceKind): MonthlyPayrollSourceVersion | null {
@@ -582,6 +516,15 @@ function sourceKindText(kind: MonthlyPayrollSourceKind): string {
   if (kind === 'social') return '社保'
   if (kind === 'tax') return '个税'
   return '工资表'
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function canSwitchSourceVersion(version: MonthlyPayrollSourceVersion): boolean {
@@ -619,25 +562,25 @@ async function switchSourceVersion(version: MonthlyPayrollSourceVersion): Promis
 const fileRows = computed(() => [
   {
     label: '工资表 Excel',
-    required: selectedDataSourceMode.value === 'salary-workbook' && selectedProcessMode.value !== 'social',
+    required: false,
     name: effectiveSourceName('salary', detected.value?.salaryWorkbookName),
-    path: effectiveSourcePath('salary', detected.value?.salaryWorkbookPath),
-    hint: sourceVersionHint('salary', selectedProcessMode.value === 'social'
-      ? '本次只报社保，工资表仅用于同时生成工资凭证'
-      : selectedDataSourceMode.value === 'salary-workbook'
-      ? '兼容模式主数据来源，报账金额按工资表 Excel 汇总'
-      : '可选附件、页数统计和辅助核对；报账金额主来源为工资数据三张表',
+    path: salarySourcePath.value,
+    hint: sourceVersionHint('salary',
+      salarySourcePath.value
+        ? '检测到工资表，本月按 Excel 兼容模式校准本地工资数据'
+        : '未检测到工资表，本月按本地在职工资、退休工资、其他工资生成',
       detected.value?.salaryWorkbookPath
     )
   },
   {
     label: '社保未申报汇总',
-    required: selectedProcessMode.value !== 'salary',
+    required: true,
     name: effectiveSourceName('social', detected.value?.socialSecurityWorkbookName),
-    path: effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath),
-    hint: sourceVersionHint('social', selectedProcessMode.value === 'salary'
-      ? '本次只报工资，社保后续单独处理'
-      : '只处理社保时需要放入社保未申报汇总文件',
+    path: socialSourcePath.value,
+    hint: sourceVersionHint('social',
+      socialSourcePath.value
+        ? '社保每月必办，已纳入本次最终候选结果'
+        : '社保每月必办；未补齐前只能生成阶段结果，不能月结',
       detected.value?.socialSecurityWorkbookPath
     )
   },
@@ -645,37 +588,65 @@ const fileRows = computed(() => [
     label: '个税计算表',
     required: false,
     name: effectiveSourceName('tax', detected.value?.taxWorkbookName),
-    path: effectiveSourcePath('tax', detected.value?.taxWorkbookPath),
+    path: taxSourcePath.value,
     hint: sourceVersionHint('tax', '未检测到时跳过个税扣款和补发工资', detected.value?.taxWorkbookPath)
   }
 ])
 
 async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
-  const files = detected.value
-  const hasSalary = Boolean(files?.salaryWorkbookPath)
-  const hasTax = Boolean(files?.taxWorkbookPath)
-  const sourceLine = `主数据来源：${selectedDataSourceModeText.value}。`
-  const mode = selectedProcessMode.value === 'salary-social'
-    ? hasTax
-      ? '本次处理：工资报账、社保报账、个税扣款。'
-      : '本次处理：工资报账、社保报账；不报个税。'
-    : selectedProcessMode.value === 'social'
-      ? hasTax
-        ? `本次只打印社保相关报表，并生成工资和社保凭证；包含个税。${hasSalary ? '' : '未检测到工资表，只生成社保凭证。'}`
-        : `本次只打印社保相关报表，并生成工资和社保凭证；不报个税。${hasSalary ? '' : '未检测到工资表，只生成社保凭证。'}`
-      : hasTax
-        ? '本次只处理工资报账和个税扣款；不生成凭证。'
-        : '本次只处理工资报账，不报个税。'
+  const hasSalary = Boolean(salarySourcePath.value)
+  const hasSocial = Boolean(socialSourcePath.value)
+  const hasTax = Boolean(taxSourcePath.value)
+  const includesSalary = true
+  const includesSocial = hasSocial
+  const includesTax = hasTax
+  const scope = [
+    includesSalary ? '工资' : '',
+    includesSocial ? '社保' : '',
+    includesTax ? '个税' : ''
+  ].filter(Boolean)
+  const salarySource = hasSalary
+    ? '已检测到工资表 Excel，作为本月权威来源'
+    : '未检测到工资表 Excel，使用本地在职工资/退休工资/其他工资'
+  const rows = [
+    {
+      item: '工资',
+      detected: salarySource,
+      action: hasSalary
+        ? '先校准本地工资数据，再生成工资报账'
+        : '按本地工资数据生成工资报账'
+    },
+    {
+      item: '社保',
+      detected: hasSocial ? '已检测到社保未申报汇总' : '未检测到社保文件',
+      action: includesSocial ? '生成社保报账' : '先生成工资阶段结果；社保补齐后需重新生成，暂不可月结'
+    },
+    {
+      item: '个税',
+      detected: hasTax ? '已检测到个税文件' : '未检测到个税文件',
+      action: includesTax ? '生成个税扣款' : '本次不报个税'
+    }
+  ]
+  const tableRows = rows
+    .map((row) => (
+      `<tr><td>${escapeHtml(row.item)}</td><td>${escapeHtml(row.detected)}</td><td>${escapeHtml(row.action)}</td></tr>`
+    ))
+    .join('')
+  const message =
+    `<div class="payroll-confirm-summary">权威来源：${escapeHtml(selectedDataSourceModeText.value)}；本次将处理：${escapeHtml(scope.join('、'))}</div>` +
+    '<table class="payroll-confirm-table"><thead><tr><th>项目</th><th>检测结果</th><th>处理方式</th></tr></thead>' +
+    `<tbody>${tableRows}</tbody></table>`
 
   try {
     await ElMessageBox.confirm(
-      `${sourceLine}${mode}`,
-      '确认处理范围',
+      message,
+      '确认工资报账范围',
       {
-        type: selectedProcessMode.value === 'salary-social' ? 'info' : 'warning',
-        confirmButtonText: '继续预处理',
+        type: 'info',
+        confirmButtonText: '确认并开始',
         cancelButtonText: '返回检查',
-        dangerouslyUseHTMLString: false
+        dangerouslyUseHTMLString: true,
+        customClass: 'monthly-payroll-confirm-box'
       }
     )
     return true
@@ -686,19 +657,17 @@ async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
 
 function currentPayload(options: { confirmWriteBack?: boolean } = {}): WorkflowRunPayload | null {
   const period = selectedPeriod.value
-  const processScope = selectedProcessMode.value
+  const processScope = effectiveProcessScope.value
   return {
     monthlyPayroll: {
-      salaryWorkbookPath: effectiveSourcePath('salary', detected.value?.salaryWorkbookPath),
-      socialSecurityWorkbookPath: processScope === 'salary'
-        ? undefined
-        : effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath),
-      taxWorkbookPath: effectiveSourcePath('tax', detected.value?.taxWorkbookPath),
+      salaryWorkbookPath: salarySourcePath.value,
+      socialSecurityWorkbookPath: socialSourcePath.value,
+      taxWorkbookPath: taxSourcePath.value,
       year: period.year,
       month: period.month,
       confirmWriteBack: options.confirmWriteBack,
       processScope,
-      dataSourceMode: selectedDataSourceMode.value
+      dataSourceMode: effectiveDataSourceMode.value
     }
   }
 }
@@ -714,8 +683,8 @@ async function confirmMonthlyPayrollWriteBack(
     : ''
   try {
     await ElMessageBox.confirm(
-      `发现 ${preview.syncableCount} 项工资表金额差异可回写到一体化工资表，涉及 ${preview.personCount} 人。确认后会按字段当前承载批次写回，并重新核对。${examples}${manual}`,
-      '确认回写一体化工资表',
+      `发现 ${preview.syncableCount} 项工资表金额差异可回写到本地工资数据，涉及 ${preview.personCount} 人。确认后会按字段当前承载批次写回，并重新核对。${examples}${manual}`,
+      '确认回写本地工资数据',
       {
         type: 'warning',
         confirmButtonText: '确认回写并复核',
@@ -738,7 +707,7 @@ async function runPreprocess(): Promise<void> {
     return
   }
   if (!canRun.value) {
-    ElMessage.warning(isSelectedMonthArchived.value ? `${selectedMonthDisplay.value}已月结` : '当前数据来源缺少必需文件，请检查处理范围')
+    ElMessage.warning(isSelectedMonthArchived.value ? `${selectedMonthDisplay.value}已月结` : '当前月份暂不可处理')
     return
   }
   const confirmedMode = await confirmMonthlyPayrollPreprocess()
@@ -805,7 +774,7 @@ async function runGenerate(): Promise<void> {
     return
   }
   if (!canRun.value) {
-    ElMessage.warning(isSelectedMonthArchived.value ? `${selectedMonthDisplay.value}已月结` : '当前数据来源缺少必需文件，请检查处理范围')
+    ElMessage.warning(isSelectedMonthArchived.value ? `${selectedMonthDisplay.value}已月结` : '当前月份暂不可处理')
     return
   }
   generating.value = true
@@ -844,7 +813,7 @@ function isReportPrintSheet(name: string | undefined): boolean {
     name === '自动生成' ||
     name === '五险一金' ||
     name === '工退遗汇总' ||
-    name === '一体化退休'
+    name === '退休工资'
   )
 }
 
@@ -853,7 +822,7 @@ const PRINT_ALL_SHEETS = [
   '五险一金',
   '工退遗汇总',
   '报销凭证',
-  '一体化退休'
+  '退休工资'
 ] as const
 
 const currentPrinterName = computed(() =>
@@ -949,9 +918,13 @@ async function archiveHistoryRun(row: MonthlyPayrollRun | null): Promise<void> {
     ElMessage.warning('请先生成或选择一条历史报表')
     return
   }
+  if (!canArchiveHistoryRun(row)) {
+    ElMessage.warning('社保文件未补齐，当前只是工资阶段结果，不能月结')
+    return
+  }
   try {
     await ElMessageBox.confirm(
-      `${row.year}年${row.month}月结后，本月不能再次进行工资报账或重新生成报表；工资、社保、个税源文件会移入同一个年月月结目录，文件名会带上年月日，仍可在历史报表中查看。`,
+      `${row.year}年${row.month}月结后，本月不能再次进行工资报账或重新生成报表；系统只归档最后有效的工资、社保、个税源文件和最终导出的保险导入、凭证、补发工资等文件。月结完成后会清零在职工资、退休工资、其他工资中的补发工资、补扣工资，用于下月业务初始化。`,
       '工资月结',
       { type: 'warning', confirmButtonText: '确认月结', cancelButtonText: '取消' }
     )
@@ -965,6 +938,10 @@ async function archiveHistoryRun(row: MonthlyPayrollRun | null): Promise<void> {
   } finally {
     archivingId.value = null
   }
+}
+
+function canArchiveHistoryRun(row: MonthlyPayrollRun | null): boolean {
+  return Boolean(row && !row.archivedAt && row.sourceSocialPath && row.insuranceImportPath)
 }
 
 async function onMonthChange(): Promise<void> {
@@ -990,7 +967,7 @@ const availablePrintAllSheets = computed(() =>
 )
 
 const canPrintAll = computed(() => {
-  const shouldPrintSalaryWorkbook = selectedProcessMode.value !== 'social' && Boolean(detected.value?.salaryWorkbookPath)
+  const shouldPrintSalaryWorkbook = Boolean(salarySourcePath.value)
   if (availablePrintAllSheets.value.length === 0 && !shouldPrintSalaryWorkbook) return false
   const needsReport =
     shouldPrintSalaryWorkbook || availablePrintAllSheets.value.some((name) => !isVoucherPrintSheet(name))
@@ -1002,9 +979,7 @@ const canPrintAll = computed(() => {
 
 async function printAllReports(): Promise<void> {
   const targets = availablePrintAllSheets.value
-  const salaryPath = selectedProcessMode.value === 'social'
-    ? undefined
-    : effectiveSourcePath('salary', detected.value?.salaryWorkbookPath)
+  const salaryPath = salarySourcePath.value
   if (targets.length === 0 && !salaryPath) {
     ElMessage.warning('没有可打印的报表')
     return
@@ -1133,7 +1108,7 @@ function cleanRemoteErrorMessage(error: unknown, fallback: string): string {
 }
 
 function getRetiredHousingPrintPageCount(): number {
-  const sheet = report.value?.sheets.find((item) => item.name === '一体化退休')
+  const sheet = report.value?.sheets.find((item) => item.name === '退休工资')
   return sheet ? splitRetiredHousingSheet(sheet).length : 0
 }
 
@@ -1174,7 +1149,7 @@ const activePages = computed<MonthlyPayrollReportSheet[]>(() => {
   const sheet = activeSheet.value
   if (!sheet) return []
   if (sheet.name === '自动生成') return splitAutoSheet(sheet)
-  if (sheet.name === '一体化退休') return splitRetiredHousingSheet(sheet)
+  if (sheet.name === '退休工资') return splitRetiredHousingSheet(sheet)
   return [sheet]
 })
 
@@ -1229,7 +1204,7 @@ function reportSheetClass(name: string): string {
   if (name === '五险一金') return 'sheet-insurance'
   if (name === '工退遗汇总') return 'sheet-summary'
   if (name === '报销凭证') return 'sheet-voucher'
-  if (name === '一体化退休') return 'sheet-retired-housing sheet-integrated-retired'
+  if (name === '退休工资') return 'sheet-retired-housing sheet-integrated-retired'
   if (name === '补发工资') return 'sheet-wide sheet-backpay'
   if (name === '保险导入') return 'sheet-wide sheet-insurance-import'
   return 'sheet-standard'
@@ -1389,7 +1364,7 @@ function isCustomStyledSheet(name: string): boolean {
     name === '自动生成' ||
     name === '五险一金' ||
     name === '工退遗汇总' ||
-    name === '一体化退休'
+    name === '退休工资'
   )
 }
 </script>
@@ -1449,32 +1424,23 @@ function isCustomStyledSheet(name: string): boolean {
       </div>
       <div class="primary-data-source">
         <div>
-          <strong>主数据来源</strong>
-          <p v-if="selectedDataSourceMode === 'integrated'">报账金额按工资数据中的三张表汇总；工资表 Excel 保留为兼容、核对和打印用途。</p>
-          <p v-else>报账金额按工资表 Excel 汇总；三张表仍用于辅助核对和后续切换。</p>
+          <strong>权威来源</strong>
+          <p v-if="effectiveDataSourceMode === 'salary-workbook'">检测到工资表 Excel，本月按兼容模式处理：Excel 校准本地在职工资和其他工资。</p>
+          <p v-else>未检测到工资表 Excel，本月直接按本地在职工资、退休工资、其他工资生成。</p>
         </div>
-        <el-radio-group
-          v-model="selectedDataSourceMode"
-          size="small"
-          :disabled="isSelectedMonthArchived"
-          @change="markDataSourceModeTouched"
-        >
-          <el-radio-button label="integrated">工资数据三张表</el-radio-button>
-          <el-radio-button label="salary-workbook">工资表 Excel</el-radio-button>
-        </el-radio-group>
         <div class="source-tags">
-          <template v-if="selectedDataSourceMode === 'integrated'">
-            <el-tag effect="plain" size="small">一体化在职</el-tag>
-            <el-tag effect="plain" size="small">一体化退休</el-tag>
-            <el-tag effect="plain" size="small">一体化其他</el-tag>
-          </template>
-          <el-tag v-else effect="plain" size="small" type="warning">工资表 Excel</el-tag>
+          <el-tag :type="effectiveDataSourceMode === 'salary-workbook' ? 'warning' : 'success'" effect="plain" size="small">
+            {{ selectedDataSourceModeText }}
+          </el-tag>
+          <el-tag effect="plain" size="small">在职工资</el-tag>
+          <el-tag effect="plain" size="small">退休工资</el-tag>
+          <el-tag effect="plain" size="small">其他工资</el-tag>
         </div>
       </div>
       <div class="tax-rule-settings">
         <div>
           <strong>个税规则设置</strong>
-          <p>个税文件按身份证匹配一体化在职后，写入当前启用字段；另一个个税字段写入时清零。</p>
+          <p>个税文件按身份证匹配在职工资后，写入当前启用字段；另一个个税字段写入时清零。</p>
         </div>
         <div class="tax-rule-actions">
           <el-radio-group v-model="payrollSettings.taxField" size="small">
@@ -1539,24 +1505,6 @@ function isCustomStyledSheet(name: string): boolean {
           >切回</el-button>
         </div>
       </div>
-    </div>
-
-    <div v-if="availableProcessModes.length" class="process-mode-panel">
-      <strong>处理范围</strong>
-      <el-radio-group v-model="selectedProcessMode" size="small" @change="markProcessModeTouched">
-        <el-radio-button
-          v-for="item in availableProcessModes"
-          :key="item.value"
-          :label="item.value"
-        >
-          {{ item.label }}
-        </el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <div class="rule-note">
-      <strong>自动判断规则</strong>
-      <p>报账金额按当前主数据来源生成，并随历史记录保存；选择“只报工资”时不生成社保凭证；选择“只报社保”时只打印五险一金等社保相关报表。未检测到个税文件时不报个税。</p>
     </div>
 
     <div v-if="generateResult" class="result-panel generated" :class="{ failed: !generateResult.ok }">
@@ -1683,6 +1631,7 @@ function isCustomStyledSheet(name: string): boolean {
                 text
                 type="warning"
                 :loading="archivingId === row.id"
+                :disabled="!canArchiveHistoryRun(row)"
                 @click="archiveHistoryRun(row)"
               >月结</el-button>
               <el-button
@@ -1803,7 +1752,7 @@ function isCustomStyledSheet(name: string): boolean {
             <el-button
               :icon="FolderOpened"
               :loading="selectedHistoryRun ? archivingId === selectedHistoryRun.id : false"
-              :disabled="!selectedHistoryRun || Boolean(selectedHistoryRun.archivedAt)"
+              :disabled="!canArchiveHistoryRun(selectedHistoryRun)"
               @click="archiveHistoryRun(selectedHistoryRun)"
             >
               {{ selectedHistoryRun?.archivedAt ? '已月结' : '月结该月' }}
@@ -2185,7 +2134,6 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .process-mode-panel,
-.rule-note,
 .result-panel {
   max-width: none;
   margin-top: 16px;
@@ -2202,17 +2150,43 @@ function isCustomStyledSheet(name: string): boolean {
   gap: 16px;
 }
 
-.process-mode-panel strong,
-.rule-note strong {
+.process-mode-panel strong {
   color: var(--text);
   font-size: 14px;
 }
 
-.rule-note p {
-  margin: 8px 0 0;
-  color: var(--text-2);
+:global(.monthly-payroll-confirm-box) {
+  max-width: 620px;
+}
+
+:global(.payroll-confirm-summary) {
+  margin-bottom: 12px;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+:global(.payroll-confirm-table) {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 13px;
-  line-height: 1.6;
+}
+
+:global(.payroll-confirm-table th),
+:global(.payroll-confirm-table td) {
+  padding: 8px 10px;
+  border: 1px solid #d8dee8;
+  text-align: left;
+  vertical-align: top;
+}
+
+:global(.payroll-confirm-table th) {
+  background: #f4f7fb;
+  color: #374151;
+  font-weight: 600;
+}
+
+:global(.payroll-confirm-table td) {
+  color: #4b5563;
 }
 
 .result-panel {
@@ -2940,7 +2914,6 @@ function isCustomStyledSheet(name: string): boolean {
   .month-overview,
   .monthly-grid,
   .process-mode-panel,
-  .rule-note,
   .result-panel,
   .report-toolbar,
   .report-tabs,

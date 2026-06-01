@@ -36,7 +36,7 @@ type LookupCtx = {
 export async function generateAnnualReportFromIntegrated(
   input: GenerateAnnualReportFromIntegratedInput
 ): Promise<GenerateAnnualReportFromIntegratedResult> {
-  const sourceWorksheet = getWorksheetByName('一体化在职')
+  const sourceWorksheet = getWorksheetByName('在职工资')
   const targetWorksheet = getWorksheetByName('工资年报')
   const source: SheetCtx = {
     table: tableNameOf(sourceWorksheet),
@@ -56,7 +56,7 @@ export async function generateAnnualReportFromIntegrated(
     month: tryFindColumnByName(sourceWorksheet, '月份'),
     batch: tryFindColumnByName(sourceWorksheet, '工资批次')
   })
-  if (rows.length === 0) throw new Error('一体化在职没有可生成工资年报的数据')
+  if (rows.length === 0) throw new Error('在职工资没有可生成工资年报的数据')
 
   const lookups = await loadLookups()
   const warnings = buildAnnualReportLookupWarnings(rows, source, lookups)

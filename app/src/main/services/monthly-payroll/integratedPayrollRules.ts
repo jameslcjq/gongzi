@@ -49,9 +49,9 @@ export const integratedActiveOtherDeductFields = [
 export const integratedSimplePayFields = ['住房补贴', '补发工资', '其他一']
 
 const integratedComputedWorksheetNames = new Set([
-  '一体化在职',
-  '一体化退休',
-  '一体化其他'
+  '在职工资',
+  '退休工资',
+  '其他工资'
 ])
 
 export type IntegratedComputedFieldSummary = {
@@ -121,10 +121,10 @@ export function applyIntegratedComputedFieldsToRow(
   row: Record<string, WorksheetRecordValue>,
   taxField: MonthlyPayrollTaxField
 ): boolean {
-  if (worksheetName === '一体化在职') {
+  if (worksheetName === '在职工资') {
     return applyIntegratedActiveComputedFields(columns, row, taxField)
   }
-  if (worksheetName === '一体化退休' || worksheetName === '一体化其他') {
+  if (worksheetName === '退休工资' || worksheetName === '其他工资') {
     return applyIntegratedSimpleComputedFields(columns, row)
   }
   return false
@@ -177,7 +177,7 @@ function computedFieldColumns(
   worksheetName: string,
   columns: WorksheetColumn[]
 ): Array<[string, string]> {
-  const names = worksheetName === '一体化在职'
+  const names = worksheetName === '在职工资'
     ? ['应发工资', '代扣合计', '实发合计']
     : ['应发工资小计', '实发合计']
   const byField = fieldColumnMap(columns)

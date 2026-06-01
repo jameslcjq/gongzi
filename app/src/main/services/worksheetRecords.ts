@@ -398,7 +398,7 @@ export function getViewCondition(worksheet: WorksheetMeta, view: string): string
 }
 
 function getIntegratedBatchViewCondition(worksheet: WorksheetMeta, view: string): string {
-  if (worksheet.name !== '一体化在职') return ''
+  if (worksheet.name !== '在职工资') return ''
   if (!view || view === '全部') return ''
   const batchCodeByView: Record<string, string> = {
     '工资(001)': '001',

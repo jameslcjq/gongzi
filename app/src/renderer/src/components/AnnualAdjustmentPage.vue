@@ -146,8 +146,8 @@ async function applyAdjustment() {
   if (changeCount > 0) {
     try {
       await ElMessageBox.confirm(
-        `将回写一体化在职 ${changeCount} 项差异。${manualCount ? `另有 ${manualCount} 项需人工判断，不会自动回写。` : ''}`,
-        '确认回写一体化在职',
+        `将回写在职工资 ${changeCount} 项差异。${manualCount ? `另有 ${manualCount} 项需人工判断，不会自动回写。` : ''}`,
+        '确认回写在职工资',
         {
           confirmButtonText: '确认回写',
           cancelButtonText: '只生成工资表',
@@ -429,7 +429,7 @@ async function pushAnnualAdjustmentToIntegrated() {
     </section>
 
     <section v-if="preview" class="annual-panel annual-wide">
-      <h2>一体化在职确认项</h2>
+      <h2>在职工资确认项</h2>
       <el-table :data="preview.integratedChanges" size="small" border max-height="260">
         <el-table-column prop="name" label="姓名" width="110" />
         <el-table-column prop="idCard" label="证件号码" width="190" />

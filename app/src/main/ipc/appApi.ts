@@ -299,8 +299,8 @@ export function registerAppIpc(): void {
       try {
         const [active, retired, other] = await Promise.all([
           loadIntegratedActiveAggregates(),
-          loadIntegratedSimpleAggregates('一体化退休'),
-          loadIntegratedSimpleAggregates('一体化其他')
+          loadIntegratedSimpleAggregates('退休工资'),
+          loadIntegratedSimpleAggregates('其他工资')
         ])
         return {
           ok: true,

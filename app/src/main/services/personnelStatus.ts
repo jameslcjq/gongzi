@@ -7,7 +7,7 @@ export const retiredPersonnelStatus = '退休'
 export const otherPersonnelStatus = '其他'
 export const transferredPersonnelStatus = '调出'
 
-const sourceWorksheetNames = new Set(['一体化在职', '一体化退休', '一体化其他'])
+const sourceWorksheetNames = new Set(['在职工资', '退休工资', '其他工资'])
 const budgetWorksheetNames = new Set(['预算在职', '预算退休', '预算其他'])
 const identityFieldNames = new Set([
   '证件号码*',

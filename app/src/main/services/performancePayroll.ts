@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { session, type Session } from 'electron'
 import * as XLSX from 'xlsx'
-import { getDataPath } from '../config/paths'
+import { getMonthlyOutputPath } from '../config/paths'
 import { readUnitSettings } from './unitSettings'
 import type {
   IntegratedHistorySalaryDataset,
@@ -148,7 +148,7 @@ export function generatePerformancePayroll(
   }
 
   const unitName = sanitizeFileName(input.unitName || input.first.agencyName || input.second.agencyName || '结果表')
-  const outputDir = getDataPath('绩效工资导出')
+  const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
   const filePath = join(
     outputDir,

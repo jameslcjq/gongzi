@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { basename, extname, join } from 'node:path'
 import * as XLSX from 'xlsx'
 import { failRule, okRule } from '../ruleResult'
 import type {
@@ -22,7 +22,7 @@ import {
   loadRetiredSummary,
   runDetailImports
 } from './monthlyPayrollDataLoaders'
-import { getDataPath } from '../../config/paths'
+import { getMonthlyOutputPath } from '../../config/paths'
 import {
   parseSalaryWorkbook,
   parseSocialSecurityWorkbook,
@@ -65,7 +65,7 @@ import {
   toChineseRmb
 } from './voucherSheet'
 import { sumSocialByCanonicalName, sumSocialByKeyword } from './socialSecuritySummary'
-import { getSalaryWorkbookPrintPageSummary } from './printSalaryViaExcel'
+import { getSalaryWorkbookPrintPageSummary, writeTaxToSalaryWorkbookViaExcel } from './printSalaryViaExcel'
 import { writeSalaryImportWorkbook } from './salaryImportWorkbook'
 import type {
   IntegratedActiveAggregates,
@@ -106,11 +106,14 @@ type MonthlyPayrollBusinessSummary = {
 function normalizeMonthlyPayrollInput(
   input?: MonthlyPayrollWorkflowInput
 ): MonthlyPayrollWorkflowInput {
+  const hasSalaryWorkbook = Boolean(input?.salaryWorkbookPath)
+  const hasSocialSecurityWorkbook = Boolean(input?.socialSecurityWorkbookPath)
   const normalized: MonthlyPayrollWorkflowInput = {
     ...(input ?? {}),
-    dataSourceMode: normalizeMonthlyPayrollDataSourceMode(input?.dataSourceMode)
+    dataSourceMode: hasSalaryWorkbook ? 'salary-workbook' : 'integrated',
+    processScope: hasSocialSecurityWorkbook ? 'salary-social' : 'salary'
   }
-  if (normalized.processScope === 'salary') {
+  if (!hasSocialSecurityWorkbook) {
     return { ...normalized, socialSecurityWorkbookPath: undefined }
   }
   return normalized
@@ -126,22 +129,7 @@ function isIntegratedDataSource(input: MonthlyPayrollWorkflowInput | undefined):
 }
 
 function missingSourceMessage(input: MonthlyPayrollWorkflowInput | undefined): string | null {
-  if (!input) return '月度工资报账需要先选择处理月份和数据来源。'
-  if (input.processScope === 'social') {
-    return input.socialSecurityWorkbookPath ? null : '只处理社保时需要放入社保未申报汇总文件。'
-  }
-  if (isIntegratedDataSource(input)) {
-    if (input.processScope === 'salary-social' && !input.socialSecurityWorkbookPath) {
-      return '工资+社保模式需要放入社保未申报汇总文件；如本月只生成工资报表，请选择“只报工资”。'
-    }
-    return null
-  }
-  if (!input.salaryWorkbookPath) {
-    return '工资表 Excel 兼容模式需要放入本月工资表；如改用三张表，请切换主数据来源。'
-  }
-  if (input.processScope === 'salary-social' && !input.socialSecurityWorkbookPath) {
-    return '工资+社保模式需要同时放入工资表和社保未申报汇总文件。'
-  }
+  if (!input) return '月度工资报账需要先选择处理月份。'
   return null
 }
 
@@ -173,16 +161,19 @@ function buildTaxByIdCardFromSummary(tax: TaxSummary | undefined): Record<string
 
 function applyTaxToSalarySummary(
   salary: SalarySummary,
-  taxByIdCard: Record<string, number>
+  taxByIdCard: Record<string, number>,
+  options: { clearTaxWhenMissing?: boolean } = {}
 ): SalarySummary {
-  if (Object.keys(taxByIdCard).length === 0) return salary
+  if (Object.keys(taxByIdCard).length === 0 && !options.clearTaxWhenMissing) return salary
 
   let oldTaxTotal = 0
   let nextTaxTotal = 0
   const activePeople = salary.activePeople.map((person) => {
     const currentTax = num(person.values['当月个人所得税'])
     const hasOverride = Object.prototype.hasOwnProperty.call(taxByIdCard, person.idCard)
-    const nextTax = hasOverride ? roundMoney(taxByIdCard[person.idCard]) : currentTax
+    const nextTax = hasOverride
+      ? roundMoney(taxByIdCard[person.idCard])
+      : options.clearTaxWhenMissing ? 0 : currentTax
     oldTaxTotal = roundMoney(oldTaxTotal + currentTax)
     nextTaxTotal = roundMoney(nextTaxTotal + nextTax)
     if (nextTax === currentTax) return person
@@ -334,13 +325,14 @@ export async function preprocessMonthlyPayroll(
     const salary = input.salaryWorkbookPath
       ? applyTaxToSalarySummary(
           await parseSalaryWorkbook(input.salaryWorkbookPath),
-          taxByIdCard
+          taxByIdCard,
+          { clearTaxWhenMissing: !tax }
         )
       : undefined
     await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
     const [integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
-      recomputeIntegratedOtherLikeWorksheet('一体化其他'),
-      recomputeIntegratedOtherLikeWorksheet('一体化退休')
+      recomputeIntegratedOtherLikeWorksheet('其他工资'),
+      recomputeIntegratedOtherLikeWorksheet('退休工资')
     ])
 
     await runDetailImports(input, salary)
@@ -351,7 +343,7 @@ export async function preprocessMonthlyPayroll(
           ok: false,
           affectedRows: 0,
           messages: [],
-          warnings: ['只处理社保时需要放入社保未申报汇总文件。']
+          warnings: ['社保每月必办，请先放入社保未申报汇总文件。']
         }
       }
       const [integratedPersonalInsurance, integratedActiveHousingFund] = await Promise.all([
@@ -359,7 +351,7 @@ export async function preprocessMonthlyPayroll(
         loadIntegratedActiveHousingFund()
       ])
       const activePaySummary = isIntegratedDataSource(input)
-        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard)
+        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
         : salary ? await summarizeIntegratedActive(taxByIdCard) : undefined
       const insuranceCheck = buildPersonalInsuranceCheck(
         socialSecurity,
@@ -368,14 +360,14 @@ export async function preprocessMonthlyPayroll(
       )
       const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
       const detailMessages = [
-        `报账模式：只处理社保${tax ? '，包含个税扣款' : '，不处理个税'}`,
+        `报账模式：社保补齐处理${tax ? '，包含个税扣款' : '，不处理个税'}`,
         salary
           ? '工资表：已读取，仅用于同时生成工资凭证；本次不生成工资相关打印报表'
           : '工资表：未检测到，本次只能生成社保凭证',
         `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`,
-        `住房公积金：按${salary ? '工资表/一体化在职' : '一体化在职'}当前公积金合计 ${formatMoney(salary ? resolveHousingFund(salary, integratedActiveHousingFund) : integratedActiveHousingFund)} 生成个人和单位公积金`,
+        `住房公积金：按${salary ? '工资表/在职工资' : '在职工资'}当前公积金合计 ${formatMoney(salary ? resolveHousingFund(salary, integratedActiveHousingFund) : integratedActiveHousingFund)} 生成个人和单位公积金`,
         tax
-          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}${isIntegratedDataSource(input) && activePaySummary ? `，已写入一体化在职「${taxField}」 ${activePaySummary.taxApplied} 人` : ''}`
+          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}${isIntegratedDataSource(input) && activePaySummary ? `，已写入在职工资「${taxField}」 ${activePaySummary.taxApplied} 人` : ''}`
           : '个税：未检测到个税文件，本次不报个税',
         ...insuranceCheck.messages
       ]
@@ -396,7 +388,7 @@ export async function preprocessMonthlyPayroll(
 
     if (isIntegratedDataSource(input)) {
       const [integratedActiveRecompute, integratedPersonalInsurance, integratedActiveHousingFund] = await Promise.all([
-        applyTaxAndRecomputeIntegratedActive(taxByIdCard),
+        applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax }),
         loadIntegratedActivePersonalInsuranceTotals(),
         loadIntegratedActiveHousingFund()
       ])
@@ -404,20 +396,20 @@ export async function preprocessMonthlyPayroll(
       const socialTotal = socialSecurity
         ? roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
         : 0
-      const mode = socialSecurity ? '工资+社保' : '只报工资'
+      const mode = socialSecurity ? '工资+社保' : '工资阶段结果'
       const detailMessages = [
-        `主数据来源：工资数据三张表；工资表 Excel${salary ? '仅作为附件、页数统计和辅助核对' : '未参与本次金额计算'}`,
+        `权威来源：本地在职工资、退休工资、其他工资；工资表 Excel${salary ? '仅作为附件、页数统计和辅助核对' : '未参与本次金额计算'}`,
         `报账模式：${mode}${tax ? '，包含个税扣款' : '，不处理个税'}`,
-        `一体化在职已按公式重算 ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
-        `一体化其他 ${integratedOtherPaySummary.rowCount} 人：实发 ${formatMoney(integratedOtherPaySummary.actualPayTotal)}`,
-        `一体化退休 ${integratedRetiredPaySummary.rowCount} 人：实发 ${formatMoney(integratedRetiredPaySummary.actualPayTotal)}`,
+        `在职工资已按公式重算 ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
+        `其他工资 ${integratedOtherPaySummary.rowCount} 人：实发 ${formatMoney(integratedOtherPaySummary.actualPayTotal)}`,
+        `退休工资 ${integratedRetiredPaySummary.rowCount} 人：实发 ${formatMoney(integratedRetiredPaySummary.actualPayTotal)}`,
         socialSecurity
           ? `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`
-          : '社保：未检测到社保文件，本次不生成社保相关报账；社保属于每月必办，请补齐文件后单独处理社保',
-        `住房公积金：按一体化在职当前公积金合计 ${formatMoney(integratedActiveHousingFund)} 生成个人和单位公积金`,
+          : '社保：未检测到社保文件，本次只生成工资阶段结果；补齐社保后重新点击工资报账即可生成最终结果，未补齐前不能月结',
+        `住房公积金：按在职工资当前公积金合计 ${formatMoney(integratedActiveHousingFund)} 生成个人和单位公积金`,
         tax
-          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，已写入一体化在职「${taxField}」 ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
-          : '个税：未检测到个税文件，本次按一体化在职现有个税字段重算',
+          ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，已写入在职工资「${taxField}」 ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
+          : '个税：未检测到个税文件，本次不报个税',
         ...insuranceCheck.messages
       ]
       const warnings = [
@@ -425,13 +417,13 @@ export async function preprocessMonthlyPayroll(
           ? [`个税表有 ${tax.missingIdCards.length} 行缺少身份证号，需要人工核对`]
           : []),
         ...(integratedActiveRecompute.taxMissing > 0
-          ? [`个税表有 ${integratedActiveRecompute.taxMissing} 人在一体化在职中找不到对应记录，未回写`]
+          ? [`个税表有 ${integratedActiveRecompute.taxMissing} 人在在职工资中找不到对应记录，未回写`]
           : []),
         ...insuranceCheck.warnings
       ]
       const messages = warnings.length === 0
         ? [
-            '主数据来源：工资数据三张表',
+            '权威来源：本地在职工资、退休工资、其他工资',
             ...buildBusinessSummaryMessages(buildBusinessSummary({
               active: integratedActiveRecompute,
               survivor: integratedOtherPaySummary,
@@ -458,7 +450,7 @@ export async function preprocessMonthlyPayroll(
           ok: false,
           affectedRows: 0,
           messages: [],
-          warnings: ['只处理社保时需要放入社保未申报汇总文件。']
+          warnings: ['社保每月必办，请先放入社保未申报汇总文件。']
         }
       }
       const [integratedPersonalInsurance, integratedActiveHousingFund] = await Promise.all([
@@ -468,9 +460,9 @@ export async function preprocessMonthlyPayroll(
       const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, undefined, integratedPersonalInsurance)
       const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
       const messages = [
-        `报账模式：只处理社保${tax ? '，包含个税扣款' : '，不处理个税'}`,
+        `报账模式：社保补齐处理${tax ? '，包含个税扣款' : '，不处理个税'}`,
         `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类，合计 ${formatMoney(socialTotal)}`,
-        `住房公积金：按一体化在职当前公积金合计 ${formatMoney(integratedActiveHousingFund)} 生成个人和单位公积金`,
+        `住房公积金：按在职工资当前公积金合计 ${formatMoney(integratedActiveHousingFund)} 生成个人和单位公积金`,
         tax
           ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}`
           : '个税：未检测到个税文件，本次只处理五险一金',
@@ -496,13 +488,13 @@ export async function preprocessMonthlyPayroll(
         workflowName,
         salary.activePeople.length + salary.survivorPeople.length + (socialSecurity?.rowCount ?? 0) + (tax?.rows.length ?? 0),
         [
-          `发现工资表与一体化工资表有 ${writeBackPlan.changes.length} 项金额差异可自动回写，涉及 ${writeBackPreview.personCount} 人`,
+          `发现工资表与本地工资数据有 ${writeBackPlan.changes.length} 项金额差异可自动回写，涉及 ${writeBackPreview.personCount} 人`,
           ...writeBackPreview.examples.map((item) => `可回写：${item}`),
           ...(writeBackPlan.manual.length > 0
             ? [`另有 ${writeBackPlan.manual.length} 项差异需要人工判断，自动回写后会继续复核`]
             : [])
         ],
-        ['请确认是否将工资表中的可回写金额同步到一体化工资表；确认后系统会自动复核，仍有差异则停止生成报表。']
+        ['请确认是否将工资表中的可回写金额同步到本地工资数据；确认后系统会自动复核，仍有差异则停止生成报表。']
       )
       result.monthlyPayrollWriteBack = writeBackPreview
       return result
@@ -513,7 +505,7 @@ export async function preprocessMonthlyPayroll(
       const appliedPlan = writeBackPlan
       await applyIntegratedWriteBackPlan(writeBackPlan)
       integratedActiveRecompute = activeWriteBackPlan.changes.length > 0
-        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard)
+        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
         : await summarizeIntegratedActive(taxByIdCard)
       activeWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
       survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
@@ -524,8 +516,8 @@ export async function preprocessMonthlyPayroll(
     }
 
     const [activeCompare, survivorCompare, integratedPersonalInsurance] = await Promise.all([
-      comparePayrollPeople('公办在职', salary.activePeople, '一体化在职', getActiveCompareFields(taxField)),
-      comparePayrollPeople('遗补', salary.survivorPeople, '一体化其他', survivorCompareFields),
+      comparePayrollPeople('公办在职', salary.activePeople, '在职工资', getActiveCompareFields(taxField)),
+      comparePayrollPeople('遗补', salary.survivorPeople, '其他工资', survivorCompareFields),
       loadIntegratedActivePersonalInsuranceTotals()
     ])
     const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
@@ -534,7 +526,7 @@ export async function preprocessMonthlyPayroll(
     const actualPayDiff = roundMoney(salaryActualPay - integratedActiveRecompute.actualPayTotal)
     const actualPayMatched = Math.abs(actualPayDiff) < 0.01
 
-    const mode = socialSecurity ? '工资+社保' : '只报工资'
+    const mode = socialSecurity ? '工资+社保' : '工资阶段结果'
     const detailMessages = [
       `报账模式：${mode}${tax ? '，包含个税扣款' : '，不处理个税'}`,
       `工资表：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`,
@@ -542,17 +534,17 @@ export async function preprocessMonthlyPayroll(
       formatCompareMessage(survivorCompare),
       socialSecurity
         ? `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类`
-        : '社保：未检测到社保文件，本次不生成社保相关报账；社保属于每月必办，请补齐文件后单独处理社保',
+        : '社保：未检测到社保文件，本次只生成工资阶段结果；补齐社保后重新点击工资报账即可生成最终结果，未补齐前不能月结',
       tax
-        ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，${writeBackPreview.applied ? `已回写到一体化在职「${taxField}」` : `已按一体化在职「${taxField}」核对`} ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
+        ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，${writeBackPreview.applied ? `已回写到在职工资「${taxField}」` : `已按在职工资「${taxField}」核对`} ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
         : '个税：未检测到个税文件，本次跳过个税扣款和补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
       ...(writeBackPreview.applied
-        ? [`工资表金额差异已自动回写 ${writeBackPreview.syncableCount} 项，复核后${activeCompare.changed === 0 ? '一体化在职已一致' : `仍有 ${activeCompare.changed} 人存在差异`}`]
+        ? [`工资表金额差异已自动回写 ${writeBackPreview.syncableCount} 项，复核后${activeCompare.changed === 0 ? '在职工资已一致' : `仍有 ${activeCompare.changed} 人存在差异`}`]
         : []),
-      `${writeBackPreview.applied ? '一体化在职已按公式重算' : '一体化在职当前汇总'} ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
+      `${writeBackPreview.applied ? '在职工资已按公式重算' : '在职工资当前汇总'} ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
       actualPayMatched
-        ? `实发核对：工资表 ${formatMoney(salaryActualPay)} 与 一体化在职 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 一致`
-        : `实发核对：工资表 ${formatMoney(salaryActualPay)} 与 一体化在职 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 差 ${formatMoney(actualPayDiff)}`,
+        ? `实发核对：工资表 ${formatMoney(salaryActualPay)} 与 在职工资 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 一致`
+        : `实发核对：工资表 ${formatMoney(salaryActualPay)} 与 在职工资 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 差 ${formatMoney(actualPayDiff)}`,
       ...insuranceCheck.messages
     ]
     const warnings = [
@@ -566,14 +558,14 @@ export async function preprocessMonthlyPayroll(
         ? [`个税表有 ${tax.missingIdCards.length} 行缺少身份证号，需要人工核对`]
         : []),
       ...(integratedActiveRecompute.taxMissing > 0
-        ? [`个税表有 ${integratedActiveRecompute.taxMissing} 人在一体化在职中找不到对应记录，未回写`]
+        ? [`个税表有 ${integratedActiveRecompute.taxMissing} 人在在职工资中找不到对应记录，未回写`]
         : []),
       ...(writeBackPreview.applied && activeCompare.changed > 0
-        ? ['自动回写后工资表与一体化在职仍有差异，请人工介入；本次不会自动生成报表']
+        ? ['自动回写后工资表与在职工资仍有差异，请人工介入；本次不会自动生成报表']
         : []),
       ...(actualPayMatched
         ? []
-        : [`工资表实发合计 ${formatMoney(salaryActualPay)} 与一体化在职实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 不一致（差 ${formatMoney(actualPayDiff)}），请先排查后再生成报表`]),
+        : [`工资表实发合计 ${formatMoney(salaryActualPay)} 与在职工资实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 不一致（差 ${formatMoney(actualPayDiff)}），请先排查后再生成报表`]),
       ...insuranceCheck.warnings
     ]
     const messages = warnings.length === 0
@@ -632,7 +624,9 @@ export async function generateMonthlyPayrollReports(
         ? parseTaxWorkbook(input.taxWorkbookPath)
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
-    const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
+    const salary = rawSalary
+      ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax), { clearTaxWhenMissing: !tax })
+      : undefined
     await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
     const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
     const useIntegratedDataSource = dataSourceMode === 'integrated'
@@ -659,12 +653,12 @@ export async function generateMonthlyPayrollReports(
     const messages = [
       input.processScope === 'social'
         ? useIntegratedDataSource
-          ? '社保报账汇总已生成预览：工资凭证按工资数据三张表生成，本次不生成工资打印报表'
+          ? '社保报账汇总已生成预览：工资凭证按本地工资数据生成，本次不生成工资打印报表'
           : salary
           ? '社保报账汇总已生成预览：工资表仅用于同时生成工资凭证，本次不生成工资打印报表'
           : '社保报账汇总已生成预览：本次只生成五险一金相关凭证'
         : useIntegratedDataSource
-        ? '工资报账汇总已生成预览：主数据来源为工资数据三张表'
+        ? '工资报账汇总已生成预览：权威来源为本地在职工资、退休工资、其他工资'
         : salary
         ? `工资报账汇总已生成预览：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`
         : '社保报账汇总已生成预览：本次只处理五险一金',
@@ -677,14 +671,14 @@ export async function generateMonthlyPayrollReports(
         : []),
       socialSecurity
         ? `社保汇总：${socialSecurity.rowCount} 行，合计 ${formatMoney(socialTotal)}；${socialItems.join('；')}`
-        : '社保汇总：未检测到社保文件，本次不生成社保报账；社保属于每月必办，请补齐文件后单独处理社保',
+        : '社保汇总：未检测到社保文件，本次只生成工资阶段结果；补齐社保后重新点击工资报账即可生成最终结果，未补齐前不能月结',
       tax
         ? `个税汇总：${tax.rows.length} 人，合计 ${formatMoney(taxTotal)}，扣税金额将在补发工资文件中按人写入岗位工资列为负数`
         : useIntegratedDataSource
-        ? '个税汇总：未检测到个税文件，本次按一体化在职现有个税字段生成'
+        ? '个税汇总：未检测到个税文件，本次不报个税'
         : '个税汇总：未检测到个税文件，本次不生成扣税补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
       useIntegratedDataSource
-        ? '补发工资：按一体化在职当前补发工资和个税字段生成'
+        ? '补发工资：按在职工资当前补发工资和个税字段生成'
         : salaryBackpayRows.length
         ? `工资表补发：${salaryBackpayRows.length} 人，基本补发写入岗位工资列，绩效补发写入薪级工资列`
         : '工资表补发：未检测到基本补发或绩效补发',
@@ -730,13 +724,15 @@ export async function generateMonthlyPayrollReportView(
   const taxField = monthlyPayrollSettings.taxField
   const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
   const useIntegratedDataSource = dataSourceMode === 'integrated'
-  const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
-  await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
   const taxByIdCard = buildTaxByIdCardFromSummary(tax)
+  const salary = rawSalary
+    ? applyTaxToSalarySummary(rawSalary, taxByIdCard, { clearTaxWhenMissing: !tax })
+    : undefined
+  await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
   const [integratedActiveSummary, integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
-    summarizeIntegratedActive(taxByIdCard),
-    recomputeIntegratedOtherLikeWorksheet('一体化其他'),
-    recomputeIntegratedOtherLikeWorksheet('一体化退休')
+    applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax }),
+    recomputeIntegratedOtherLikeWorksheet('其他工资'),
+    recomputeIntegratedOtherLikeWorksheet('退休工资')
   ])
 
   const [
@@ -754,8 +750,8 @@ export async function generateMonthlyPayrollReportView(
     readUnitSettings(),
     loadIntegratedActiveHousingFund(),
     loadIntegratedActiveAggregates(),
-    loadIntegratedSimpleAggregates('一体化退休'),
-    loadIntegratedSimpleAggregates('一体化其他'),
+    loadIntegratedSimpleAggregates('退休工资'),
+    loadIntegratedSimpleAggregates('其他工资'),
     loadIntegratedActiveBackpayRows()
   ])
   const integratedAggregates = {
@@ -796,13 +792,21 @@ export async function generateMonthlyPayrollReportView(
   const shouldGenerateSalaryImport = Boolean(
     salary && !useIntegratedDataSource && input.processScope !== 'social' && salary.activePeople.length > 0
   )
+  const shouldWriteTaxSalaryWorkbook = Boolean(
+    salary && !useIntegratedDataSource && tax && input.salaryWorkbookPath
+  )
   const previousRun = await findSameMonthlyPayrollRun(
     period.year,
     period.month,
     reportFingerprint,
     dataSourceMode
   )
-  if (previousRun && (!shouldGenerateSalaryImport || previousRun.salaryImportPath)) {
+  if (
+    previousRun &&
+    (!shouldGenerateSalaryImport || previousRun.salaryImportPath) &&
+    (!shouldWriteTaxSalaryWorkbook ||
+      Boolean(previousRun.sourceSalaryPath && previousRun.sourceSalaryPath !== input.salaryWorkbookPath))
+  ) {
     return {
       ok: true,
       message: '本次报表内容无变化，未重新生成文件，已沿用上次输出结果',
@@ -818,16 +822,19 @@ export async function generateMonthlyPayrollReportView(
     }
   }
 
-  const outputDir = getDataPath('工资报账输出')
+  const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
-  const insuranceImportPath = socialSecurity ? join(outputDir, `保险导入_${stamp}.xlsx`) : undefined
-  const salaryImportPath = shouldGenerateSalaryImport ? join(outputDir, `工资导入_${stamp}.xls`) : undefined
+  const sourceSalaryPath = shouldWriteTaxSalaryWorkbook && input.salaryWorkbookPath
+    ? await createTaxWrittenSalaryWorkbookCopy(input.salaryWorkbookPath, taxByIdCard, stamp)
+    : input.salaryWorkbookPath ?? null
+  const insuranceImportPath = socialSecurity ? join(outputDir, `工资报账_保险导入_${stamp}.xlsx`) : undefined
+  const salaryImportPath = shouldGenerateSalaryImport ? join(outputDir, `工资报账_工资导入_${stamp}.xls`) : undefined
   const backpaySheet = sheets.find((sheet) => sheet.name === '补发工资')
   const hasBackpayRows = Boolean(backpaySheet?.rows.length)
-  const payrollBackpayPath = hasBackpayRows ? join(outputDir, `补发工资_${stamp}.xls`) : undefined
+  const payrollBackpayPath = hasBackpayRows ? join(outputDir, `工资报账_补发工资_${stamp}.xls`) : undefined
   const voucherSheet = sheets.find((sheet) => sheet.name === '凭证')
-  const voucherImportPath = voucherSheet ? join(outputDir, `凭证_${stamp}.xlsx`) : undefined
+  const voucherImportPath = voucherSheet ? join(outputDir, `工资报账_凭证_${stamp}.xlsx`) : undefined
 
   if (insuranceImportPath) {
     const insuranceSheet = sheets.find((sheet) => sheet.name === '保险导入')
@@ -884,9 +891,7 @@ export async function generateMonthlyPayrollReportView(
     withholdingTotal: useIntegratedDataSource
       ? integratedActiveAggregates.五险一金合计
       : reportSalary ? num(reportSalary.active['五险一金']) : 0,
-    taxTotal: useIntegratedDataSource
-      ? integratedActiveAggregates.个税
-      : tax?.totalTax ?? (reportSalary ? num(reportSalary.active['个税']) : 0),
+    taxTotal: tax ? (useIntegratedDataSource ? integratedActiveAggregates.个税 : tax.totalTax) : 0,
     actualPay: roundMoney(
       businessSummary.activeActualPay +
         businessSummary.survivorActualPay +
@@ -896,7 +901,7 @@ export async function generateMonthlyPayrollReportView(
     survivorActualPay: businessSummary.survivorActualPay,
     retiredHousingActualPay: businessSummary.retiredHousingActualPay,
     retiredHousing: reportRetired.housing,
-    sourceSalaryPath: input.salaryWorkbookPath ?? null,
+    sourceSalaryPath,
     sourceSocialPath: input.socialSecurityWorkbookPath ?? null,
     sourceTaxPath: input.taxWorkbookPath ?? null,
     insuranceImportPath: insuranceImportPath ?? null,
@@ -959,7 +964,7 @@ function buildReportSheets(
   const socialTotal = roundMoney(socialRows.reduce((sum, [, amount]) => sum + amount, 0))
   const taxTotal = tax?.totalTax ?? 0
   active['住房公积金'] = resolveHousingFund(salary, integratedActiveHousingFund)
-  active['个税'] = tax ? taxTotal : num(active['个税'])
+  active['个税'] = tax ? taxTotal : 0
   const salaryTotal = num(active['应发工资合计'])
   const survivorTotal = num(survivor['合计'])
   const retiredHousing = retired.housing
@@ -1020,7 +1025,7 @@ function buildReportSheets(
   const titleAuto = `${unit.unitFullName}${payrollMonth}工资发放汇总表`
   const subtitleLeft = '       （自动生成表）                单位：元'
   const subtitleRight = '（自动生成表）                            单位：元'
-  // 自动生成 / 报销凭证 各行金额：useIntegrated 时全部走 一体化 三表汇总
+  // 自动生成 / 报销凭证 各行金额：useIntegrated 时全部走本地三张工资表汇总
   const housing = useIntegrated ? integratedActive!.住房补贴 : num(active['住房补贴'])
   const teachingAge = useIntegrated ? integratedActive!.教龄津贴 : num(active['教龄津贴'])
   const traffic = useIntegrated ? integratedActive!.交通补贴 : num(active['交通补贴'])
@@ -1028,7 +1033,7 @@ function buildReportSheets(
   const ruralTotal = useIntegrated
     ? integratedActive!.其他一
     : roundMoney(num(active['乡镇补贴']) + num(active['边远乡镇补贴']))
-  // 自动生成中的"基本工资"=一体化在职(岗位+薪级) - 个人代扣(不含个税)；其它项保持原口径
+  // 自动生成中的"基本工资"=在职工资(岗位+薪级) - 个人代扣(不含个税)；其它项保持原口径
   const autoActiveInsuranceWithoutTax = useIntegrated
     ? roundMoney(
         integratedActive!.养老保险 +
@@ -1141,7 +1146,7 @@ function buildReportSheets(
     titleRow(payrollSummaryFooter)
   ]
 
-  // 报销凭证 C1 行：useIntegrated 时全部用 一体化口径
+  // 报销凭证 C1 行：useIntegrated 时全部用本地工资数据口径
   const voucherReimburseTotal = useIntegrated ? salaryBudgetGrandTotal : salaryReimburseTotal
   const voucherWithholding = useIntegrated ? autoActiveInsurance : activeInsurance
   const voucherActualPay = useIntegrated
@@ -1397,7 +1402,7 @@ function buildReportSheets(
       actualPay: roundMoney(retiredHousingPeople.reduce((s, r) => s + r.actualPay, 0))
     }
     sheets.push({
-      name: '一体化退休',
+      name: '退休工资',
       columns: gridColumns(7),
       showColumnHeader: false,
       columnWidths: [6, 12, 22, 12, 12, 14, 14],
@@ -1452,7 +1457,7 @@ async function getGeneratedSalaryPrintSummary(
 }
 
 function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): number {
-  const sheet = sheets.find((item) => item.name === '一体化退休')
+  const sheet = sheets.find((item) => item.name === '退休工资')
   if (!sheet) return 0
   if (sheet.rows.length === 0) return 0
   if (sheet.rows.length <= 3) return 1
@@ -1490,7 +1495,7 @@ function buildSocialOnlyReportSheets(
   salary?: SalarySummary,
   retired: RetiredSummary = { count: 0, housing: 0 }
 ): MonthlyPayrollReportSheet[] {
-  if (!socialSecurity) throw new Error('只处理社保时需要放入社保未申报汇总文件')
+  if (!socialSecurity) throw new Error('生成社保报账需要放入社保未申报汇总文件')
 
   const today = new Date()
   const payrollMonth = `${today.getFullYear()}年${today.getMonth() + 1}月`
@@ -1502,7 +1507,7 @@ function buildSocialOnlyReportSheets(
   active['住房公积金'] = salary
     ? resolveHousingFund(salary, integratedActiveHousingFund)
     : roundMoney(integratedActiveHousingFund)
-  const activeTax = tax?.totalTax ?? num(active['个税'])
+  const activeTax = tax?.totalTax ?? 0
   active['个税'] = activeTax
   const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, amount) => sum + amount, 0))
   const insuranceVoucherTotal = roundMoney(socialTotal + activeTax + num(active['住房公积金']) * 2)
@@ -1782,7 +1787,7 @@ function buildPersonalInsuranceCheck(
   const salaryDiffs = salaryTotals
     ? diffPersonalInsuranceTotals(social, salaryTotals, '工资表', { includeHousing: false })
     : []
-  const integratedDiffs = diffPersonalInsuranceTotals(social, integrated, '一体化在职', { includeHousing: false })
+  const integratedDiffs = diffPersonalInsuranceTotals(social, integrated, '在职工资', { includeHousing: false })
   const socialFourTotal = roundMoney(social.pension + social.annuity + social.medical + social.unemployment)
   const salaryFourTotal = salaryTotals
     ? roundMoney(salaryTotals.pension + salaryTotals.annuity + salaryTotals.medical + salaryTotals.unemployment)
@@ -1792,29 +1797,29 @@ function buildPersonalInsuranceCheck(
   )
   const messages = [
     salaryTotals
-      ? `个人四险核对：社保文件四项合计 ${formatMoney(socialFourTotal)}，工资表 ${formatMoney(salaryFourTotal)}，一体化在职 ${formatMoney(integratedFourTotal)}`
-      : `个人四险核对：社保文件四项合计 ${formatMoney(socialFourTotal)}，一体化在职 ${formatMoney(integratedFourTotal)}`
+      ? `个人四险核对：社保文件四项合计 ${formatMoney(socialFourTotal)}，工资表 ${formatMoney(salaryFourTotal)}，在职工资 ${formatMoney(integratedFourTotal)}`
+      : `个人四险核对：社保文件四项合计 ${formatMoney(socialFourTotal)}，在职工资 ${formatMoney(integratedFourTotal)}`
   ]
   // 公积金双方对比（社保 XLS 没有公积金数据）
   const housingDiff = salaryTotals ? roundMoney(salaryTotals.housing - integrated.housing) : 0
   if (salaryTotals) {
     messages.push(
-      `公积金个人核对：工资表 ${formatMoney(salaryTotals.housing)}，一体化在职 ${formatMoney(integrated.housing)}` +
+      `公积金个人核对：工资表 ${formatMoney(salaryTotals.housing)}，在职工资 ${formatMoney(integrated.housing)}` +
         (Math.abs(housingDiff) < 0.01 ? '（一致）' : `，差额 ${formatMoney(housingDiff)}`)
     )
   }
   const warnings = [
     ...(salaryDiffs.length ? [`社保个人四险与工资表不一致：${salaryDiffs.join('；')}`] : []),
-    ...(integratedDiffs.length ? [`社保个人四险与一体化在职不一致：${integratedDiffs.join('；')}`] : []),
+    ...(integratedDiffs.length ? [`社保个人四险与在职工资不一致：${integratedDiffs.join('；')}`] : []),
     ...(salaryTotals && Math.abs(housingDiff) >= 0.01
-      ? [`公积金个人与一体化在职不一致：差额 ${formatMoney(housingDiff)}`]
+      ? [`公积金个人与在职工资不一致：差额 ${formatMoney(housingDiff)}`]
       : [])
   ]
   if (warnings.length === 0) {
     messages.push(
       salaryTotals
-        ? '个人五险一金核对：社保文件、工资表、一体化在职金额一致'
-        : '个人四险核对：社保文件与一体化在职金额一致'
+        ? '个人五险一金核对：社保文件、工资表、在职工资金额一致'
+        : '个人四险核对：社保文件与在职工资金额一致'
     )
   }
   return { messages, warnings }
@@ -1945,6 +1950,25 @@ function timestamp(): string {
   const date = new Date()
   const pad = (value: number): string => String(value).padStart(2, '0')
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+async function createTaxWrittenSalaryWorkbookCopy(
+  salaryWorkbookPath: string,
+  taxByIdCard: Record<string, number>,
+  stamp: string
+): Promise<string> {
+  if (Object.keys(taxByIdCard).length === 0) return salaryWorkbookPath
+  const outputDir = getMonthlyOutputPath()
+  mkdirSync(outputDir, { recursive: true })
+  const extension = extname(salaryWorkbookPath) || '.xlsx'
+  const baseName = basename(salaryWorkbookPath, extension).replace(/[<>:"/\\|?*]+/g, '_') || '工资表'
+  const targetPath = join(outputDir, `工资报账_工资表已写个税_${stamp}_${baseName}${extension}`)
+  copyFileSync(salaryWorkbookPath, targetPath)
+  await writeTaxToSalaryWorkbookViaExcel({
+    salaryWorkbookPath: targetPath,
+    taxByIdCard
+  })
+  return targetPath
 }
 
 function dateStamp(): string {

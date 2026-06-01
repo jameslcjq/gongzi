@@ -32,7 +32,7 @@ export async function writeBackNewHousingSubsidyToRetired(): Promise<RuleResult>
 
 async function calculateRetiredHousingSubsidy(): Promise<RuleResult> {
   const source = getSheetCtx('人员明细导出')
-  const retired = getSheetCtx('一体化退休')
+  const retired = getSheetCtx('退休工资')
   const target = getSheetCtx('新房补')
 
   const sourceColumns = {
@@ -104,7 +104,7 @@ async function calculateRetiredHousingSubsidy(): Promise<RuleResult> {
           lookupTable: retired.worksheet.name,
           lookupKey: '证件号码',
           lookupValue: idCard,
-          reason: '一体化退休中未找到该证件号码'
+          reason: '退休工资中未找到该证件号码'
         })
         continue
       }
@@ -134,7 +134,7 @@ async function calculateRetiredHousingSubsidy(): Promise<RuleResult> {
         lookupTable: source.worksheet.name,
         lookupKey: '证件号码',
         lookupValue: idCard,
-        reason: '一体化退休中存在该人员，但人员明细导出中未找到该证件号码'
+        reason: '退休工资中存在该人员，但人员明细导出中未找到该证件号码'
       })
     }
 
@@ -146,23 +146,23 @@ async function calculateRetiredHousingSubsidy(): Promise<RuleResult> {
 
   const warnings = [
     ...(missingFromRetired > 0
-      ? [`${missingFromRetired} 人在人员明细导出中存在，但未在一体化退休中找到，已写入查询失败日志`]
+      ? [`${missingFromRetired} 人在人员明细导出中存在，但未在退休工资中找到，已写入查询失败日志`]
       : []),
     ...(missingFromSource > 0
-      ? [`${missingFromSource} 人在一体化退休中存在，但未在人员明细导出中找到，已写入查询失败日志`]
+      ? [`${missingFromSource} 人在退休工资中存在，但未在人员明细导出中找到，已写入查询失败日志`]
       : [])
   ]
   return okRule(
     workflowName,
     generated,
-    [`已按（待遇标准 + 一体化退休住房补贴）* 0.2 生成退休提租补贴，见分进元`],
+    [`已按（待遇标准 + 退休工资住房补贴）* 0.2 生成退休提租补贴，见分进元`],
     warnings
   )
 }
 
 async function writeBackRetiredHousingSubsidy(workflow: string): Promise<RuleResult> {
   const source = getSheetCtx('新房补')
-  const retired = getSheetCtx('一体化退休')
+  const retired = getSheetCtx('退休工资')
 
   const sourceColumns = {
     name: findColumnByName(source.worksheet, '姓名'),
@@ -210,7 +210,7 @@ async function writeBackRetiredHousingSubsidy(workflow: string): Promise<RuleRes
           lookupTable: retired.worksheet.name,
           lookupKey: '证件号码',
           lookupValue: idCard,
-          reason: '一体化退休中未找到该证件号码，无法回写退休房补'
+          reason: '退休工资中未找到该证件号码，无法回写退休房补'
         })
         continue
       }
@@ -237,7 +237,7 @@ async function writeBackRetiredHousingSubsidy(workflow: string): Promise<RuleRes
         lookupTable: source.worksheet.name,
         lookupKey: '证件号码',
         lookupValue: idCard,
-        reason: '一体化退休中存在该人员，但新房补中未生成对应记录'
+        reason: '退休工资中存在该人员，但新房补中未生成对应记录'
       })
     }
     await run(database, 'COMMIT')
@@ -246,8 +246,8 @@ async function writeBackRetiredHousingSubsidy(workflow: string): Promise<RuleRes
     throw error
   }
 
-  const warnings = failures > 0 ? [`${failures} 人未在一体化退休中找到，已写入查询失败日志`] : []
-  return okRule(workflow, updated, ['已将新房补的退休提租补贴回写到一体化退休住房补贴'], warnings)
+  const warnings = failures > 0 ? [`${failures} 人未在退休工资中找到，已写入查询失败日志`] : []
+  return okRule(workflow, updated, ['已将新房补的退休提租补贴回写到退休工资住房补贴'], warnings)
 }
 
 function getSheetCtx(name: string): SheetCtx {

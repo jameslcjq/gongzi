@@ -28,6 +28,18 @@ const amountColumns: ColumnDef[] = [
   { key: 'retiredRentSubsidy', names: ['退休人员提租补贴', '退休提租补贴'] }
 ]
 
+const requiredAmountColumnKeys = new Set([
+  'baseSalary',
+  'allowance',
+  'performance',
+  'rentSubsidy',
+  'pension',
+  'medical',
+  'otherInsurance',
+  'annuity',
+  'housingFund'
+])
+
 type HeaderDetection = {
   headerRowIndex: number
   budgetCodeCol?: number
@@ -53,7 +65,7 @@ export async function readPersonnelExpensePlanPrefill(
     return {
       ok: false,
       rows: [],
-      message: '监控文件夹未找到人员经费核对表'
+      message: '监控文件夹未找到必备列完整的人员经费核对表'
     }
   }
 
@@ -131,7 +143,10 @@ function detectPersonnelExpensePlanWorkbook(filePath: string): HeaderDetection |
       })
 
       const score = Object.keys(amountCols).length
-      if (score < 4) return
+      const missingRequired = Array.from(requiredAmountColumnKeys).filter(
+        (key) => amountCols[key] === undefined
+      )
+      if (missingRequired.length > 0) return
 
       const budgetCodeCol = cells.findIndex((cell) => cell.includes('预算代码'))
       const detected: HeaderDetection = {

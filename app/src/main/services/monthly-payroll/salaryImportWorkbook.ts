@@ -61,7 +61,7 @@ async function loadIntegratedActiveTemplate(): Promise<{
   headers: string[]
   values: Array<string | number>
 }> {
-  const worksheet = getWorksheetByName('一体化在职')
+  const worksheet = getWorksheetByName('在职工资')
   const columns: TemplateColumn[] = getWorksheetLocalColumns(worksheet).map((column) => ({
     header: salaryImportHeaderName(column.field.importSource || column.field.name),
     columnName: column.columnName,
@@ -76,7 +76,7 @@ async function loadIntegratedActiveTemplate(): Promise<{
     `SELECT * FROM ${tableNameOf(worksheet)} ORDER BY "id" DESC LIMIT 200`
   )
   if (!rows.length) {
-    throw new Error('一体化在职没有可作为工资导入模板的行，请先导入一体化在职数据')
+    throw new Error('在职工资没有可作为工资导入模板的行，请先导入在职工资数据')
   }
 
   const templateRow = selectTemplateRow(rows, batchColumn)

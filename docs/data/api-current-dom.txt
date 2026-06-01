@@ -34,7 +34,7 @@
 - generic: IP 白名单
 - generic: 在 IP 白名单内的 IP 来源地址才能发起请求。未设置则所有 IP 来源都可发起请求。
 - generic: 修改
-- generic: 一体化在职
+- generic: 在职工资
 - generic: 
 - generic: 筛选条件生成器
 - generic: 工作表ID：68d1363b4b3cd60c8a8cc89b工作表别名：设置

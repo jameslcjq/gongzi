@@ -133,13 +133,15 @@ export type IntegratedActiveRecomputeResult = {
 }
 
 export async function applyTaxAndRecomputeIntegratedActive(
-  taxByIdCard: Record<string, number>
+  taxByIdCard: Record<string, number>,
+  options: { clearTaxWhenMissing?: boolean } = {}
 ): Promise<IntegratedActiveRecomputeResult> {
   const settings = await readMonthlyPayrollSettings()
   const taxField = settings.taxField
   const inactiveTaxField = inactiveMonthlyPayrollTaxField(taxField)
   const hasTaxOverrides = Object.keys(taxByIdCard).length > 0
-  const worksheet = getWorksheetByName('一体化在职')
+  const shouldRewriteTax = hasTaxOverrides || Boolean(options.clearTaxWhenMissing)
+  const worksheet = getWorksheetByName('在职工资')
   const idCardCol = findColumnByName(worksheet, '证件号码')
   const taxCol = findColumnByName(worksheet, taxField)
   const inactiveTaxCol = findColumnByName(worksheet, inactiveTaxField)
@@ -192,7 +194,7 @@ export async function applyTaxAndRecomputeIntegratedActive(
         const receivesOverrideTax = overrideTax !== undefined && num(row.id) === num(taxCarrier.id)
         const taxAmount = overrideTax !== undefined
           ? (receivesOverrideTax ? overrideTax : 0)
-          : num(row[taxCol])
+          : options.clearTaxWhenMissing ? 0 : num(row[taxCol])
         const payable = payCols.reduce((sum, col) => sum + num(row[col]), 0)
         const deductionsSum = deductionCols.reduce((sum, col) => sum + num(row[col]), 0)
         const withholding = roundMoney(deductionsSum + taxAmount)
@@ -201,7 +203,7 @@ export async function applyTaxAndRecomputeIntegratedActive(
 
         const assignments = [
           `${quoteIdentifier(taxCol)} = ?`,
-          ...(hasTaxOverrides ? [`${quoteIdentifier(inactiveTaxCol)} = ?`] : []),
+          ...(shouldRewriteTax ? [`${quoteIdentifier(inactiveTaxCol)} = ?`] : []),
           `${quoteIdentifier(payableCol)} = ?`,
           `${quoteIdentifier(withholdingCol)} = ?`,
           `${quoteIdentifier(actualCol)} = ?`,
@@ -209,7 +211,7 @@ export async function applyTaxAndRecomputeIntegratedActive(
         ].join(', ')
         const params: unknown[] = [
           taxAmount,
-          ...(hasTaxOverrides ? [0] : []),
+          ...(shouldRewriteTax ? [0] : []),
           payableRounded,
           withholding,
           actual,
@@ -247,7 +249,7 @@ export async function applyTaxAndRecomputeIntegratedActive(
 export async function summarizeIntegratedActive(
   taxByIdCard: Record<string, number>
 ): Promise<IntegratedActiveRecomputeResult> {
-  const rows = await loadIntegratedRows('一体化在职')
+  const rows = await loadIntegratedRows('在职工资')
   const idCards = new Set(rows.map((row) => row.idCard))
   let taxApplied = 0
   let taxMissing = 0
@@ -265,7 +267,7 @@ export async function summarizeIntegratedActive(
 }
 
 export async function recomputeIntegratedOtherLikeWorksheet(
-  worksheetName: '一体化其他' | '一体化退休'
+  worksheetName: '其他工资' | '退休工资'
 ): Promise<IntegratedSimplePaySummary> {
   try {
     const worksheet = getWorksheetByName(worksheetName)
@@ -386,9 +388,9 @@ export async function buildIntegratedActiveWriteBackPlan(
   const taxField = settings.taxField
   return buildIntegratedWorksheetWriteBackPlan(
     sourcePeople,
-    '一体化在职',
+    '在职工资',
     getActiveCompareFields(taxField),
-    '一体化在职 缺少证件号码字段',
+    '在职工资 缺少证件号码字段',
     (targetFieldName) => targetFieldName === taxField ? '001' : undefined
   )
 }
@@ -398,9 +400,9 @@ export async function buildIntegratedOtherWriteBackPlan(
 ): Promise<IntegratedWriteBackPlan> {
   return buildIntegratedWorksheetWriteBackPlan(
     sourcePeople,
-    '一体化其他',
+    '其他工资',
     survivorCompareFields,
-    '一体化其他 缺少证件号码字段'
+    '其他工资 缺少证件号码字段'
   )
 }
 

@@ -13,7 +13,7 @@ import type {
   StatReportResult,
   StatReportRow
 } from '../../shared/types'
-import { getDataPath } from '../config/paths'
+import { getMonthlyOutputPath } from '../config/paths'
 
 const HR_TABLE = '人事信息'
 
@@ -836,11 +836,11 @@ export async function runStatReport(id: string): Promise<StatReportResult> {
 export async function exportStatReport(
   result: StatReportResult
 ): Promise<{ filePath: string; rowCount: number }> {
-  const exportDir = getDataPath('统计报表导出')
+  const exportDir = getMonthlyOutputPath()
   mkdirSync(exportDir, { recursive: true })
   const safeName = result.name.replace(/[\\/:*?"<>|]/g, '_')
   const stamp = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[\/\s:]/g, '').replace(/,/g, '')
-  const filePath = join(exportDir, `${safeName}_${stamp}.xlsx`)
+  const filePath = join(exportDir, `统计报表_${safeName}_${stamp}.xlsx`)
 
   const header = ['项目', ...result.columns.map((column) => column.label), '筛选条件']
   const rows = result.rows.map((item) => [

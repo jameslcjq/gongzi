@@ -2,13 +2,13 @@ import { app, dialog } from 'electron'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import * as XLSX from 'xlsx'
 import { all, getDatabase, run } from '../db/connection'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import { readUnitSettings } from './unitSettings'
 import { getWorksheetByName, tableNameOf } from './worksheetTable'
-import { getDataPath } from '../config/paths'
+import { getDataPath, getMonthlyOutputPath } from '../config/paths'
 import { parseSalaryWorkbook } from './monthly-payroll/monthlyPayrollParsers'
 import { writeSalaryImportWorkbook } from './monthly-payroll/salaryImportWorkbook'
 import type {
@@ -181,13 +181,13 @@ export async function applyAnnualAdjustment(
   const sources = await readAnnualSources(input)
   const prepared = prepareAnnualSources(sources)
   const integratedPlan = await buildAnnualIntegratedPlan(prepared.people)
-  const outputDir = getDataPath('社保个税输出')
+  const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
 
   const salaryOutputPath = join(
     outputDir,
-    `${safeFileStem(input.salaryWorkbookPath)}_年初调整_${stamp}${extname(input.salaryWorkbookPath) || '.xlsx'}`
+    `社保个税_${safeFileStem(input.salaryWorkbookPath)}_年初调整_${stamp}${extname(input.salaryWorkbookPath) || '.xlsx'}`
   )
   const salaryApplied = await writeAnnualValuesToSalaryWorkbook({
     salaryWorkbookPath: input.salaryWorkbookPath,
@@ -199,7 +199,7 @@ export async function applyAnnualAdjustment(
   const salaryImportWarnings: string[] = []
   try {
     const salaryImportSource = await parseSalaryWorkbook(salaryOutputPath)
-    const candidatePath = join(outputDir, `工资导入_年初调整_${stamp}.xls`)
+    const candidatePath = join(outputDir, `社保个税_工资导入_年初调整_${stamp}.xls`)
     await writeSalaryImportWorkbook(candidatePath, salaryImportSource)
     salaryImportPath = candidatePath
   } catch (error) {
@@ -230,7 +230,7 @@ export async function applyAnnualAdjustment(
 
   return {
     ok: true,
-    message: `已生成年初调整工资表，工资表写回 ${salaryApplied} 人${integratedApplied ? `，一体化在职回写 ${integratedApplied} 项` : ''}`,
+    message: `已生成年初调整工资表，工资表写回 ${salaryApplied} 人${integratedApplied ? `，在职工资回写 ${integratedApplied} 项` : ''}`,
     salaryOutputPath,
     salaryImportPath,
     housingDeclarationPath,
@@ -243,7 +243,7 @@ export async function applyAnnualAdjustment(
       ...salaryImportWarnings,
       ...buildMissingIntegratedWarnings(integratedPlan.missing),
       ...(integratedPlan.manual.length
-        ? [`一体化在职有 ${integratedPlan.manual.length} 项需要人工判断，未自动回写`]
+        ? [`在职工资有 ${integratedPlan.manual.length} 项需要人工判断，未自动回写`]
         : [])
     ]
   }
@@ -254,11 +254,11 @@ export async function generatePersonalTaxImportWorkbook(
 ): Promise<PersonalTaxImportGenerateResult> {
   if (input.incomeFields.length === 0) throw new Error('请至少选择一个计入本期收入的工资字段')
   const rows = await buildPersonalTaxRows(input.incomeFields)
-  if (rows.length === 0) throw new Error('一体化在职没有可导出的人员')
+  if (rows.length === 0) throw new Error('在职工资没有可导出的人员')
 
-  const outputDir = getDataPath('社保个税输出')
+  const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
-  const filePath = join(outputDir, `正常工资薪金所得_${timestamp()}.xls`)
+  const filePath = join(outputDir, `社保个税_正常工资薪金所得_${timestamp()}.xls`)
   await writePersonalTaxWorkbook(
     filePath,
     input.templateWorkbookPath ?? resolveBuiltinTemplatePath('正常工资薪金所得.xls'),
@@ -286,12 +286,12 @@ export async function exportSocialInsuranceBaseWorkbook(
 ): Promise<SocialInsuranceBaseExportResult> {
   if (input.baseFields.length === 0) throw new Error('请至少选择一个计入社保基数的工资字段')
   const rows = await buildSocialInsuranceBaseRows(input.baseFields)
-  if (rows.length === 0) throw new Error('一体化在职没有可导出的人员')
+  if (rows.length === 0) throw new Error('在职工资没有可导出的人员')
 
-  const outputDir = getDataPath('社保个税输出')
+  const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
   const stamp = timestamp()
-  const filePath = join(outputDir, `参保职工列表_社保基数_${stamp}.xlsx`)
+  const filePath = join(outputDir, `社保个税_参保职工列表_社保基数_${stamp}.xlsx`)
   await writeSocialInsuranceBaseWorkbook(
     filePath,
     input.templateWorkbookPath ?? resolveBuiltinTemplatePath('参保职工列表模板.xlsx'),
@@ -308,17 +308,17 @@ export async function exportSocialInsuranceBaseWorkbook(
 }
 
 async function buildPersonalTaxRows(incomeFields: string[]): Promise<PersonalTaxRow[]> {
-  const worksheet = getWorksheetByName('一体化在职')
+  const worksheet = getWorksheetByName('在职工资')
   const columns = getWorksheetLocalColumns(worksheet)
   const colByField = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const idColumn = colByField.get('证件号码')
   const nameColumn = colByField.get('姓名')
   const batchColumn = colByField.get('工资批次')
-  if (!idColumn || !nameColumn) throw new Error('一体化在职缺少姓名或证件号码字段')
+  if (!idColumn || !nameColumn) throw new Error('在职工资缺少姓名或证件号码字段')
 
   const missingIncomeFields = incomeFields.filter((field) => !colByField.has(field))
   if (missingIncomeFields.length > 0) {
-    throw new Error(`一体化在职缺少字段：${missingIncomeFields.join('、')}`)
+    throw new Error(`在职工资缺少字段：${missingIncomeFields.join('、')}`)
   }
 
   const database = await getDatabase()
@@ -371,17 +371,17 @@ async function buildPersonalTaxRows(incomeFields: string[]): Promise<PersonalTax
 }
 
 async function buildSocialInsuranceBaseRows(baseFields: string[]): Promise<SocialInsuranceBaseRow[]> {
-  const worksheet = getWorksheetByName('一体化在职')
+  const worksheet = getWorksheetByName('在职工资')
   const columns = getWorksheetLocalColumns(worksheet)
   const colByField = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const idColumn = colByField.get('证件号码')
   const nameColumn = colByField.get('姓名')
   const batchColumn = colByField.get('工资批次')
-  if (!idColumn || !nameColumn) throw new Error('一体化在职缺少姓名或证件号码字段')
+  if (!idColumn || !nameColumn) throw new Error('在职工资缺少姓名或证件号码字段')
 
   const missingBaseFields = baseFields.filter((field) => !colByField.has(field))
   if (missingBaseFields.length > 0) {
-    throw new Error(`一体化在职缺少字段：${missingBaseFields.join('、')}`)
+    throw new Error(`在职工资缺少字段：${missingBaseFields.join('、')}`)
   }
 
   const database = await getDatabase()
@@ -434,7 +434,7 @@ async function writePersonalTaxWorkbook(
 ): Promise<void> {
   if (templateWorkbookPath && existsForRead(templateWorkbookPath)) {
     const stamp = timestamp()
-    const dataPath = getDataPath('社保个税输出', `个税导入数据_${stamp}.json`)
+    const dataPath = join(dirname(filePath), `个税导入数据_${stamp}.json`)
     writeFileSync(dataPath, JSON.stringify(rows), 'utf8')
     try {
       await runPowerShellScript(
@@ -520,7 +520,7 @@ async function writeSocialInsuranceBaseWorkbook(
   stamp: string
 ): Promise<void> {
   if (templateWorkbookPath && existsForRead(templateWorkbookPath)) {
-    const dataPath = getDataPath('社保个税输出', `社保基数数据_${stamp}.json`)
+    const dataPath = join(dirname(filePath), `社保基数数据_${stamp}.json`)
     writeFileSync(dataPath, JSON.stringify(rows), 'utf8')
     try {
       await runPowerShellScript(
@@ -770,12 +770,12 @@ async function writeAnnualValuesToSalaryWorkbook(input: {
 }
 
 async function buildAnnualIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Promise<IntegratedPlan> {
-  const worksheet = getWorksheetByName('一体化在职')
+  const worksheet = getWorksheetByName('在职工资')
   const columns = getWorksheetLocalColumns(worksheet)
   const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
   const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
   const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
-  if (!idColumn) throw new Error('一体化在职缺少证件号码字段')
+  if (!idColumn) throw new Error('在职工资缺少证件号码字段')
   const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const database = await getDatabase()
   const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
@@ -811,7 +811,7 @@ async function buildAnnualIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Pr
           fieldName,
           sourceValue: roundMoney(num(person.values[fieldName])),
           targetValue: 0,
-          reason: '一体化在职中未找到该身份证'
+          reason: '在职工资中未找到该身份证'
         })
       }
       continue
@@ -850,7 +850,7 @@ function buildMissingIntegratedWarnings(missing: AnnualIntegratedChangePreview[]
   const examples = people.slice(0, 8).map((item) => item.name ? `${item.name}(${item.idCard})` : item.idCard)
   const suffix = people.length > examples.length ? `，等 ${people.length} 人` : ''
   return [
-    `工资表有 ${people.length} 人按身份证在一体化在职中未找到，相关年初调整金额未自动回写。示例：${examples.join('、')}${suffix}`
+    `工资表有 ${people.length} 人按身份证在在职工资中未找到，相关年初调整金额未自动回写。示例：${examples.join('、')}${suffix}`
   ]
 }
 
@@ -879,7 +879,7 @@ function decideIntegratedUpdate(
     return { ok: false, reason: '该字段在多个批次都有金额，无法自动判断拆分方式' }
   }
   const preferred = personRows.find((row) => !batchColumn || text(row[batchColumn]) === '001') ?? personRows[0]
-  if (!preferred) return { ok: false, reason: '一体化在职没有可写入行' }
+  if (!preferred) return { ok: false, reason: '在职工资没有可写入行' }
   return {
     ok: true,
     reason: batchColumn ? `写入批次 ${text(preferred[batchColumn]) || '当前行'}` : '写入当前行',
@@ -889,7 +889,7 @@ function decideIntegratedUpdate(
 
 async function applyIntegratedPlan(plan: IntegratedPlan): Promise<void> {
   if (plan.changes.length === 0) return
-  const worksheet = getWorksheetByName('一体化在职')
+  const worksheet = getWorksheetByName('在职工资')
   const columns = getWorksheetLocalColumns(worksheet)
   const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const table = tableNameOf(worksheet)

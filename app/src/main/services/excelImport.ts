@@ -819,13 +819,13 @@ async function loadTownshipUnitNameLookup(
   const worksheets = readWorksheetMetadata()
   const sources = [
     {
-      worksheetName: '一体化在职',
+      worksheetName: '在职工资',
       idFields: ['证件号码'],
       unitFields: ['单位名称', '单位名称*', '单位全称', '单位'],
       nameFields: ['姓名', '姓名*']
     },
     {
-      worksheetName: '一体化退休',
+      worksheetName: '退休工资',
       idFields: ['证件号码'],
       unitFields: ['单位名称', '单位名称*', '单位全称', '单位'],
       nameFields: ['姓名', '姓名*']
@@ -917,7 +917,7 @@ async function applyPersonnelStatusToRows(
     if (budgetStatus) {
       row.md_status = budgetStatus
       row.md_status_changed_at = now
-      row.md_status_reason = '按一体化三张表刷新人员状态'
+      row.md_status_reason = '按三张工资表刷新人员状态'
     } else {
       row[statusColumn] = resolvePersonnelStatus(row[identityColumn], activeIds, retiredIds, otherIds)
     }
@@ -1071,10 +1071,10 @@ async function buildBudgetAlignmentMessages(
   if (budgetIds.size === 0) return ['人员对齐：预算底稿没有可识别的证件号码，未执行校验']
 
   if (worksheet.name === '预算在职') {
-    const activeIds = await loadWorksheetIdentitySet(database, worksheets, '一体化在职')
-    const retiredIds = await loadWorksheetIdentitySet(database, worksheets, '一体化退休')
-    const otherIds = await loadWorksheetIdentitySet(database, worksheets, '一体化其他')
-    if (activeIds.size === 0) return ['人员对齐：未检测到一体化在职数据，预算在职底稿暂未校验']
+    const activeIds = await loadWorksheetIdentitySet(database, worksheets, '在职工资')
+    const retiredIds = await loadWorksheetIdentitySet(database, worksheets, '退休工资')
+    const otherIds = await loadWorksheetIdentitySet(database, worksheets, '其他工资')
+    if (activeIds.size === 0) return ['人员对齐：未检测到在职工资数据，预算在职底稿暂未校验']
 
     const newInIntegrated = countMissing(activeIds, budgetIds)
     const movedToRetired = countWhere(budgetIds, (id) => !activeIds.has(id) && retiredIds.has(id))
@@ -1084,18 +1084,18 @@ async function buildBudgetAlignmentMessages(
       (id) => !activeIds.has(id) && !retiredIds.has(id) && !otherIds.has(id)
     )
     if (newInIntegrated === 0 && movedToRetired === 0 && movedToOther === 0 && notFound === 0) {
-      return ['人员对齐：预算在职底稿与一体化在职一致']
+      return ['人员对齐：预算在职底稿与在职工资一致']
     }
     return [
-      `人员对齐：一体化在职新增 ${newInIntegrated} 人；底稿中 ${movedToRetired} 人已在一体化退休、${movedToOther} 人已在一体化其他、${notFound} 人未在一体化三张表找到`
+      `人员对齐：在职工资新增 ${newInIntegrated} 人；底稿中 ${movedToRetired} 人已在退休工资、${movedToOther} 人已在其他工资、${notFound} 人未在三张工资表找到`
     ]
   }
 
   if (worksheet.name === '预算退休' || worksheet.name === '预算其他') {
-    const activeIds = await loadWorksheetIdentitySet(database, worksheets, '一体化在职')
-    const retiredIds = await loadWorksheetIdentitySet(database, worksheets, '一体化退休')
-    const otherIds = await loadWorksheetIdentitySet(database, worksheets, '一体化其他')
-    const sourceName = worksheet.name === '预算退休' ? '一体化退休' : '一体化其他'
+    const activeIds = await loadWorksheetIdentitySet(database, worksheets, '在职工资')
+    const retiredIds = await loadWorksheetIdentitySet(database, worksheets, '退休工资')
+    const otherIds = await loadWorksheetIdentitySet(database, worksheets, '其他工资')
+    const sourceName = worksheet.name === '预算退休' ? '退休工资' : '其他工资'
     const sourceIds = worksheet.name === '预算退休' ? retiredIds : otherIds
     const wrongActive = countWhere(budgetIds, (id) => !sourceIds.has(id) && activeIds.has(id))
     const wrongRetired =
@@ -1118,7 +1118,7 @@ async function buildBudgetAlignmentMessages(
       return [`人员对齐：${worksheet.name}底稿与${sourceName}一致`]
     }
     return [
-      `人员对齐：${sourceName}新增 ${newInIntegrated} 人；底稿中 ${wrongActive} 人已在一体化在职、${wrongRetired} 人已在一体化退休、${wrongOther} 人已在一体化其他、${notFound} 人未在一体化三张表找到`
+      `人员对齐：${sourceName}新增 ${newInIntegrated} 人；底稿中 ${wrongActive} 人已在在职工资、${wrongRetired} 人已在退休工资、${wrongOther} 人已在其他工资、${notFound} 人未在三张工资表找到`
     ]
   }
 

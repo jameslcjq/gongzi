@@ -87,7 +87,7 @@ type LicenseDeviceInfo = {
 
 const modules: ModuleGroup[] = [
   { key: 'integration', label: '一体化对接', tables: [] },
-  { key: 'integrated', label: '工资数据', tables: ['一体化在职', '一体化退休', '一体化其他'] },
+  { key: 'integrated', label: '工资数据', tables: ['在职工资', '退休工资', '其他工资'] },
   { key: 'payroll', label: '工资业务', tables: [] },
   { key: 'budget', label: '预算', tables: ['预算在职', '预算退休', '预算其他'] },
   { key: 'annual', label: '工资年报', tables: ['工资年报', '绩效工资'] },
@@ -115,9 +115,9 @@ const modules: ModuleGroup[] = [
 
 const visibleModules = modules.filter((module) => !module.hidden)
 const worksheetDisplayNames: Record<string, string> = {
-  一体化在职: '在职工资',
-  一体化退休: '退休工资',
-  一体化其他: '其他工资'
+  在职工资: '在职工资',
+  退休工资: '退休工资',
+  其他工资: '其他工资'
 }
 
 function displayWorksheetName(name: string) {
@@ -255,7 +255,7 @@ const defaultViewByWorksheet: Record<string, string> = {
   '预算在职': '全部',
   '预算退休': '全部',
   '预算其他': '全部',
-  '一体化在职': '全部'
+  '在职工资': '全部'
 }
 
 // 使用标志位防止级联触发 loadRecords 多次
@@ -674,7 +674,7 @@ async function onImported(summary?: ImportBatchSummary) {
 }
 
 async function handleImportedWorksheetName(worksheetName?: string) {
-  if (worksheetName === '一体化在职') {
+  if (worksheetName === '在职工资') {
     await promptHrMasterSync()
     return
   }
@@ -698,7 +698,7 @@ async function promptHrMasterSync() {
     const preview = await window.salaryApi.previewHrMasterSyncFromIntegrated()
     const warnings = buildHrMasterSyncWarnings(preview)
     if (preview.updatableRows === 0) {
-      await showIdCardLookupNotice(`${displayWorksheetName('一体化在职')}身份证匹配提醒`, warnings)
+      await showIdCardLookupNotice(`${displayWorksheetName('在职工资')}身份证匹配提醒`, warnings)
       return
     }
 
@@ -706,8 +706,8 @@ async function promptHrMasterSync() {
     const title = isEmptyMaster ? '更新人事信息主表' : '发现人事信息差异'
     const selections = await openSyncDiffDialog(
       title,
-      appendSyncSummaryWarnings(`${displayWorksheetName('一体化在职')}：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
-      flattenSyncDiffRows(displayWorksheetName('一体化在职'), preview.diffs, 'sourceRecordId')
+      appendSyncSummaryWarnings(`${displayWorksheetName('在职工资')}：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
+      flattenSyncDiffRows(displayWorksheetName('在职工资'), preview.diffs, 'sourceRecordId')
     )
     if (!selections) return
 
@@ -836,10 +836,10 @@ function openSyncDiffDialog(
 function buildHrMasterSyncWarnings(preview: HrMasterSyncPreview): string[] {
   return [
     ...(preview.missingIdCardRows
-      ? [`${displayWorksheetName('一体化在职')}有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
+      ? [`${displayWorksheetName('在职工资')}有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
       : []),
     ...(preview.missingLookupRows
-      ? [`${displayWorksheetName('一体化在职')}有 ${preview.missingLookupRows} 条按工资金额未匹配到岗位/薪级对照，未纳入本次更新。`]
+      ? [`${displayWorksheetName('在职工资')}有 ${preview.missingLookupRows} 条按工资金额未匹配到岗位/薪级对照，未纳入本次更新。`]
       : [])
   ]
 }
@@ -1142,8 +1142,8 @@ function buildTownshipNameIssueMessage(result: TownshipIdCardFillResult): string
   const rows = result.issues.slice(0, 30).map((issue) => {
     const reason =
       issue.reason === 'duplicate'
-        ? `人事信息/${displayWorksheetName('一体化在职')}/${displayWorksheetName('一体化退休')}中有 ${issue.matchedCount} 个同名不同证件号`
-        : `人事信息/${displayWorksheetName('一体化在职')}/${displayWorksheetName('一体化退休')}中未查到`
+        ? `人事信息/${displayWorksheetName('在职工资')}/${displayWorksheetName('退休工资')}中有 ${issue.matchedCount} 个同名不同证件号`
+        : `人事信息/${displayWorksheetName('在职工资')}/${displayWorksheetName('退休工资')}中未查到`
     return `<li>${escapeHtml(issue.name || `第 ${issue.rowId} 行`)}：${escapeHtml(reason)}</li>`
   })
   const more = result.issues.length > 30 ? `<p>仅显示前 30 条，另有 ${result.issues.length - 30} 条未展示。</p>` : ''

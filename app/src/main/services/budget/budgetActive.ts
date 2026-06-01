@@ -55,7 +55,7 @@ export async function increaseSalaryGrade(): Promise<RuleResult> {
 export async function calculateBudgetActiveBaseSalary(): Promise<RuleResult> {
   try {
     const budgetActive = getWorksheetByName('预算在职')
-    const integratedActive = getWorksheetByName('一体化在职')
+    const integratedActive = getWorksheetByName('在职工资')
 
     const idCardColumn = findColumnByName(budgetActive, '证件号码*')
     const allowanceColumn = findColumnByName(budgetActive, '岗位津贴')
@@ -99,7 +99,7 @@ export async function calculateBudgetActiveBaseSalary(): Promise<RuleResult> {
     const matched = matchedCount[0]?.count ?? 0
     const warnings: string[] = []
     if (matched < total) {
-      warnings.push(`有 ${total - matched} 条预算在职在"一体化在职"中未找到生活补贴，已按 0 计算`)
+      warnings.push(`有 ${total - matched} 条预算在职在"在职工资"中未找到生活补贴，已按 0 计算`)
     }
 
     return okRule('计算基础性绩效工资', matched, ['基础性绩效工资 = 岗位津贴 + 生活补贴'], warnings)

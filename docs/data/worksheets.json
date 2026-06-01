@@ -1,6 +1,6 @@
 [
   {
-    "name": "一体化在职",
+    "name": "在职工资",
     "worksheetId": "68d1363b4b3cd60c8a8cc89b",
     "fieldCount": 50,
     "fields": [
@@ -471,7 +471,7 @@
     ]
   },
   {
-    "name": "一体化退休",
+    "name": "退休工资",
     "worksheetId": "68d1363b4b3cd60c8a8cc89d",
     "fieldCount": 13,
     "fields": [
@@ -683,7 +683,7 @@
     ]
   },
   {
-    "name": "一体化其他",
+    "name": "其他工资",
     "worksheetId": "68d38e10a70778463f3eb9a8",
     "fieldCount": 13,
     "fields": [

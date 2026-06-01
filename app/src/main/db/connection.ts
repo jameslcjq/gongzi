@@ -1,7 +1,8 @@
+import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import sqlite3 from 'sqlite3'
-import { getDataPath } from '../config/paths'
+import { getDataPath, getLegacyDatabasePaths } from '../config/paths'
 import { readWorksheetMetadata } from './metadata'
 import {
   getSqlType,
@@ -40,9 +41,11 @@ export async function getDatabase(): Promise<sqlite3.Database> {
     PRAGMA foreign_keys = ON;
     PRAGMA temp_store = MEMORY;
   `)
+  await ensureRenamedWorksheetTables(db)
   await exec(db, readRetainedSchemaSql())
   await ensureSystemTables(db)
   await syncWorksheetColumns(db)
+  await migrateLegacyDatabasesIntoCurrent(db)
   await ensurePackagedLookupSeeds(db)
   await backfillHrBankFieldsFromBudget(db)
   await ensureBudgetStatusColumns(db)
@@ -51,6 +54,160 @@ export async function getDatabase(): Promise<sqlite3.Database> {
   await ensureIdentityUniqueIndexes(db)
 
   return db
+}
+
+const renamedWorksheetTables = [
+  { oldName: '一体化在职', newName: '在职工资' },
+  { oldName: '一体化退休', newName: '退休工资' },
+  { oldName: '一体化其他', newName: '其他工资' }
+]
+
+async function ensureRenamedWorksheetTables(database: sqlite3.Database): Promise<void> {
+  for (const item of renamedWorksheetTables) {
+    const oldExists = await tableExists(database, item.oldName)
+    const newExists = await tableExists(database, item.newName)
+    if (oldExists && !newExists) {
+      await exec(
+        database,
+        `ALTER TABLE ${quoteIdentifier(item.oldName)} RENAME TO ${quoteIdentifier(item.newName)}`
+      )
+      continue
+    }
+    if (oldExists && newExists) {
+      const oldCount = await tableRowCount(database, item.oldName)
+      const newCount = await tableRowCount(database, item.newName)
+      if (oldCount > 0 && newCount === 0) {
+        await copyTableRows(database, item.oldName, item.newName)
+      }
+    }
+  }
+}
+
+async function tableExists(database: sqlite3.Database, tableName: string): Promise<boolean> {
+  const row = await get<{ name: string }>(
+    database,
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`,
+    [tableName]
+  )
+  return Boolean(row)
+}
+
+async function tableRowCount(
+  database: sqlite3.Database,
+  tableName: string,
+  schemaName = 'main'
+): Promise<number> {
+  const row = await get<{ count: number }>(
+    database,
+    `SELECT COUNT(*) AS count FROM ${qualifiedTableName(schemaName, tableName)}`
+  )
+  return Number(row?.count ?? 0)
+}
+
+async function copyTableRows(
+  database: sqlite3.Database,
+  sourceTableName: string,
+  targetTableName: string,
+  sourceSchemaName = 'main'
+): Promise<number> {
+  const sourceColumns = await tableColumnNames(database, sourceTableName, sourceSchemaName)
+  const targetColumns = await tableColumnNames(database, targetTableName)
+  const commonColumns = targetColumns.filter((column) => sourceColumns.includes(column))
+  if (commonColumns.length === 0) return 0
+
+  const quotedColumns = commonColumns.map(quoteIdentifier).join(', ')
+  const beforeCount = await tableRowCount(database, targetTableName)
+  await exec(
+    database,
+    `INSERT INTO ${quoteIdentifier(targetTableName)} (${quotedColumns})
+       SELECT ${quotedColumns}
+         FROM ${qualifiedTableName(sourceSchemaName, sourceTableName)}`
+  )
+  const afterCount = await tableRowCount(database, targetTableName)
+  return Math.max(0, afterCount - beforeCount)
+}
+
+async function tableColumnNames(
+  database: sqlite3.Database,
+  tableName: string,
+  schemaName = 'main'
+): Promise<string[]> {
+  const pragma = schemaName === 'main'
+    ? `PRAGMA table_info(${quoteIdentifier(tableName)})`
+    : `PRAGMA ${quoteIdentifier(schemaName)}.table_info(${quoteIdentifier(tableName)})`
+  const rows = await all<{ name: string }>(database, pragma)
+  return rows.map((row) => row.name)
+}
+
+function qualifiedTableName(schemaName: string, tableName: string): string {
+  return schemaName === 'main'
+    ? quoteIdentifier(tableName)
+    : `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`
+}
+
+async function migrateLegacyDatabasesIntoCurrent(database: sqlite3.Database): Promise<void> {
+  const currentDatabasePath = getDataPath('salary-system.sqlite')
+  for (const legacyDatabasePath of getLegacyDatabasePaths()) {
+    if (!existsSync(legacyDatabasePath)) continue
+    if (samePath(legacyDatabasePath, currentDatabasePath)) continue
+    await copyEmptyTablesFromLegacyDatabase(database, legacyDatabasePath)
+  }
+}
+
+async function copyEmptyTablesFromLegacyDatabase(
+  database: sqlite3.Database,
+  legacyDatabasePath: string
+): Promise<void> {
+  const schemaName = 'legacy_migrate'
+  try {
+    await run(database, `ATTACH DATABASE ? AS ${quoteIdentifier(schemaName)}`, [legacyDatabasePath])
+    const targetTables = await all<{ name: string }>(
+      database,
+      `SELECT name FROM sqlite_master
+        WHERE type = 'table'
+          AND name NOT LIKE 'sqlite_%'
+        ORDER BY name`
+    )
+    const sourceTables = new Set(
+      (await all<{ name: string }>(
+        database,
+        `SELECT name FROM ${quoteIdentifier(schemaName)}.sqlite_master
+          WHERE type = 'table'
+            AND name NOT LIKE 'sqlite_%'`
+      )).map((row) => row.name)
+    )
+
+    for (const target of targetTables) {
+      const sourceName = sourceTables.has(target.name)
+        ? target.name
+        : legacySourceTableName(target.name)
+      if (!sourceName || !sourceTables.has(sourceName)) continue
+
+      const targetCount = await tableRowCount(database, target.name)
+      if (targetCount > 0) continue
+
+      const sourceCount = await tableRowCount(database, sourceName, schemaName)
+      if (sourceCount === 0) continue
+
+      await copyTableRows(database, sourceName, target.name, schemaName)
+    }
+  } catch (error) {
+    console.warn(`迁移旧工资数据失败：${legacyDatabasePath}`, error)
+  } finally {
+    try {
+      await exec(database, `DETACH DATABASE ${quoteIdentifier(schemaName)}`)
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function legacySourceTableName(targetTableName: string): string | null {
+  return renamedWorksheetTables.find((item) => item.newName === targetTableName)?.oldName ?? null
+}
+
+function samePath(left: string, right: string): boolean {
+  return left.replace(/\//g, '\\').toLowerCase() === right.replace(/\//g, '\\').toLowerCase()
 }
 
 async function ensureBudgetStatusColumns(database: sqlite3.Database): Promise<void> {
@@ -604,9 +761,9 @@ async function ensureColumns(
 async function ensurePerformanceIndexes(database: sqlite3.Database): Promise<void> {
   // 给证件号码等 JOIN 关联列创建索引，显著提升透视查询和工作流的关联速度
   const idCardIndexes: Array<{ table: string; column: string }> = [
-    { table: '一体化在职', column: '证件号码' },
-    { table: '一体化退休', column: '证件号码' },
-    { table: '一体化其他', column: '证件号码' },
+    { table: '在职工资', column: '证件号码' },
+    { table: '退休工资', column: '证件号码' },
+    { table: '其他工资', column: '证件号码' },
     { table: '预算在职', column: '证件号码*' },
     { table: '预算退休', column: '证件号码*' },
     { table: '预算其他', column: '证件号码' },
@@ -675,7 +832,7 @@ const identityNonUniqueWorksheetIds = new Set([
 ])
 
 const identityCompositeFieldNames = new Map<string, string[]>([
-  ['\u4e00\u4f53\u5316\u5728\u804c', ['\u5de5\u8d44\u6279\u6b21']]
+  ['在职工资', ['\u5de5\u8d44\u6279\u6b21']]
 ])
 
 export type IdentityDuplicateIssue = {
@@ -834,9 +991,9 @@ type PersonnelStatusSourceRow = {
 
 async function refreshPersonnelStatusIndex(database: sqlite3.Database): Promise<void> {
   const worksheets = readWorksheetMetadata()
-  const activeWorksheet = worksheets.find((item) => item.name === '一体化在职')
-  const retiredWorksheet = worksheets.find((item) => item.name === '一体化退休')
-  const otherWorksheet = worksheets.find((item) => item.name === '一体化其他')
+  const activeWorksheet = worksheets.find((item) => item.name === '在职工资')
+  const retiredWorksheet = worksheets.find((item) => item.name === '退休工资')
+  const otherWorksheet = worksheets.find((item) => item.name === '其他工资')
   const activeRows = activeWorksheet ? await loadIdentityRows(database, activeWorksheet) : []
   const retiredRows = retiredWorksheet ? await loadIdentityRows(database, retiredWorksheet) : []
   const otherRows = otherWorksheet ? await loadIdentityRows(database, otherWorksheet) : []
@@ -866,9 +1023,9 @@ async function refreshPersonnelStatusIndex(database: sqlite3.Database): Promise<
     entries.set(idCard, current)
   }
 
-  for (const row of activeRows) append(row, '一体化在职', 'inActive')
-  for (const row of retiredRows) append(row, '一体化退休', 'inRetired')
-  for (const row of otherRows) append(row, '一体化其他', 'inOther')
+  for (const row of activeRows) append(row, '在职工资', 'inActive')
+  for (const row of retiredRows) append(row, '退休工资', 'inRetired')
+  for (const row of otherRows) append(row, '其他工资', 'inOther')
 
   const now = new Date().toISOString()
   await run(database, `DELETE FROM personnel_status_index`)
@@ -1000,7 +1157,7 @@ export async function refreshWorksheetPersonnelStatus(
     }
     if (budgetStatus && hasBudgetStatus) {
       assignments.push(`"md_status" = ?`, `"md_status_changed_at" = ?`, `"md_status_reason" = ?`)
-      params.push(budgetStatus, new Date().toISOString(), '按一体化三张表刷新人员状态')
+      params.push(budgetStatus, new Date().toISOString(), '按三张工资表刷新人员状态')
     }
     if (assignments.length === 0) continue
     params.push(new Date().toISOString(), row.id)

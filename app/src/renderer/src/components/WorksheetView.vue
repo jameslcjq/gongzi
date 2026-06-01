@@ -92,17 +92,17 @@ const PERSONNEL_DRAWER_TABLES = new Set([
   '预算在职',
   '预算退休',
   '预算其他',
-  '一体化在职',
-  '一体化退休',
-  '一体化其他'
+  '在职工资',
+  '退休工资',
+  '其他工资'
 ])
 const PLAIN_ALL_FIELD_TABLES = new Set([
   '预算在职',
   '预算退休',
   '预算其他',
-  '一体化在职',
-  '一体化退休',
-  '一体化其他'
+  '在职工资',
+  '退休工资',
+  '其他工资'
 ])
 
 const detailEnabled = computed(() => true)
@@ -506,9 +506,9 @@ const moduleWorkflows = computed(() => {
   }
 
   const moduleMap: Record<string, string> = {
-    一体化在职: '一体化在职',
-    一体化退休: '一体化在职',
-    一体化其他: '一体化在职',
+    在职工资: '在职工资',
+    退休工资: '在职工资',
+    其他工资: '在职工资',
     预算在职: '预算',
     预算退休: '预算',
     预算其他: '预算',

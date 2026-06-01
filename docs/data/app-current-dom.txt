@@ -40,23 +40,23 @@
   - generic: 文件
   - generic: 全部展开
   - generic: 无搜索结果
-- link "一体化在职":
+- link "在职工资":
   - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d1363b4b3cd60c8a8cc89b?flag=1777542127749
-  - generic "一体化在职"
+  - generic "在职工资"
 - text: 
-- link "一体化退休":
+- link "退休工资":
   - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d1363b4b3cd60c8a8cc89d
-  - generic "一体化退休"
+  - generic "退休工资"
 - text: 
-- link "一体化其他":
+- link "其他工资":
   - /url: /app/b38eea69-98e4-4e25-bc51-381d8246f3cd/68d13640e4123bd7b70f6311/68d38e10a70778463f3eb9a8
-  - generic "一体化其他"
+  - generic "其他工资"
 - text: 
 - generic: 
 - generic: 新建
 - generic: 
 - generic: 
-- generic "一体化在职"
+- generic "在职工资"
 - generic: 
 - generic: 
 - text: 

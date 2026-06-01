@@ -5,9 +5,9 @@ import type { ImportBatchSummary, ImportPreview } from '@shared/types'
 
 type WorksheetOption = { worksheetId: string; name: string }
 const worksheetDisplayNames: Record<string, string> = {
-  一体化在职: '在职工资',
-  一体化退休: '退休工资',
-  一体化其他: '其他工资'
+  在职工资: '在职工资',
+  退休工资: '退休工资',
+  其他工资: '其他工资'
 }
 
 function displayWorksheetName(name?: string) {

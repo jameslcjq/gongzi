@@ -49,7 +49,7 @@ const integratedActivePayableFields = [
 
 export async function loadRetiredSummary(): Promise<RetiredSummary> {
   try {
-    const worksheet = getWorksheetByName('一体化退休')
+    const worksheet = getWorksheetByName('退休工资')
     const columns = getWorksheetLocalColumns(worksheet)
     const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
     const housingColumn = columns.find((column) => column.field.name === '住房补贴')?.columnName
@@ -75,7 +75,7 @@ export async function loadRetiredSummary(): Promise<RetiredSummary> {
 
 export async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[]> {
   try {
-    const worksheet = getWorksheetByName('一体化退休')
+    const worksheet = getWorksheetByName('退休工资')
     const columns = getWorksheetLocalColumns(worksheet)
     const colByName = (name: string): string | undefined =>
       columns.find((column) => column.field.name === name)?.columnName
@@ -122,7 +122,7 @@ export async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[
 
 export async function loadIntegratedActiveHousingFund(): Promise<number> {
   try {
-    const rows = await loadIntegratedRows('一体化在职')
+    const rows = await loadIntegratedRows('在职工资')
     return roundMoney(rows.reduce((sum, row) => sum + num(row.values['公积金']), 0))
   } catch {
     return 0
@@ -155,7 +155,7 @@ export async function loadIntegratedActiveAggregates(): Promise<IntegratedActive
     五险一金合计: 0
   }
   try {
-    const rows = await loadIntegratedRows('一体化在职')
+    const rows = await loadIntegratedRows('在职工资')
     const { taxField } = await readMonthlyPayrollSettings()
     const sumField = (name: string): number =>
       rows.reduce((sum, row) => sum + num(row.values[name]), 0)
@@ -199,7 +199,7 @@ export async function loadIntegratedActiveAggregates(): Promise<IntegratedActive
 
 export async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<string | number>>> {
   try {
-    const rows = await loadIntegratedRows('一体化在职')
+    const rows = await loadIntegratedRows('在职工资')
     const { taxField } = await readMonthlyPayrollSettings()
     const year = new Date().getFullYear()
     const month = new Date().getMonth() + 1
@@ -237,7 +237,7 @@ function createIntegratedBackpayRow(
 }
 
 export async function loadIntegratedSimpleAggregates(
-  worksheetName: '一体化退休' | '一体化其他'
+  worksheetName: '退休工资' | '其他工资'
 ): Promise<IntegratedSimpleAggregates> {
   const empty: IntegratedSimpleAggregates = {
     count: 0,
@@ -311,7 +311,7 @@ export async function runDetailImports(
 
 export async function loadIntegratedActivePersonalInsuranceTotals(): Promise<PersonalInsuranceTotals> {
   try {
-    const rows = await loadIntegratedRows('一体化在职')
+    const rows = await loadIntegratedRows('在职工资')
     return personalInsuranceTotals({
       pension: rows.reduce((sum, row) => sum + num(row.values['养老保险缴费']), 0),
       annuity: rows.reduce((sum, row) => sum + num(row.values['职业年金缴费']), 0),

@@ -4,7 +4,8 @@ import { copyFile, readdir, rename, rmdir, unlink, writeFile } from 'node:fs/pro
 import { basename, dirname, join } from 'node:path'
 import * as XLSX from 'xlsx'
 import { all, getDatabase, run } from '../../db/connection'
-import { archiveRoot } from '../../config/paths'
+import { getWorksheetLocalColumns, quoteIdentifier } from '../../db/schema'
+import { getPeriodOutputPath } from '../../config/paths'
 import type {
   MonthlyPayrollArchiveResult,
   MonthlyPayrollDataSourceMode,
@@ -19,6 +20,8 @@ import { normalizeMonthlyPayrollTaxField } from './monthlyPayrollSettings'
 import { readMonthlyPayrollPrintSettings } from '../printSettings'
 import { getSalaryWorkbookPrintPageSummary } from './printSalaryViaExcel'
 import { createOperationBatch, logFileOperation, logRecordSnapshots, logRowsBeforeDelete } from '../operationLog'
+import { getWorksheetByName } from '../worksheetTable'
+import { applyTaxAndRecomputeIntegratedActive, recomputeIntegratedOtherLikeWorksheet } from './integratedPayroll'
 
 export type MonthlyPayrollRunInput = Omit<
   MonthlyPayrollRun,
@@ -36,9 +39,19 @@ export type MonthlyPayrollRunInput = Omit<
   | 'salaryPushedAt'
 >
 
+const monthCloseAdjustmentWorksheetNames = ['在职工资', '退休工资', '其他工资'] as const
+const monthCloseAdjustmentFieldNames = ['补发工资', '补扣工资'] as const
+
 export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput): Promise<void> {
   const database = await getDatabase()
   const outdatedAt = new Date().toISOString()
+  const oldRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs
+      WHERE year = ? AND month = ? AND archived_at IS NULL AND is_outdated = 0`,
+    [payload.year, payload.month]
+  )
+  const oldRuns = oldRows.map(mapRunRow)
   await run(
     database,
     `UPDATE monthly_payroll_runs
@@ -55,6 +68,33 @@ export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput):
       payload.month
     ]
   )
+  const outdatedRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs
+      WHERE year = ? AND month = ? AND archived_at IS NULL AND is_outdated = 1`,
+    [payload.year, payload.month]
+  )
+  const outdatedRuns = outdatedRows.map(mapRunRow)
+  if (outdatedRuns.length > 0) {
+    const batchId = await createOperationBatch(database, {
+      kind: 'monthly-payroll.replace-generated-files',
+      targetType: 'monthly-payroll',
+      targetName: `${payload.year}-${String(payload.month).padStart(2, '0')}`,
+      reason: '同月重新生成工资报账结果，清理旧导出文件',
+      meta: { year: payload.year, month: payload.month, replacedRunIds: oldRuns.map((run) => run.id) }
+    })
+    await cleanupMonthlyPayrollGeneratedFiles(database, batchId, outdatedRuns)
+    await run(
+      database,
+      `UPDATE monthly_payroll_runs
+          SET insurance_import_path = NULL,
+              salary_import_path = NULL,
+              payroll_backpay_path = NULL,
+              voucher_import_path = NULL
+        WHERE year = ? AND month = ? AND archived_at IS NULL AND is_outdated = 1`,
+      [payload.year, payload.month]
+    )
+  }
   await run(
     database,
     `INSERT INTO monthly_payroll_runs (
@@ -124,31 +164,58 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
   const runRow = rows[0]
   if (!runRow) throw new Error('未找到要月结的工资报账记录')
 
-  const existingRun = mapRunRow(runRow)
-  if (existingRun.archivedAt && existingRun.archiveDir) {
+  const requestedRun = mapRunRow(runRow)
+  if (requestedRun.archivedAt && requestedRun.archiveDir) {
     return {
-      run: existingRun,
-      archiveDir: existingRun.archiveDir,
-      files: existingRun.archiveManifest
+      run: requestedRun,
+      archiveDir: requestedRun.archiveDir,
+      files: requestedRun.archiveManifest
+    }
+  }
+  const archivedMonthRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs
+      WHERE year = ? AND month = ? AND archived_at IS NOT NULL
+      ORDER BY archived_at DESC, created_at DESC LIMIT 1`,
+    [requestedRun.year, requestedRun.month]
+  )
+  const archivedMonthRun = archivedMonthRows[0] ? mapRunRow(archivedMonthRows[0]) : null
+  if (archivedMonthRun?.archiveDir) {
+    return {
+      run: archivedMonthRun,
+      archiveDir: archivedMonthRun.archiveDir,
+      files: archivedMonthRun.archiveManifest
     }
   }
 
-  const archiveDir = monthlyPayrollArchiveDir(existingRun)
+  const finalRows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs
+      WHERE year = ? AND month = ? AND archived_at IS NULL AND COALESCE(is_outdated, 0) = 0
+      ORDER BY created_at DESC LIMIT 1`,
+    [requestedRun.year, requestedRun.month]
+  )
+  const finalRun = finalRows[0] ? mapRunRow(finalRows[0]) : requestedRun
+  if (!finalRun.sourceSocialPath || !finalRun.insuranceImportPath) {
+    throw new Error(`${finalRun.year}年${finalRun.month}月社保文件未补齐，当前只是工资阶段结果，不能月结。`)
+  }
+  const archiveDir = monthlyPayrollArchiveDir(finalRun)
   mkdirSync(archiveDir, { recursive: true })
   const archiveDate = dateStamp()
   const monthRows = await all<Record<string, unknown>>(
     database,
     `SELECT * FROM monthly_payroll_runs
      WHERE year = ? AND month = ? AND archived_at IS NULL`,
-    [existingRun.year, existingRun.month]
+    [finalRun.year, finalRun.month]
   )
   const monthRuns = monthRows.map(mapRunRow)
+  const outdatedRuns = monthRuns.filter((run) => run.id !== finalRun.id)
   const operationBatchId = await createOperationBatch(database, {
     kind: 'monthly-payroll.archive-month',
     targetType: 'monthly-payroll',
-    targetName: `${existingRun.year}-${String(existingRun.month).padStart(2, '0')}`,
+    targetName: `${finalRun.year}-${String(finalRun.month).padStart(2, '0')}`,
     reason: '工资报账月结归档',
-    meta: { id, year: existingRun.year, month: existingRun.month, archiveDir }
+    meta: { id: finalRun.id, requestedId: id, year: finalRun.year, month: finalRun.month, archiveDir }
   })
   await logRecordSnapshots(database, {
     batchId: operationBatchId,
@@ -156,45 +223,46 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
     action: 'archive',
     rows: monthRows
   })
+  await cleanupMonthlyPayrollGeneratedFiles(database, operationBatchId, outdatedRuns)
 
   const archivedFiles = (
     await Promise.all(
-      monthRuns.flatMap((run) => [
-        moveArchiveFile(database, operationBatchId, run.sourceSalaryPath, archiveDir, '工资表', archiveDate),
-        moveArchiveFile(database, operationBatchId, run.sourceSocialPath, archiveDir, '社保', archiveDate),
-        moveArchiveFile(database, operationBatchId, run.sourceTaxPath, archiveDir, '个税', archiveDate),
-        copyArchiveFile(database, operationBatchId, run.insuranceImportPath, archiveDir, '保险导入', archiveDate),
-        copyArchiveFile(database, operationBatchId, run.salaryImportPath, archiveDir, '工资导入', archiveDate),
-        copyArchiveFile(database, operationBatchId, run.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
-        copyArchiveFile(database, operationBatchId, run.voucherImportPath, archiveDir, '凭证', archiveDate)
-      ])
+      [
+        moveArchiveFile(database, operationBatchId, finalRun.sourceSalaryPath, archiveDir, '工资表', archiveDate),
+        moveArchiveFile(database, operationBatchId, finalRun.sourceSocialPath, archiveDir, '社保', archiveDate),
+        moveArchiveFile(database, operationBatchId, finalRun.sourceTaxPath, archiveDir, '个税', archiveDate),
+        copyArchiveFile(database, operationBatchId, finalRun.insuranceImportPath, archiveDir, '保险导入', archiveDate),
+        copyArchiveFile(database, operationBatchId, finalRun.salaryImportPath, archiveDir, '工资导入', archiveDate),
+        copyArchiveFile(database, operationBatchId, finalRun.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
+        copyArchiveFile(database, operationBatchId, finalRun.voucherImportPath, archiveDir, '凭证', archiveDate)
+      ]
     )
   ).filter((item): item is string => Boolean(item))
 
   const archivedAt = new Date().toISOString()
-  const manifestPath = uniqueArchivePath(archiveDir, `月结清单_${archiveDate}.json`)
+  const manifestPath = uniqueArchivePath(archiveDir, `工资报账月结_清单_${archiveDate}.json`)
   await writeFile(
     manifestPath,
     JSON.stringify(
       {
-        year: existingRun.year,
-        month: existingRun.month,
-        unitFullName: existingRun.unitFullName,
+        year: finalRun.year,
+        month: finalRun.month,
+        unitFullName: finalRun.unitFullName,
         archivedAt,
         archiveDir,
         files: archivedFiles,
         totals: {
-          activeCount: existingRun.activeCount,
-          survivorCount: existingRun.survivorCount,
-          retiredHousingCount: existingRun.retiredHousingCount,
-          salaryTotal: existingRun.salaryTotal,
-          withholdingTotal: existingRun.withholdingTotal,
-          taxTotal: existingRun.taxTotal,
-          actualPay: existingRun.actualPay,
-          activeActualPay: existingRun.activeActualPay,
-          survivorActualPay: existingRun.survivorActualPay,
-          retiredHousingActualPay: existingRun.retiredHousingActualPay,
-          retiredHousing: existingRun.retiredHousing
+          activeCount: finalRun.activeCount,
+          survivorCount: finalRun.survivorCount,
+          retiredHousingCount: finalRun.retiredHousingCount,
+          salaryTotal: finalRun.salaryTotal,
+          withholdingTotal: finalRun.withholdingTotal,
+          taxTotal: finalRun.taxTotal,
+          actualPay: finalRun.actualPay,
+          activeActualPay: finalRun.activeActualPay,
+          survivorActualPay: finalRun.survivorActualPay,
+          retiredHousingActualPay: finalRun.retiredHousingActualPay,
+          retiredHousing: finalRun.retiredHousing
         }
       },
       null,
@@ -204,18 +272,30 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
   )
   archivedFiles.push(manifestPath)
 
+  await clearMonthCloseAdjustmentFields(database, operationBatchId)
+
   await run(
     database,
     `UPDATE monthly_payroll_runs
        SET archived_at = ?, archive_dir = ?, archive_manifest = ?
-     WHERE year = ? AND month = ? AND archived_at IS NULL`,
-    [archivedAt, archiveDir, JSON.stringify(archivedFiles), existingRun.year, existingRun.month]
+     WHERE id = ?`,
+    [archivedAt, archiveDir, JSON.stringify(archivedFiles), finalRun.id]
+  )
+  await run(
+    database,
+    `UPDATE monthly_payroll_runs
+        SET insurance_import_path = NULL,
+            salary_import_path = NULL,
+            payroll_backpay_path = NULL,
+            voucher_import_path = NULL
+      WHERE year = ? AND month = ? AND archived_at IS NULL AND is_outdated = 1`,
+    [finalRun.year, finalRun.month]
   )
 
   const updatedRows = await all<Record<string, unknown>>(
     database,
     `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
-    [id]
+    [finalRun.id]
   )
   return {
     run: mapRunRow(updatedRows[0]),
@@ -255,6 +335,7 @@ export async function cancelMonthlyPayrollMonthClose(id: number): Promise<Monthl
   })
   await restoreMonthlyPayrollSourceFiles(monthRunList)
   await cleanupMonthlyPayrollGeneratedFiles(database, operationBatchId, monthRunList)
+  await restoreMonthCloseAdjustmentFields(database, operationBatchId, targetRun.year, targetRun.month)
 
   await run(
     database,
@@ -502,7 +583,7 @@ function archivedSalaryWorkbookPaths(payrollRun: MonthlyPayrollRun): string[] {
 }
 
 function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): number {
-  const sheet = sheets.find((item) => item.name === '一体化退休')
+  const sheet = sheets.find((item) => item.name === '退休工资')
   if (!sheet) return 0
   if (sheet.rows.length === 0) return 0
   if (sheet.rows.length <= 3) return 1
@@ -647,12 +728,7 @@ function parseReportSnapshot(value: unknown): MonthlyPayrollReportResult | null 
 }
 
 function monthlyPayrollArchiveDir(run: MonthlyPayrollRun): string {
-  const yearDir = join(monthlyPayrollArchiveRoot(), String(run.year))
-  return join(yearDir, `${run.year}-${String(run.month).padStart(2, '0')}_工资报账月结`)
-}
-
-function monthlyPayrollArchiveRoot(): string {
-  return archiveRoot
+  return getPeriodOutputPath(run.year, run.month)
 }
 
 async function copyArchiveFile(
@@ -703,7 +779,7 @@ async function moveArchiveFile(
 }
 
 function archiveFileName(label: string, archiveDate: string, sourcePath: string): string {
-  return `${label}_${archiveDate}_${basename(sourcePath)}`
+  return `工资报账月结_${label}_${archiveDate}_${basename(sourcePath)}`
 }
 
 async function cleanupMonthlyPayrollGeneratedFiles(
@@ -715,7 +791,7 @@ async function cleanupMonthlyPayrollGeneratedFiles(
   const removedFiles = new Set<string>()
   const runIds = new Set(runs.map((run) => run.id))
   for (const run of runs) {
-    // 取消月结代表当月数据需要重生成，先清理已生成的导入/凭证文件。
+    // 重新生成或取消月结时，旧导入/凭证文件不再作为最终结果保留。
     for (const filePath of [
       run.insuranceImportPath,
       run.salaryImportPath,
@@ -788,6 +864,213 @@ async function cleanupMonthlyPayrollGeneratedFiles(
         console.warn(`清理归档目录失败：${run.archiveDir}`, error)
       }
     }
+  }
+}
+
+async function clearMonthCloseAdjustmentFields(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  batchId: number
+): Promise<void> {
+  let touched = false
+  const updatedAt = new Date().toISOString()
+
+  for (const worksheetName of monthCloseAdjustmentWorksheetNames) {
+    const target = resolveMonthCloseAdjustmentTarget(worksheetName)
+    if (!target) continue
+
+    const whereSql = target.columns
+      .map((column) => `CAST(COALESCE(${quoteIdentifier(column.columnName)}, 0) AS REAL) <> 0`)
+      .join(' OR ')
+    const rows = await all<Record<string, unknown>>(
+      database,
+      `SELECT * FROM ${target.tableName} WHERE ${whereSql}`
+    )
+    if (rows.length === 0) continue
+
+    await logRecordSnapshots(database, {
+      batchId,
+      tableName: worksheetName,
+      worksheetName,
+      action: 'update',
+      rows,
+      afterValues: Object.fromEntries(target.columns.map((column) => [column.columnName, 0]))
+    })
+
+    const assignments = [
+      ...target.columns.map((column) => `${quoteIdentifier(column.columnName)} = 0`),
+      '"md_updated_at" = ?'
+    ].join(', ')
+    for (const row of rows) {
+      const rowId = Number(row.id)
+      if (!Number.isFinite(rowId)) continue
+      await run(
+        database,
+        `UPDATE ${target.tableName}
+            SET ${assignments}
+          WHERE "id" = ?`,
+        [updatedAt, rowId]
+      )
+      touched = true
+    }
+  }
+
+  if (touched) {
+    await recomputeMonthlyPayrollWorksheetsAfterAdjustmentChange()
+  }
+}
+
+async function restoreMonthCloseAdjustmentFields(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  batchId: number,
+  year: number,
+  month: number
+): Promise<void> {
+  const archiveBatch = await latestArchiveOperationBatch(database, year, month)
+  if (!archiveBatch) return
+
+  const logs = await all<{
+    worksheetName: string | null
+    recordId: number | null
+    beforeValues: string | null
+  }>(
+    database,
+    `SELECT l.worksheet_name AS worksheetName,
+            l.record_id AS recordId,
+            l.before_values AS beforeValues
+       FROM record_change_logs l
+      WHERE l.batch_id = ?
+        AND l.action = 'update'
+        AND l.worksheet_name IN (${monthCloseAdjustmentWorksheetNames.map(() => '?').join(', ')})
+      ORDER BY l.table_name ASC, l.id ASC`,
+    [archiveBatch.id, ...monthCloseAdjustmentWorksheetNames]
+  )
+  if (logs.length === 0) return
+
+  let touched = false
+  const updatedAt = new Date().toISOString()
+  for (const worksheetName of monthCloseAdjustmentWorksheetNames) {
+    const target = resolveMonthCloseAdjustmentTarget(worksheetName)
+    if (!target) continue
+
+    const worksheetLogs = logs.filter((log) => log.worksheetName === worksheetName)
+    if (worksheetLogs.length === 0) continue
+    const currentRows: Record<string, unknown>[] = []
+
+    for (const log of worksheetLogs) {
+      const beforeValues = parseJsonObject(log.beforeValues)
+      const rowId = Number(beforeValues.id ?? log.recordId)
+      if (!Number.isFinite(rowId)) continue
+
+      const current = await all<Record<string, unknown>>(
+        database,
+        `SELECT * FROM ${target.tableName} WHERE "id" = ? LIMIT 1`,
+        [rowId]
+      )
+      if (!current[0]) continue
+      currentRows.push(current[0])
+
+      const restoreColumns = target.columns.filter((column) =>
+        Object.prototype.hasOwnProperty.call(beforeValues, column.columnName)
+      )
+      if (restoreColumns.length === 0) continue
+
+      const assignments = [
+        ...restoreColumns.map((column) => `${quoteIdentifier(column.columnName)} = ?`),
+        '"md_updated_at" = ?'
+      ].join(', ')
+      await run(
+        database,
+        `UPDATE ${target.tableName}
+            SET ${assignments}
+          WHERE "id" = ?`,
+        [
+          ...restoreColumns.map((column) => beforeValues[column.columnName]),
+          updatedAt,
+          rowId
+        ]
+      )
+      touched = true
+    }
+
+    if (currentRows.length > 0) {
+      await logRecordSnapshots(database, {
+        batchId,
+        tableName: worksheetName,
+        worksheetName,
+        action: 'restore',
+        rows: currentRows
+      })
+    }
+  }
+
+  if (touched) {
+    await recomputeMonthlyPayrollWorksheetsAfterAdjustmentChange()
+  }
+}
+
+function resolveMonthCloseAdjustmentTarget(
+  worksheetName: (typeof monthCloseAdjustmentWorksheetNames)[number]
+): {
+  tableName: string
+  columns: Array<{ fieldName: string; columnName: string }>
+} | null {
+  try {
+    const worksheet = getWorksheetByName(worksheetName)
+    const localColumns = getWorksheetLocalColumns(worksheet)
+    const columns: Array<{ fieldName: string; columnName: string }> = []
+    for (const fieldName of monthCloseAdjustmentFieldNames) {
+      const matched = localColumns.find((column) => column.field.name === fieldName)
+      if (matched) columns.push({ fieldName, columnName: matched.columnName })
+    }
+    if (columns.length === 0) return null
+    return {
+      tableName: quoteIdentifier(worksheet.name),
+      columns
+    }
+  } catch {
+    return null
+  }
+}
+
+async function recomputeMonthlyPayrollWorksheetsAfterAdjustmentChange(): Promise<void> {
+  await Promise.all([
+    applyTaxAndRecomputeIntegratedActive({}),
+    recomputeIntegratedOtherLikeWorksheet('退休工资'),
+    recomputeIntegratedOtherLikeWorksheet('其他工资')
+  ])
+}
+
+async function latestArchiveOperationBatch(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  year: number,
+  month: number
+): Promise<{ id: number } | null> {
+  const rows = await all<{ id: number }>(
+    database,
+    `SELECT id
+       FROM operation_batches
+      WHERE kind = 'monthly-payroll.archive-month'
+        AND target_name = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+    [monthlyPayrollOperationTargetName(year, month)]
+  )
+  return rows[0] ?? null
+}
+
+function monthlyPayrollOperationTargetName(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'string') return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
   }
 }
 
@@ -868,7 +1151,7 @@ function uniqueArchivePath(targetDir: string, fileName: string): string {
   }
 }
 
-const FINGERPRINT_SKIP_SHEETS = new Set(['一体化退休'])
+const FINGERPRINT_SKIP_SHEETS = new Set(['退休工资'])
 const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 

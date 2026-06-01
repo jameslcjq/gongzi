@@ -31,8 +31,7 @@
       key: 'allowance',
       label: '津贴补贴',
       code: '30102',
-      codes: ['30102', '30302'],
-      hints: ['津贴补贴'],
+      projectHints: ['事业人员工资'],
       exclude: ['提租补贴', '退休提租']
     },
     {
@@ -45,8 +44,7 @@
       key: 'rentSubsidy',
       label: '提租补贴',
       code: '30102',
-      codes: ['30102', '30302'],
-      hints: ['提租补贴'],
+      projectHints: ['事业人员提租补贴'],
       exclude: ['退休提租']
     },
     {
@@ -95,8 +93,7 @@
       key: 'retiredRentSubsidy',
       label: '退休提租补贴',
       code: '30302',
-      codes: ['30302'],
-      hints: ['退休提租', '退休人员提租', '退休费']
+      codes: ['30302']
     }
   ]
 
@@ -153,11 +150,23 @@
     )
   }
 
+  function rowProjectText(row) {
+    return normalizeText([row.pro_name, row.pro_code_name].join(' '))
+  }
+
   function matchesItem(row, item) {
     const text = rowText(row)
+    const projectText = rowProjectText(row)
     const codes = item.codes || (item.code ? [item.code] : [])
     if (codes.length > 0 && !codes.some((code) => text.includes(code))) return false
     if (item.hints && item.hints.length > 0 && !item.hints.some((hint) => text.includes(hint))) {
+      return false
+    }
+    if (
+      item.projectHints &&
+      item.projectHints.length > 0 &&
+      !item.projectHints.some((hint) => projectText.includes(hint))
+    ) {
       return false
     }
     if (item.exclude && item.exclude.some((hint) => text.includes(hint))) return false
@@ -669,6 +678,7 @@
         label: item.label,
         code: item.code,
         hints: item.hints,
+        projectHints: item.projectHints,
         exclude: item.exclude,
         amount: item.amount,
         summary: item.summary,

@@ -301,7 +301,7 @@
 - generic: name
 - text: "\""
 - generic: ":"
-- generic: "\"一体化在职\""
+- generic: "\"在职工资\""
 - text: "\""
 - generic: alias
 - text: "\""

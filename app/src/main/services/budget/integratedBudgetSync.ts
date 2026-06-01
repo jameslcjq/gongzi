@@ -59,9 +59,9 @@ export async function syncAllBudgetFromIntegrated(): Promise<RuleResult> {
 }
 
 async function runBudgetStatusSync(): Promise<RuleResult> {
-  const activeSource = getSheetCtx('一体化在职')
-  const retiredSource = getSheetCtx('一体化退休')
-  const otherSource = getSheetCtx('一体化其他')
+  const activeSource = getSheetCtx('在职工资')
+  const retiredSource = getSheetCtx('退休工资')
+  const otherSource = getSheetCtx('其他工资')
   const activeTarget = getSheetCtx('预算在职')
   const retiredTarget = getSheetCtx('预算退休')
   const otherTarget = getSheetCtx('预算其他')
@@ -85,21 +85,21 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
       targetName: '预算在职',
       targetRows: activeTargetRows,
       target: activeTarget,
-      sourceNames: '一体化在职/一体化退休',
+      sourceNames: '在职工资/退休工资',
       existsInSource: (idCard) => activeSourceMap.has(idCard) || retiredSourceMap.has(idCard)
     },
     {
       targetName: '预算退休',
       targetRows: retiredTargetRows,
       target: retiredTarget,
-      sourceNames: '一体化退休',
+      sourceNames: '退休工资',
       existsInSource: (idCard) => retiredSourceMap.has(idCard)
     },
     {
       targetName: '预算其他',
       targetRows: otherTargetRows,
       target: otherTarget,
-      sourceNames: '一体化其他',
+      sourceNames: '其他工资',
       existsInSource: (idCard) => otherSourceMap.has(idCard)
     }
   ])
@@ -151,7 +151,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
         })
         lookupFailureCount += await recordLookupFailures(update.failures)
         Object.assign(values, update.values)
-        await updateTargetFieldsAndStatus(activeTarget, row, values, '正常', '一体化在职匹配')
+        await updateTargetFieldsAndStatus(activeTarget, row, values, '正常', '在职工资匹配')
         counts.activeUpdated += 1
         continue
       }
@@ -178,7 +178,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
       }
 
       activeMissingIntegrated.push(personLabel(activeTarget, row, idCard))
-      await updateTargetStatus(activeTarget, row, '调出人员', '一体化在职和一体化退休均未找到')
+      await updateTargetStatus(activeTarget, row, '调出人员', '在职工资和退休工资均未找到')
       counts.activeTransferredOut += 1
     }
 
@@ -201,7 +201,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
       })
       lookupFailureCount += await recordLookupFailures(update.failures)
       Object.assign(values, update.values)
-      await insertTargetRow(activeTarget, values, '正常', '一体化在职新增')
+      await insertTargetRow(activeTarget, values, '正常', '在职工资新增')
       counts.activeAdded += 1
     }
     await clearBudgetActiveExcludedFields(activeTarget)
@@ -229,11 +229,11 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
           lookups
         })
         Object.assign(values, patch)
-        await updateTargetFieldsAndStatus(retiredTarget, row, values, '正常', '一体化退休匹配')
+        await updateTargetFieldsAndStatus(retiredTarget, row, values, '正常', '退休工资匹配')
         counts.retiredUpdated += 1
       } else {
         retiredMissingIntegrated.push(personLabel(retiredTarget, row, idCard))
-        await updateTargetStatus(retiredTarget, row, '去世', '一体化退休未找到')
+        await updateTargetStatus(retiredTarget, row, '去世', '退休工资未找到')
         counts.retiredDeceased += 1
       }
     }
@@ -248,7 +248,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
         target: retiredTarget,
         lookups
       })
-      await insertTargetRow(retiredTarget, values, '正常', '一体化退休新增')
+      await insertTargetRow(retiredTarget, values, '正常', '退休工资新增')
       counts.retiredAdded += 1
     }
 
@@ -274,11 +274,11 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
           lookups
         })
         Object.assign(values, patch)
-        await updateTargetFieldsAndStatus(otherTarget, row, values, '正常', '一体化其他匹配')
+        await updateTargetFieldsAndStatus(otherTarget, row, values, '正常', '其他工资匹配')
         counts.otherUpdated += 1
       } else {
         otherMissingIntegrated.push(personLabel(otherTarget, row, idCard))
-        await updateTargetStatus(otherTarget, row, '去世', '一体化其他未找到')
+        await updateTargetStatus(otherTarget, row, '去世', '其他工资未找到')
         counts.otherDeceased += 1
       }
     }
@@ -293,7 +293,7 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
         target: otherTarget,
         lookups
       })
-      await insertTargetRow(otherTarget, values, '正常', '一体化其他新增')
+      await insertTargetRow(otherTarget, values, '正常', '其他工资新增')
       counts.otherAdded += 1
     }
 
@@ -309,30 +309,30 @@ async function runBudgetStatusSync(): Promise<RuleResult> {
     throw error
   }
 
-  if (activeSourceRows.length === 0) warnings.push('一体化在职没有可用于更新预算的数据')
-  if (retiredSourceRows.length === 0) warnings.push('一体化退休没有可用于更新预算的数据')
-  if (otherSourceRows.length === 0) warnings.push('一体化其他没有可用于更新预算的数据')
+  if (activeSourceRows.length === 0) warnings.push('在职工资没有可用于更新预算的数据')
+  if (retiredSourceRows.length === 0) warnings.push('退休工资没有可用于更新预算的数据')
+  if (otherSourceRows.length === 0) warnings.push('其他工资没有可用于更新预算的数据')
   warnings.push(
-    ...buildMissingLookupWarnings('一体化在职', activeSourceRows, activeSource, lookups.hrInfoByIdCard, '人事信息'),
-    ...buildMissingLookupWarnings('一体化退休', retiredSourceRows, retiredSource, lookups.hrInfoByIdCard, '人事信息'),
-    ...buildMissingLookupWarnings('一体化其他', otherSourceRows, otherSource, lookups.hrInfoByIdCard, '人事信息'),
-    ...buildMissingLookupWarnings('一体化在职', activeSourceRows, activeSource, lookups.educationByIdCard, '教职工学历'),
-    ...buildMissingLookupWarnings('一体化退休', retiredSourceRows, retiredSource, lookups.educationByIdCard, '教职工学历'),
-    ...buildMissingLookupWarnings('一体化其他', otherSourceRows, otherSource, lookups.educationByIdCard, '教职工学历')
+    ...buildMissingLookupWarnings('在职工资', activeSourceRows, activeSource, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingLookupWarnings('退休工资', retiredSourceRows, retiredSource, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingLookupWarnings('其他工资', otherSourceRows, otherSource, lookups.hrInfoByIdCard, '人事信息'),
+    ...buildMissingLookupWarnings('在职工资', activeSourceRows, activeSource, lookups.educationByIdCard, '教职工学历'),
+    ...buildMissingLookupWarnings('退休工资', retiredSourceRows, retiredSource, lookups.educationByIdCard, '教职工学历'),
+    ...buildMissingLookupWarnings('其他工资', otherSourceRows, otherSource, lookups.educationByIdCard, '教职工学历')
   )
   if (activeMissingIntegrated.length > 0) {
     warnings.push(
-      `预算在职有 ${activeMissingIntegrated.length} 人按身份证在一体化在职/一体化退休中均未找到，已标记为调出人员。${formatExamples(activeMissingIntegrated)}`
+      `预算在职有 ${activeMissingIntegrated.length} 人按身份证在在职工资/退休工资中均未找到，已标记为调出人员。${formatExamples(activeMissingIntegrated)}`
     )
   }
   if (retiredMissingIntegrated.length > 0) {
     warnings.push(
-      `预算退休有 ${retiredMissingIntegrated.length} 人按身份证在一体化退休中未找到，已标记为去世。${formatExamples(retiredMissingIntegrated)}`
+      `预算退休有 ${retiredMissingIntegrated.length} 人按身份证在退休工资中未找到，已标记为去世。${formatExamples(retiredMissingIntegrated)}`
     )
   }
   if (otherMissingIntegrated.length > 0) {
     warnings.push(
-      `预算其他有 ${otherMissingIntegrated.length} 人按身份证在一体化其他中未找到，已标记为去世。${formatExamples(otherMissingIntegrated)}`
+      `预算其他有 ${otherMissingIntegrated.length} 人按身份证在其他工资中未找到，已标记为去世。${formatExamples(otherMissingIntegrated)}`
     )
   }
   if (lookupFailureCount > 0) warnings.push(`查询失败 ${lookupFailureCount} 条，已写入查询失败日志`)
@@ -375,7 +375,7 @@ function ensureBudgetSourceCompleteness(
     [
       '更新预算已暂停：一体化来源数据疑似不完整，继续执行会批量标记调出或去世。',
       ...blocked,
-      '请先确认一体化在职、退休、其他三张表是否已完整导入。'
+      '请先确认在职工资、退休、其他三张表是否已完整导入。'
     ].join('\n')
   )
 }
@@ -827,7 +827,7 @@ async function loadLatestSourceRows(source: SheetCtx): Promise<Row[]> {
   const rows = await all<Row>(database, `SELECT * FROM ${source.table}`)
   const byIdCard = new Map<string, Row>()
 
-  // 一体化在职 同一人会出现 001 工资 / 002 数币 两行；预算同步只关心 001（交通费等字段都在 001）。
+  // 在职工资 同一人会出现 001 工资 / 002 数币 两行；预算同步只关心 001（交通费等字段都在 001）。
   // 没有 001 的退回 002，避免漏人。
   const batchRankOf = (row: Row): number => {
     if (!batchColumn) return 0
