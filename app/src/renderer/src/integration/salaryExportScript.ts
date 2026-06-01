@@ -13,6 +13,8 @@ type SalaryExportScriptOptions = {
   saltypes: SalaryExportSaltypeInput[]
   /** 单位过滤名：只导出 agency_name 包含这个字符串的单位；为空则全导 */
   filterUnitName?: string
+  /** 预算单位编码：多单位账号下优先用编码精确定位单位 */
+  filterUnitCode?: string
 }
 
 /**
@@ -32,6 +34,7 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
   const month = options.month ?? ''
   const saltypes = options.saltypes
   const filterUnitName = options.filterUnitName ?? ''
+  const filterUnitCode = options.filterUnitCode ?? ''
 
   return `
 ;(async function runSalaryExport() {
@@ -39,11 +42,13 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
   const FORCE_MONTH = ${JSON.stringify(month)}
   const SALTYPES = ${JSON.stringify(saltypes)}
   const FILTER_UNIT_NAME = ${JSON.stringify(filterUnitName)}
+  const FILTER_UNIT_CODE = ${JSON.stringify(filterUnitCode)}
 
   const EMPTY_XLS_THRESHOLD = 4096
   const STEP_DELAY = 350
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
+  function normalizeCode(value) { return String(value || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase() }
 
   function ensureStatus() {
     let el = document.getElementById('salary-export-status')
@@ -263,9 +268,27 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     if (!agDisc.ok) throw new Error('发现单位失败：' + agDisc.reason)
     if (!agDisc.agencies.length) throw new Error('当前账号没有可访问的单位（getAllAgencyHN 返回空）')
 
-    // 单位过滤：按 unitFullName 匹配（前后双向 includes，更宽容）
+    // 单位过滤：预算单位编码优先，单位全称兜底。多单位账号必须唯一命中，避免误导出其它单位。
     let agencies = agDisc.agencies
-    if (FILTER_UNIT_NAME) {
+    if (FILTER_UNIT_CODE) {
+      const codeFiltered = agencies.filter(function (a) {
+        return normalizeCode(a.agency_code) === normalizeCode(FILTER_UNIT_CODE) ||
+          normalizeCode(a.agency_code + a.agency_name).indexOf(normalizeCode(FILTER_UNIT_CODE)) >= 0
+      })
+      if (!codeFiltered.length) {
+        throw new Error(
+          '按预算单位编码"' + FILTER_UNIT_CODE + '"过滤后没有匹配单位。\\n可用单位：' +
+            agencies.map(function (a) { return a.agency_code + ' ' + a.agency_name }).join('、')
+        )
+      }
+      if (codeFiltered.length > 1) {
+        throw new Error(
+          '预算单位编码"' + FILTER_UNIT_CODE + '"匹配到多个单位：' +
+            codeFiltered.map(function (a) { return a.agency_code + ' ' + a.agency_name }).join('、')
+        )
+      }
+      agencies = codeFiltered
+    } else if (FILTER_UNIT_NAME) {
       const filtered = agencies.filter(function (a) {
         return (
           (a.agency_name || '').indexOf(FILTER_UNIT_NAME) >= 0 ||
@@ -276,6 +299,12 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
         throw new Error(
           '按"' + FILTER_UNIT_NAME + '"过滤后没有匹配单位。\\n可用单位：' +
             agencies.map(function (a) { return a.agency_code + ' ' + a.agency_name }).join('、')
+        )
+      }
+      if (filtered.length > 1) {
+        throw new Error(
+          '按"' + FILTER_UNIT_NAME + '"匹配到多个单位，请在系统设置中维护预算单位编码：' +
+            filtered.map(function (a) { return a.agency_code + ' ' + a.agency_name }).join('、')
         )
       }
       agencies = filtered

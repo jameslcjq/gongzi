@@ -31,6 +31,11 @@ import { buildSalarySystemImportScript } from '../integration/salarySystemImport
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
 import { buildPushVoucherScript } from '../integration/pushVoucherScript'
 import { pendingPushQueue, type PushStep } from '../integration/insurancePushQueue'
+import {
+  buildIntegrationPushPreflightScript,
+  type IntegrationPushPreflightResult,
+  type IntegrationPushPreflightUnit
+} from '../integration/integrationPushPreflightScript'
 import type { BudgetImportResult, MonthlyPayrollPushStatus } from '@shared/types'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
@@ -204,7 +209,28 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
     try {
       const unit = await window.salaryApi.getUnitSettings()
       filterUnitName = (unit.unitFullName || '').trim()
+      const filterUnitCode = (unit.unitImportCode || '').trim()
+      const r = (await wv.executeJavaScript(
+        buildSalarySystemImportScript({
+          mode: step.mode,
+          file: {
+            fileName: step.fileName,
+            base64: step.fileBase64,
+            size: step.fileSize
+          },
+          filterUnitName,
+          filterUnitCode,
+          month: step.month
+        })
+      )) as SalarySystemImportResult | undefined
+      if (r?.ok) {
+        ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
+      } else {
+        throw new Error(`${name}失败：${r?.message || '未知错误'}`)
+      }
+      return
     } catch (error) {
+      if (filterUnitName) throw error
       console.warn('读取单位设置失败，继续由一体化单位列表判断', error)
     }
     const r = (await wv.executeJavaScript(
@@ -219,11 +245,8 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
         month: step.month
       })
     )) as SalarySystemImportResult | undefined
-    if (r?.ok) {
-      ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
-    } else {
-      throw new Error(`${name}失败：${r?.message || '未知错误'}`)
-    }
+    if (r?.ok) ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
+    else throw new Error(`${name}失败：${r?.message || '未知错误'}`)
   }
 }
 
@@ -236,6 +259,76 @@ async function markPushStatus(step: PushStep, status: MonthlyPayrollPushStatus):
   }
 }
 
+function collectInsuranceUnits(steps: PushStep[]): IntegrationPushPreflightUnit[] {
+  const map = new Map<string, IntegrationPushPreflightUnit>()
+  for (const step of steps) {
+    if (step.kind !== 'insurance') continue
+    for (const record of step.records) {
+      const code = String(record.agency_code || '').trim()
+      const name = String(record.agency_code_name || '').trim()
+      const key = `${code}|${name}`
+      if (code || name) map.set(key, { code, name })
+    }
+  }
+  return Array.from(map.values())
+}
+
+async function markStepsStatus(steps: PushStep[], status: MonthlyPayrollPushStatus): Promise<void> {
+  const seen = new Set<string>()
+  for (const step of steps) {
+    const key = `${step.runId || ''}|${step.pushTarget || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    await markPushStatus(step, status)
+  }
+}
+
+async function runPushPreflight(wv: PortalWebview, steps: PushStep[]): Promise<boolean> {
+  const needsSalary = steps.some((step) => step.kind === 'salary-system-import')
+  const needsInsurance = steps.some((step) => step.kind === 'insurance')
+  const needsVoucher = steps.some((step) => step.kind === 'voucher')
+  let unitFullName = ''
+  let unitImportCode = ''
+
+  try {
+    const unit = await window.salaryApi.getUnitSettings()
+    unitFullName = (unit.unitFullName || '').trim()
+    unitImportCode = (unit.unitImportCode || '').trim()
+  } catch (error) {
+    ElMessage.error(`读取单位设置失败：${error instanceof Error ? error.message : String(error)}`)
+    return false
+  }
+
+  const result = (await wv.executeJavaScript(
+    buildIntegrationPushPreflightScript({
+      unitFullName,
+      unitImportCode,
+      needsSalary,
+      needsInsurance,
+      needsVoucher,
+      insuranceUnits: collectInsuranceUnits(steps)
+    })
+  )) as IntegrationPushPreflightResult | undefined
+
+  if (result?.ok) {
+    const agency = result.matchedAgency
+    ElMessage.success(
+      agency
+        ? `推送前检测通过：${agency.agency_code} ${agency.agency_name}`
+        : result.message || '推送前检测通过'
+    )
+    return true
+  }
+
+  const details = result?.details?.filter(Boolean) ?? []
+  await ElMessageBox.alert(
+    [result?.message || '一体化推送前检测未通过', ...details].join('\n'),
+    '推送前检测',
+    { type: 'error', confirmButtonText: '知道了' }
+  )
+  return false
+}
+
 async function processPushQueue(): Promise<void> {
   if (processingPushQueue.value) return
   if (!pendingPushQueue.value.length) return
@@ -244,6 +337,12 @@ async function processPushQueue(): Promise<void> {
     const wv = activeWebview()
     if (!wv) {
       ElMessage.error('一体化 webview 尚未就绪，推送任务已丢弃，请重新触发')
+      pendingPushQueue.value = []
+      return
+    }
+    const queuedSteps = pendingPushQueue.value.slice()
+    if (!(await runPushPreflight(wv, queuedSteps))) {
+      await markStepsStatus(queuedSteps, 'failed')
       pendingPushQueue.value = []
       return
     }
@@ -637,12 +736,14 @@ async function exportSalary(): Promise<void> {
   type SaltypeInput = { saltype_id: string; saltype_name: string; onlyFirstBatch?: boolean }
   let saltypes: SaltypeInput[] = []
   let filterUnitName = ''
+  let filterUnitCode = ''
   try {
     const unit = await window.salaryApi.getUnitSettings()
     saltypes = ((unit.salaryExportSaltypes || []) as SaltypeInput[]).filter(
       (s) => s.saltype_id && s.saltype_name
     )
     filterUnitName = (unit.unitFullName || '').trim()
+    filterUnitCode = (unit.unitImportCode || '').trim()
   } catch (error) {
     salaryExporting.value = false
     ElMessage.error(`读取单位设置失败：${error instanceof Error ? error.message : String(error)}`)
@@ -659,7 +760,7 @@ async function exportSalary(): Promise<void> {
   let result: SalaryExportScriptResult | null = null
   try {
     result = (await wv.executeJavaScript(
-      buildSalaryExportScript({ saltypes, filterUnitName })
+      buildSalaryExportScript({ saltypes, filterUnitName, filterUnitCode })
     )) as SalaryExportScriptResult
   } catch (error) {
     salaryExporting.value = false

@@ -10,6 +10,7 @@ type SalarySystemImportScriptOptions = {
   mode: SalarySystemImportMode
   file: SalarySystemImportFile
   filterUnitName?: string
+  filterUnitCode?: string
   month?: string
 }
 
@@ -22,11 +23,13 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
   var FILE_NAME = ${JSON.stringify(options.file.fileName)}
   var BASE64 = ${JSON.stringify(options.file.base64)}
   var FILTER_UNIT_NAME = ${JSON.stringify(options.filterUnitName || '')}
+  var FILTER_UNIT_CODE = ${JSON.stringify(options.filterUnitCode || '')}
   var MONTH = ${JSON.stringify(options.month || '')}
   var MENUID = ${JSON.stringify(SALARY_MENUID)}
 
   function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms) }) }
   function normalize(value) { return String(value || '').replace(/\\s+/g, '') }
+  function normalizeCode(value) { return String(value || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase() }
 
   function ensureStatus() {
     var el = document.getElementById('salary-system-import-status')
@@ -98,6 +101,16 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
       }
     }).filter(function (item) { return !!item.agency_id })
     if (!list.length) throw new Error('未读取到工资单位列表，请先进入工资信息维护页面后再试')
+
+    var filterCode = normalizeCode(FILTER_UNIT_CODE)
+    if (filterCode) {
+      var codeMatched = list.filter(function (item) {
+        return normalizeCode(item.agency_code) === filterCode ||
+          normalizeCode(item.agency_code + item.agency_name).indexOf(filterCode) >= 0
+      })
+      if (codeMatched.length === 1) return codeMatched[0]
+      if (codeMatched.length > 1) throw new Error('预算单位编码匹配到多个单位：' + codeMatched.map(function (x) { return x.agency_code + ' ' + x.agency_name }).join('、'))
+    }
 
     var filter = normalize(FILTER_UNIT_NAME)
     if (filter) {
