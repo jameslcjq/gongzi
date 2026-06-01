@@ -7,6 +7,7 @@ import type {
   BackupSummary,
   ImportWatcherStatus,
   MonthlyPayrollRun,
+  RecycleBinBatch,
   SalaryExportSaltype,
   UnitSettings,
   UnitSettingsLockState
@@ -28,6 +29,9 @@ const backups = ref<BackupSummary[]>([])
 const backupsLoading = ref(false)
 const creatingBackup = ref(false)
 const wiping = ref(false)
+const recycleBatches = ref<RecycleBinBatch[]>([])
+const recycleLoading = ref(false)
+const recycleRestoringId = ref<number | null>(null)
 const monthCloseRuns = ref<MonthlyPayrollRun[]>([])
 const monthCloseLoading = ref(false)
 const cancelingMonthCloseId = ref<number | null>(null)
@@ -91,6 +95,7 @@ watch(
   (visible) => {
     if (visible) {
       void refreshBackups()
+      void refreshRecycleBin()
       void refreshMonthCloseRuns()
       void loadUnitSettings()
       void loadAppVersion()
@@ -215,6 +220,15 @@ async function refreshBackups() {
   }
 }
 
+async function refreshRecycleBin() {
+  recycleLoading.value = true
+  try {
+    recycleBatches.value = await window.salaryApi.listRecycleBinBatches(200)
+  } finally {
+    recycleLoading.value = false
+  }
+}
+
 async function refreshMonthCloseRuns() {
   monthCloseLoading.value = true
   try {
@@ -292,6 +306,36 @@ async function restore(backup: BackupSummary) {
   }
 }
 
+async function restoreRecycleBatch(row: RecycleBinBatch) {
+  try {
+    await ElMessageBox.confirm(
+      `将尝试恢复批次 ${row.id} 中的 ${row.recordCount} 行删除快照；如原记录 ID 或唯一字段已经被占用，系统会跳过冲突行，不覆盖现有数据。`,
+      '从回收站恢复',
+      {
+        type: 'warning',
+        confirmButtonText: '恢复',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    return
+  }
+
+  recycleRestoringId.value = row.id
+  try {
+    const result = await window.salaryApi.restoreRecycleBinBatch(row.id)
+    ElMessage.success(
+      `已恢复 ${result.restoredRows} 行，冲突 ${result.conflictRows} 行，跳过 ${result.skippedRows} 行`
+    )
+    await refreshRecycleBin()
+    emit('changed')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '恢复失败')
+  } finally {
+    recycleRestoringId.value = null
+  }
+}
+
 async function chooseImportFolder() {
   await window.salaryApi.chooseImportWatcherFolder()
   emit('changed')
@@ -300,7 +344,7 @@ async function chooseImportFolder() {
 async function wipeAll() {
   try {
     await ElMessageBox.confirm(
-      '将清空业务工作表数据 + 导入批次 + 操作日志，四张对照基础表会保留。无法恢复，建议先建一份备份。确定继续吗？',
+      '将清空业务工作表数据 + 导入批次，四张对照基础表会保留；本次清空会写入永久操作留痕。建议先建一份备份。确定继续吗？',
       '一键清空所有数据',
       {
         type: 'error',
@@ -351,6 +395,17 @@ async function openImportFolder() {
 
 function openLookupWorksheet(name: string) {
   emit('openWorksheet', name)
+}
+
+function recycleKindText(kind: string): string {
+  if (kind === 'system.wipe-all') return '一键清空'
+  if (kind === 'worksheet.clear') return '清空工作表'
+  if (kind === 'worksheet.delete-records') return '批量删除'
+  if (kind === 'worksheet.delete-record') return '删除记录'
+  if (kind === 'monthly-payroll.delete-run') return '删除工资报账'
+  if (kind === 'monthly-payroll.detail-replace') return '替换月度明细'
+  if (kind === 'budget-xls.update') return '预算导入更新'
+  return kind
 }
 
 function close() {
@@ -588,6 +643,42 @@ function formatMoney(value: number): string {
           <el-table-column label="操作" width="120" fixed="right">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="restore(row)">恢复</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="回收站" name="recycle">
+        <div class="settings-section">
+          <h4>回收站</h4>
+          <p>删除、清空、替换前的数据快照会永久留痕；恢复时只补回不存在的原记录，不覆盖当前数据。</p>
+          <div>
+            <el-button @click="refreshRecycleBin">刷新回收站</el-button>
+          </div>
+        </div>
+
+        <el-table :data="recycleBatches" v-loading="recycleLoading" border size="small" height="420">
+          <el-table-column prop="id" label="批次" width="78" />
+          <el-table-column prop="createdAt" label="时间" min-width="170" />
+          <el-table-column label="类型" width="130">
+            <template #default="{ row }">{{ recycleKindText(row.kind) }}</template>
+          </el-table-column>
+          <el-table-column label="对象" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.targetName || row.targetType || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="说明" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.reason || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="recordCount" label="快照行数" width="100" align="right" />
+          <el-table-column label="操作" width="110" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                text
+                type="primary"
+                :loading="recycleRestoringId === row.id"
+                @click="restoreRecycleBatch(row)"
+              >恢复</el-button>
             </template>
           </el-table-column>
         </el-table>

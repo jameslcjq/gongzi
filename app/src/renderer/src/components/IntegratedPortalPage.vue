@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Close,
   Download,
@@ -27,10 +27,11 @@ import {
   buildStartSalaryQuotaMatchScript
 } from '../integration/salaryQuotaMatchScript'
 import { buildSalarySystemImportScript } from '../integration/salarySystemImportScript'
-// 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 自动入库
+// 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 预览确认后入库
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
 import { buildPushVoucherScript } from '../integration/pushVoucherScript'
 import { pendingPushQueue, type PushStep } from '../integration/insurancePushQueue'
+import type { BudgetImportResult, MonthlyPayrollPushStatus } from '@shared/types'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
 const salaryGiveOutUrl =
@@ -169,8 +170,6 @@ function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
 // 主进程通过 IPC 通知"webview 内有弹窗请求"
 let stopOpenTabListener: (() => void) | null = null
 let stopDownloadDoneListener: (() => void) | null = null
-let stopBudgetImportListener: (() => void) | null = null
-let stopRecorderDevTools: (() => void) | null = null
 // 保险/凭证推送队列：MonthlyPayrollPage 把多步任务塞进 pendingPushQueue，
 // 这里串行处理，每步在 active webview 上跑对应注入脚本
 const processingPushQueue = ref(false)
@@ -186,7 +185,7 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
     if (r?.ok) {
       ElMessage.success(`✅ 保险已推送 ${r.recordCount} 条 / ${step.label}`)
     } else {
-      ElMessage.error(`❌ 保险推送失败：${r?.reason || '未知错误'}`)
+      throw new Error(`保险推送失败：${r?.reason || '未知错误'}`)
     }
   } else if (step.kind === 'voucher') {
     ElMessage.info(`【凭证】开始：${step.label}（${step.fileName}）`)
@@ -196,7 +195,7 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
     if (r?.ok) {
       ElMessage.success(`✅ 凭证已导入 / ${step.label}`)
     } else {
-      ElMessage.error(`❌ 凭证推送失败：${r?.reason || '未知错误'}`)
+      throw new Error(`凭证推送失败：${r?.reason || '未知错误'}`)
     }
   } else if (step.kind === 'salary-system-import') {
     const name = step.mode === 'backpay' ? '补发工资' : '工资导入'
@@ -223,8 +222,17 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
     if (r?.ok) {
       ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
     } else {
-      ElMessage.error(`❌ ${name}失败：${r?.message || '未知错误'}`)
+      throw new Error(`${name}失败：${r?.message || '未知错误'}`)
     }
+  }
+}
+
+async function markPushStatus(step: PushStep, status: MonthlyPayrollPushStatus): Promise<void> {
+  if (!step.runId || !step.pushTarget) return
+  try {
+    await window.salaryApi.updateMonthlyPayrollPushStatus(step.runId, step.pushTarget, status)
+  } catch (error) {
+    console.warn('更新推送状态失败', error)
   }
 }
 
@@ -242,12 +250,17 @@ async function processPushQueue(): Promise<void> {
     while (pendingPushQueue.value.length > 0) {
       const step = pendingPushQueue.value.shift() as PushStep
       try {
+        await markPushStatus(step, 'queued')
         await runOneStep(wv, step)
+        await markPushStatus(step, 'success')
       } catch (error) {
+        await markPushStatus(step, 'failed')
+        const stopped = pendingPushQueue.value.length
+        pendingPushQueue.value = []
         ElMessage.error(
-          `执行 ${step.kind} 步骤异常：${error instanceof Error ? error.message : String(error)}`
+          `执行 ${step.kind} 步骤失败，已停止后续 ${stopped} 个步骤：${error instanceof Error ? error.message : String(error)}`
         )
-        // 出错继续做后面的步骤
+        return
       }
       // 步骤间隔，让浮窗状态可读
       await new Promise((r) => window.setTimeout(r, 1200))
@@ -265,58 +278,69 @@ watch(
   { immediate: false }
 )
 
-onMounted(() => {
-  if (import.meta.env.DEV) {
-    void nextTick(async () => {
-      const actions = document.querySelector<HTMLElement>('.portal-actions')
-      if (!actions) return
-      const mod = await import('../integration/recorderDevTools')
-      stopRecorderDevTools = mod.mountPortalRecorderDevTools({
-        target: actions,
-        activeWebview,
-        api: window.salaryApi
-      })
-    })
+async function confirmBudgetImport(filePath: string): Promise<void> {
+  let preview: BudgetImportResult
+  try {
+    preview = await window.salaryApi.previewBudgetImport(filePath)
+  } catch (error) {
+    ElMessage.error(`预算 xls 预览失败：${error instanceof Error ? error.message : String(error)}`)
+    return
   }
+
+  const summary = formatBudgetImportSummary(preview, false)
+  try {
+    await ElMessageBox.confirm(
+      `${summary}\n\n确认后才会写入预算表。`,
+      '确认预算 xls 入库',
+      {
+        type: preview.ok ? 'warning' : 'error',
+        confirmButtonText: '确认入库',
+        cancelButtonText: '暂不入库',
+        dangerouslyUseHTMLString: false
+      }
+    )
+  } catch {
+    ElMessage.info('已取消预算 xls 入库，文件已保留在本地')
+    return
+  }
+
+  try {
+    const result = await window.salaryApi.commitBudgetImport(filePath)
+    if (result.ok) {
+      ElMessage.success({
+        message: formatBudgetImportSummary(result, true),
+        duration: 10000
+      })
+    } else {
+      ElMessage.error(`预算入库失败：${result.message || '详见明细'}`)
+    }
+  } catch (error) {
+    ElMessage.error(`预算入库失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function formatBudgetImportSummary(result: BudgetImportResult, committed: boolean): string {
+  const action = committed ? '入库完成' : '预览结果'
+  const head =
+    `预算 xls ${action}：${committed ? '插入' : '将插入'} ${result.totalInserted}，` +
+    `${committed ? '更新' : '将更新'} ${result.totalUpdated}，跳过 ${result.totalSkipped}`
+  const lines = result.sheets
+    .filter((sheet) => sheet.inserted + sheet.updated + sheet.skipped > 0 || sheet.status !== 'empty')
+    .map((sheet) => {
+      const status = sheet.status === 'ok' ? '' : `（${sheet.message || sheet.status}）`
+      return `${sheet.worksheetName}: ${committed ? '新增' : '将新增'} ${sheet.inserted} / ${committed ? '更新' : '将更新'} ${sheet.updated} / 跳过 ${sheet.skipped}${status}`
+    })
+  return [head, ...lines.slice(0, 8), lines.length > 8 ? `其余 ${lines.length - 8} 张表略` : '']
+    .filter(Boolean)
+    .join('\n')
+}
+
+onMounted(() => {
   if (pendingPushQueue.value.length > 0) {
     void nextTick(() => {
       window.setTimeout(() => void processPushQueue(), 800)
     })
   }
-  stopBudgetImportListener = window.salaryApi.onBudgetImportDone(
-    (payload: {
-      ok: boolean
-      savedPath: string
-      totalInserted?: number
-      totalUpdated?: number
-      totalSkipped?: number
-      sheets?: Array<{
-        sheetName: string
-        worksheetName: string
-        inserted: number
-        updated: number
-        skipped: number
-        status: string
-        message?: string
-      }>
-      message?: string
-    }) => {
-      if (payload.ok) {
-        const lines = (payload.sheets || [])
-          .filter((s) => s.inserted + s.updated > 0)
-          .map((s) => `  • ${s.worksheetName}: 新增 ${s.inserted} / 更新 ${s.updated}`)
-        ElMessage.success({
-          message:
-            `✅ 预算 xls 入库完成：插入 ${payload.totalInserted || 0}，更新 ${payload.totalUpdated || 0}\n` +
-            (lines.length ? lines.join('\n') : '（所有 sheet 为空或无新增）'),
-          duration: 10000
-        })
-      } else {
-        ElMessage.error(`预算入库失败：${payload.message || '未知错误'}`)
-      }
-    }
-  )
-
   stopDownloadDoneListener = window.salaryApi.onWebviewDownloadDone((payload: {
     ok: boolean
     state: string
@@ -327,9 +351,8 @@ onMounted(() => {
   }) => {
     if (payload.ok) {
       if (payload.isBudget) {
-        ElMessage.success(
-          `预算 xls 已存档：${payload.savedPath}；正在自动入库...`
-        )
+        ElMessage.success(`预算 xls 已存档：${payload.savedPath}；等待确认入库`)
+        void confirmBudgetImport(payload.savedPath)
       } else {
         ElMessage.success(
           `已自动入库：${payload.originalName} → ${payload.savedPath}（watcher 会自动导入）`
@@ -368,14 +391,6 @@ onBeforeUnmount(() => {
   if (stopDownloadDoneListener) {
     stopDownloadDoneListener()
     stopDownloadDoneListener = null
-  }
-  if (stopBudgetImportListener) {
-    stopBudgetImportListener()
-    stopBudgetImportListener = null
-  }
-  if (stopRecorderDevTools) {
-    stopRecorderDevTools()
-    stopRecorderDevTools = null
   }
 })
 

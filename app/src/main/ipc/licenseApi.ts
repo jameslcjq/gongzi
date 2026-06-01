@@ -10,7 +10,6 @@ import {
   getSavedLicenseKey,
   importOfflineLicenseText,
   saveLicenseKey,
-  setLicenseServerUrl,
   verifyLicense
 } from '../services/licenseService'
 
@@ -75,14 +74,9 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:setServerUrl', async (_event, serverUrl: string) => {
-    try {
-      setLicenseServerUrl(serverUrl || '')
-      return ok(getLicenseServerUrl())
-    } catch (error) {
-      return fail(error)
-    }
-  })
+  ipcMain.handle('license:setServerUrl', async () =>
+    fail(new Error('授权服务器地址不允许在客户端修改'))
+  )
 
   ipcMain.handle('license:deviceInfo', async (_event, licenseKey?: string) => {
     try {

@@ -252,6 +252,26 @@ export type SalaryQuotaMatchLocalSummary = {
   message?: string
 }
 
+export type BudgetSheetImportResult = {
+  sheetName: string
+  worksheetName: string
+  inserted: number
+  updated: number
+  skipped: number
+  status: 'ok' | 'no-target-worksheet' | 'empty' | 'no-key' | 'error'
+  message?: string
+}
+
+export type BudgetImportResult = {
+  ok: boolean
+  filePath: string
+  sheets: BudgetSheetImportResult[]
+  totalInserted: number
+  totalUpdated: number
+  totalSkipped: number
+  message?: string
+}
+
 export type LocalFileBase64 = {
   filePath: string
   fileName: string
@@ -398,7 +418,73 @@ export type MonthlyPayrollRun = {
   archiveDir: string | null
   archiveManifest: string[]
   reportSnapshot?: MonthlyPayrollReportResult | null
+  isOutdated: boolean
+  outdatedAt: string | null
+  outdatedReason: string | null
+  insurancePushStatus: MonthlyPayrollPushStatus
+  salaryPushStatus: MonthlyPayrollPushStatus
+  insurancePushedAt: string | null
+  salaryPushedAt: string | null
   createdAt: string
+}
+
+export type MonthlyPayrollPushStatus =
+  | 'not-pushed'
+  | 'queued'
+  | 'success'
+  | 'failed'
+  | 'needs-repush'
+
+export type MonthlyPayrollSourceKind = 'salary' | 'social' | 'tax'
+
+export type MonthlyPayrollSourceVersionStatus = 'current' | 'replaced'
+
+export type MonthlyPayrollSourceVersion = {
+  id: number
+  year: number
+  month: number
+  kind: MonthlyPayrollSourceKind
+  filePath: string
+  archivePath: string | null
+  fileName: string
+  fileSize: number
+  sha256: string
+  rowCount: number
+  totalAmount: number
+  summary: Record<string, unknown>
+  status: MonthlyPayrollSourceVersionStatus
+  replacedAt: string | null
+  createdAt: string
+}
+
+export type RecycleBinBatch = {
+  id: number
+  kind: string
+  targetType: string | null
+  targetName: string | null
+  reason: string | null
+  recordCount: number
+  createdAt: string
+}
+
+export type RecycleBinRecord = {
+  id: number
+  batchId: number
+  tableName: string
+  worksheetName: string | null
+  recordId: number | null
+  action: 'delete' | 'clear' | 'wipe'
+  beforeValues: Record<string, unknown>
+  createdAt: string
+}
+
+export type RecycleBinRestoreResult = {
+  batchId: number
+  restoredRows: number
+  skippedRows: number
+  conflictRows: number
+  failedRows: number
+  messages: string[]
 }
 
 export type MonthlyPayrollArchiveResult = {

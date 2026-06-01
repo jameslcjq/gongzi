@@ -10,12 +10,14 @@ import type { InsuranceRecord } from './pushInsuranceScript'
  *   - voucher：凭证文件 base64，POST /gld-account-server/.../gl_import_file_json (multipart)
  *   - salary-system-import：工资系统的工资变动/补发工资 Excel 导入
  *
- * 一次塞多步 → 串行处理（先保险再凭证）。一步失败也继续处理后续步骤（独立报错）。
+ * 一次塞多步 → 串行处理（先保险再凭证）。一步失败立即停止，避免外部系统半成功。
  */
 export type InsurancePushStep = {
   kind: 'insurance'
   records: InsuranceRecord[]
   label: string
+  runId?: number
+  pushTarget?: 'insurance' | 'salary'
 }
 
 export type VoucherPushStep = {
@@ -23,6 +25,8 @@ export type VoucherPushStep = {
   fileBase64: string
   fileName: string
   label: string
+  runId?: number
+  pushTarget?: 'insurance' | 'salary'
 }
 
 export type SalarySystemImportPushStep = {
@@ -33,6 +37,8 @@ export type SalarySystemImportPushStep = {
   fileSize: number
   month?: string
   label: string
+  runId?: number
+  pushTarget?: 'insurance' | 'salary'
 }
 
 export type PushStep = InsurancePushStep | VoucherPushStep | SalarySystemImportPushStep
@@ -51,6 +57,3 @@ export function requestSwitchToIntegration(): void {
   if (switchToIntegrationFn) switchToIntegrationFn()
   else console.warn('[push-queue] 切换函数未注册')
 }
-
-// 向后兼容（旧代码引用 pendingInsurancePush 不再有效，留个别名占位）
-export const pendingInsurancePush = ref<null>(null) // deprecated

@@ -11,13 +11,31 @@ import {
   getCachedImportFolder,
   startExcelImportWatcher
 } from './services/excelImportWatcher'
-import { importBudgetXls } from './services/budgetExcelImport'
 import { applyAnnualTownshipYearIncreaseIfNeeded } from './services/township-allowance/townshipAllowance'
 
 const isDev = process.env.NODE_ENV === 'development'
 
 // 防止给同一个 session 重复挂 will-download 监听
 const hookedSessions = new WeakSet<Session>()
+
+function normalizeDownloadName(filename: string): string {
+  return filename.trim().replace(/\s+/g, '')
+}
+
+function isBudgetPersonnelExport(filename: string): boolean {
+  const name = normalizeDownloadName(filename)
+  return /(^|[_-])人员信息([_-]|$)/.test(name) && /\d{5,}/.test(name)
+}
+
+function isSalaryExportWorkbook(filename: string): boolean {
+  const name = normalizeDownloadName(filename)
+  return /^工资[-_]/.test(name)
+}
+
+function shouldAutoCapturePortalWorkbook(filename: string): boolean {
+  const name = normalizeDownloadName(filename)
+  return isSalaryExportWorkbook(name) || isBudgetPersonnelExport(name)
+}
 
 function installDownloadInterception(targetSession: Session, hostWindow: BrowserWindow): void {
   if (hookedSessions.has(targetSession)) return
@@ -27,10 +45,10 @@ function installDownloadInterception(targetSession: Session, hostWindow: Browser
     try {
       const url = item.getURL()
       const filename = item.getFilename() || 'download.bin'
-      // 只拦内网一体化系统的 Excel/CSV 类下载
+      // 只拦一体化里的两个入库来源：导出工资、预算人员信息；其它 Excel 走默认另存为。
       const isPortalSource = /172\.24\.147\.202|portal|sal-|bim\//i.test(url)
       const isImportable = /\.(xls|xlsx|csv)$/i.test(filename)
-      if (!isPortalSource || !isImportable) {
+      if (!isPortalSource || !isImportable || !shouldAutoCapturePortalWorkbook(filename)) {
         return // 让它正常走默认下载行为（操作系统的另存为对话框）
       }
 
@@ -42,9 +60,9 @@ function installDownloadInterception(targetSession: Session, hostWindow: Browser
       }
 
       // 预算"人员信息查看"导出的文件名形如 "019070_人员信息_20260522..._xxx.xls"
-      // 只用文件名判定：含"人员信息"四字 → 预算分支（走子目录 + 调 budget importer）
+      // 只用文件名判定：单位编码 + "_人员信息_" → 预算分支（走子目录 + 调 budget importer）
       // 其他都按工资 xls 处理（主目录 + watcher 自动入库）
-      const isBudget = /人员信息/.test(filename)
+      const isBudget = isBudgetPersonnelExport(filename)
       const targetDir = isBudget ? join(folder, '预算导出') : folder
       try {
         if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
@@ -71,32 +89,6 @@ function installDownloadInterception(targetSession: Session, hostWindow: Browser
 
       item.once('done', (_e, state) => {
         const completed = state === 'completed'
-        // 预算 xls 下载完成 → 立即触发入库
-        if (completed && isBudget) {
-          void importBudgetXls(fullPath)
-            .then((result) => {
-              if (!hostWindow.isDestroyed()) {
-                hostWindow.webContents.send('integration:budget-import-done', {
-                  ok: result.ok,
-                  savedPath: fullPath,
-                  totalInserted: result.totalInserted,
-                  totalUpdated: result.totalUpdated,
-                  totalSkipped: result.totalSkipped,
-                  sheets: result.sheets
-                })
-              }
-            })
-            .catch((error) => {
-              console.error('[budget-import] 失败', error)
-              if (!hostWindow.isDestroyed()) {
-                hostWindow.webContents.send('integration:budget-import-done', {
-                  ok: false,
-                  savedPath: fullPath,
-                  message: error instanceof Error ? error.message : String(error)
-                })
-              }
-            })
-        }
         if (!hostWindow.isDestroyed()) {
           hostWindow.webContents.send('integration:webview-download-done', {
             ok: completed,

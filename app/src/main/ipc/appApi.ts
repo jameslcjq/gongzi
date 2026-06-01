@@ -38,7 +38,8 @@ import {
   deleteMonthlyPayrollRun,
   generateMonthlyPayrollReportView,
   getMonthlyPayrollRunReport,
-  listMonthlyPayrollRuns
+  listMonthlyPayrollRuns,
+  updateMonthlyPayrollPushStatus
 } from '../services/monthly-payroll/monthlyPayroll'
 import {
   getSalaryWorkbookPrintPageSummary,
@@ -70,6 +71,15 @@ import {
   readMonthlyPayrollSettings,
   writeMonthlyPayrollSettings
 } from '../services/monthly-payroll/monthlyPayrollSettings'
+import {
+  listMonthlyPayrollSourceVersions,
+  setMonthlyPayrollSourceVersionCurrent
+} from '../services/monthly-payroll/monthlyPayrollSources'
+import {
+  listRecycleBinBatches,
+  listRecycleBinRecords,
+  restoreRecycleBinBatch
+} from '../services/operationLog'
 import { getCachedLicenseStatus } from '../services/licenseService'
 import { getPersonnelStatusViews } from '../services/personnelStatus'
 import { exportWorksheetToExcel } from '../services/worksheetExport'
@@ -83,6 +93,7 @@ import {
   previewBudgetActiveMasterSync
 } from '../services/budgetActiveHrSync'
 import { readPersonnelExpensePlanPrefill } from '../services/budget/personnelExpensePlanPrefill'
+import { importBudgetXls, previewBudgetXls } from '../services/budgetExcelImport'
 import {
   applyTeacherDetailMasterSync,
   previewTeacherDetailMasterSync
@@ -148,9 +159,14 @@ import type {
   WorksheetField,
   LookupFailureEntry,
   MonthlyPayrollRun,
+  MonthlyPayrollPushStatus,
+  MonthlyPayrollSourceVersion,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
   MonthlyPayrollSettings,
+  RecycleBinBatch,
+  RecycleBinRecord,
+  RecycleBinRestoreResult,
   PrintRequest,
   PrinterSummary,
   UnitSettings,
@@ -398,32 +414,6 @@ export function registerAppIpc(): void {
   )
 
   ipcMain.handle(
-    'integration:save-recording',
-    async (
-      _event,
-      payload: { json: string; defaultFileName?: string }
-    ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> => {
-      try {
-        const { dialog } = await import('electron')
-        const { writeFileSync } = await import('node:fs')
-        const def = payload.defaultFileName || `一体化录制_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`
-        const res = await dialog.showSaveDialog({
-          title: '保存录制文件',
-          defaultPath: def,
-          filters: [{ name: 'JSON', extensions: ['json'] }]
-        })
-        if (res.canceled || !res.filePath) {
-          return { ok: false, reason: '用户取消', canceled: true }
-        }
-        writeFileSync(res.filePath, payload.json, 'utf-8')
-        return { ok: true, path: res.filePath }
-      } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
-      }
-    }
-  )
-
-  ipcMain.handle(
     'integration:get-portal-token',
     async (
       _event,
@@ -546,6 +536,16 @@ export function registerAppIpc(): void {
   )
 
   ipcMain.handle(
+    'budget-import:preview',
+    (_event, filePath: string) => previewBudgetXls(filePath)
+  )
+
+  ipcMain.handle(
+    'budget-import:commit',
+    (_event, filePath: string) => importBudgetXls(filePath)
+  )
+
+  ipcMain.handle(
     'salary-export:save-xls',
     async (
       _event,
@@ -640,6 +640,28 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('monthly-payroll:list-runs', (): Promise<MonthlyPayrollRun[]> =>
     listMonthlyPayrollRuns()
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:list-source-versions',
+    (_event, year: number, month: number): Promise<MonthlyPayrollSourceVersion[]> =>
+      listMonthlyPayrollSourceVersions(year, month)
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:set-source-version-current',
+    (_event, id: number): Promise<MonthlyPayrollSourceVersion> =>
+      setMonthlyPayrollSourceVersionCurrent(id)
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:update-push-status',
+    (
+      _event,
+      id: number,
+      target: 'insurance' | 'salary',
+      status: MonthlyPayrollPushStatus
+    ): Promise<MonthlyPayrollRun> => updateMonthlyPayrollPushStatus(id, target, status)
   )
 
   ipcMain.handle('monthly-payroll:delete-run', (_event, id: number): Promise<boolean> =>
@@ -876,6 +898,24 @@ export function registerAppIpc(): void {
   ipcMain.handle(
     'system:wipe-all',
     (): Promise<{ tables: number; rows: number }> => wipeAllWorksheetData()
+  )
+
+  ipcMain.handle('recycle-bin:list-batches', (_event, limit?: number): Promise<RecycleBinBatch[]> => {
+    return listRecycleBinBatches(limit)
+  })
+
+  ipcMain.handle(
+    'recycle-bin:list-records',
+    (_event, batchId: number, limit?: number): Promise<RecycleBinRecord[]> => {
+      return listRecycleBinRecords(batchId, limit)
+    }
+  )
+
+  ipcMain.handle(
+    'recycle-bin:restore-batch',
+    (_event, batchId: number): Promise<RecycleBinRestoreResult> => {
+      return restoreRecycleBinBatch(batchId)
+    }
   )
 
   ipcMain.handle(

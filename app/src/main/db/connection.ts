@@ -332,10 +332,38 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       archive_dir TEXT,
       archive_manifest TEXT,
       report_snapshot TEXT,
+      is_outdated INTEGER NOT NULL DEFAULT 0,
+      outdated_at TEXT,
+      outdated_reason TEXT,
+      insurance_push_status TEXT NOT NULL DEFAULT 'not-pushed',
+      salary_push_status TEXT NOT NULL DEFAULT 'not-pushed',
+      insurance_pushed_at TEXT,
+      salary_pushed_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS idx_monthly_payroll_runs_ym ON monthly_payroll_runs (year DESC, month DESC, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS monthly_payroll_source_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      archive_path TEXT,
+      file_name TEXT NOT NULL,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      sha256 TEXT NOT NULL,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      total_amount REAL NOT NULL DEFAULT 0,
+      summary_json TEXT,
+      status TEXT NOT NULL DEFAULT 'current',
+      replaced_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_monthly_payroll_source_versions_ym
+      ON monthly_payroll_source_versions (year DESC, month DESC, kind, status, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS import_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -463,6 +491,48 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       detail TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS operation_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      target_type TEXT,
+      target_name TEXT,
+      reason TEXT,
+      meta_json TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS record_change_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      table_name TEXT NOT NULL,
+      worksheet_name TEXT,
+      record_id INTEGER,
+      action TEXT NOT NULL,
+      before_values TEXT,
+      after_values TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (batch_id) REFERENCES operation_batches(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_record_change_logs_batch ON record_change_logs (batch_id);
+    CREATE INDEX IF NOT EXISTS idx_record_change_logs_target ON record_change_logs (table_name, record_id);
+
+    CREATE TABLE IF NOT EXISTS file_operation_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      file_label TEXT,
+      existed INTEGER NOT NULL DEFAULT 0,
+      file_size INTEGER,
+      sha256 TEXT,
+      error TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (batch_id) REFERENCES operation_batches(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_file_operation_logs_batch ON file_operation_logs (batch_id);
   `
   )
 
@@ -489,7 +559,17 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'archived_at', definition: 'TEXT' },
     { name: 'archive_dir', definition: 'TEXT' },
     { name: 'archive_manifest', definition: 'TEXT' },
-    { name: 'report_snapshot', definition: 'TEXT' }
+    { name: 'report_snapshot', definition: 'TEXT' },
+    { name: 'is_outdated', definition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'outdated_at', definition: 'TEXT' },
+    { name: 'outdated_reason', definition: 'TEXT' },
+    { name: 'insurance_push_status', definition: 'TEXT NOT NULL DEFAULT \'not-pushed\'' },
+    { name: 'salary_push_status', definition: 'TEXT NOT NULL DEFAULT \'not-pushed\'' },
+    { name: 'insurance_pushed_at', definition: 'TEXT' },
+    { name: 'salary_pushed_at', definition: 'TEXT' }
+  ])
+  await ensureColumns(database, 'monthly_payroll_source_versions', [
+    { name: 'archive_path', definition: 'TEXT' }
   ])
   await ensureColumns(database, 'personnel_status_index', [
     { name: 'name', definition: 'TEXT' },

@@ -11,6 +11,7 @@ import {
   applyIntegratedComputedFieldsForUpdate,
   applyIntegratedComputedFieldsToRows
 } from './monthly-payroll/integratedPayrollRules'
+import { createOperationBatch, logRowsBeforeDelete } from './operationLog'
 import type {
   WorksheetMeta,
   WorksheetMutationResult,
@@ -106,7 +107,29 @@ export async function deleteRecord(
   const worksheet = getWorksheetById(worksheetId)
   const tableName = quoteIdentifier(worksheet.name)
   const database = await getDatabase()
-  await run(database, `DELETE FROM ${tableName} WHERE "id" = ?`, [recordId])
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    const batchId = await createOperationBatch(database, {
+      kind: 'worksheet.delete-record',
+      targetType: 'worksheet',
+      targetName: worksheet.name,
+      reason: '手动删除单条记录',
+      meta: { worksheetId, recordId }
+    })
+    await logRowsBeforeDelete(database, {
+      batchId,
+      tableName: worksheet.name,
+      worksheetName: worksheet.name,
+      action: 'delete',
+      whereSql: '"id" = ?',
+      params: [recordId]
+    })
+    await run(database, `DELETE FROM ${tableName} WHERE "id" = ?`, [recordId])
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    throw error
+  }
   await refreshPersonnelStatusesForWorksheet(database, worksheet)
 
   return {
@@ -130,6 +153,21 @@ export async function deleteRecords(
   await run(database, 'BEGIN TRANSACTION')
   try {
     const placeholders = recordIds.map(() => '?').join(', ')
+    const batchId = await createOperationBatch(database, {
+      kind: 'worksheet.delete-records',
+      targetType: 'worksheet',
+      targetName: worksheet.name,
+      reason: '手动批量删除记录',
+      meta: { worksheetId, recordIds }
+    })
+    await logRowsBeforeDelete(database, {
+      batchId,
+      tableName: worksheet.name,
+      worksheetName: worksheet.name,
+      action: 'delete',
+      whereSql: `"id" IN (${placeholders})`,
+      params: recordIds
+    })
     await run(database, `DELETE FROM ${tableName} WHERE "id" IN (${placeholders})`, recordIds)
     await run(
       database,
@@ -165,6 +203,19 @@ export async function clearWorksheet(
 
   await run(database, 'BEGIN TRANSACTION')
   try {
+    const batchId = await createOperationBatch(database, {
+      kind: 'worksheet.clear',
+      targetType: 'worksheet',
+      targetName: worksheet.name,
+      reason: '手动清空工作表',
+      meta: { worksheetId, total }
+    })
+    await logRowsBeforeDelete(database, {
+      batchId,
+      tableName: worksheet.name,
+      worksheetName: worksheet.name,
+      action: 'clear'
+    })
     await run(database, `DELETE FROM ${tableName}`)
     await run(database, `DELETE FROM import_batch_rows WHERE worksheet_name = ?`, [worksheet.name])
     await run(database, 'COMMIT')
@@ -190,6 +241,12 @@ export async function wipeAllWorksheetData(): Promise<{ tables: number; rows: nu
   let clearedTables = 0
   await run(database, 'BEGIN TRANSACTION')
   try {
+    const batchId = await createOperationBatch(database, {
+      kind: 'system.wipe-all',
+      targetType: 'system',
+      targetName: 'all-worksheet-data',
+      reason: '手动一键清空所有业务数据'
+    })
     for (const worksheet of worksheets) {
       if (retainedBaseTables.has(worksheet.name)) continue
       const tableName = quoteIdentifier(worksheet.name)
@@ -199,6 +256,12 @@ export async function wipeAllWorksheetData(): Promise<{ tables: number; rows: nu
       )
       totalRows += totalRow?.total ?? 0
       clearedTables += 1
+      await logRowsBeforeDelete(database, {
+        batchId,
+        tableName: worksheet.name,
+        worksheetName: worksheet.name,
+        action: 'wipe'
+      })
       await run(database, `DELETE FROM ${tableName}`)
     }
     await run(database, `DELETE FROM import_batch_rows`)

@@ -8,6 +8,7 @@ import { archiveRoot } from '../../config/paths'
 import type {
   MonthlyPayrollArchiveResult,
   MonthlyPayrollDataSourceMode,
+  MonthlyPayrollPushStatus,
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
   MonthlyPayrollRun,
@@ -17,14 +18,43 @@ import type {
 import { normalizeMonthlyPayrollTaxField } from './monthlyPayrollSettings'
 import { readMonthlyPayrollPrintSettings } from '../printSettings'
 import { getSalaryWorkbookPrintPageSummary } from './printSalaryViaExcel'
+import { createOperationBatch, logFileOperation, logRecordSnapshots, logRowsBeforeDelete } from '../operationLog'
 
 export type MonthlyPayrollRunInput = Omit<
   MonthlyPayrollRun,
-  'id' | 'createdAt' | 'archivedAt' | 'archiveDir' | 'archiveManifest'
+  | 'id'
+  | 'createdAt'
+  | 'archivedAt'
+  | 'archiveDir'
+  | 'archiveManifest'
+  | 'isOutdated'
+  | 'outdatedAt'
+  | 'outdatedReason'
+  | 'insurancePushStatus'
+  | 'salaryPushStatus'
+  | 'insurancePushedAt'
+  | 'salaryPushedAt'
 >
 
 export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput): Promise<void> {
   const database = await getDatabase()
+  const outdatedAt = new Date().toISOString()
+  await run(
+    database,
+    `UPDATE monthly_payroll_runs
+        SET is_outdated = 1,
+            outdated_at = COALESCE(outdated_at, ?),
+            outdated_reason = COALESCE(outdated_reason, ?),
+            insurance_push_status = CASE WHEN insurance_push_status = 'success' THEN 'needs-repush' ELSE insurance_push_status END,
+            salary_push_status = CASE WHEN salary_push_status = 'success' THEN 'needs-repush' ELSE salary_push_status END
+      WHERE year = ? AND month = ? AND archived_at IS NULL AND is_outdated = 0`,
+    [
+      outdatedAt,
+      '同月已重新生成工资报账结果',
+      payload.year,
+      payload.month
+    ]
+  )
   await run(
     database,
     `INSERT INTO monthly_payroll_runs (
@@ -75,7 +105,10 @@ export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
       active_actual_pay, survivor_actual_pay, retired_housing_actual_pay, retired_housing,
       source_salary_path, source_social_path, source_tax_path,
       insurance_import_path, voucher_import_path, salary_import_path, payroll_backpay_path,
-      report_fingerprint, tax_field, data_source_mode, archived_at, archive_dir, archive_manifest, created_at
+      report_fingerprint, tax_field, data_source_mode, archived_at, archive_dir, archive_manifest,
+      is_outdated, outdated_at, outdated_reason,
+      insurance_push_status, salary_push_status, insurance_pushed_at, salary_pushed_at,
+      created_at
      FROM monthly_payroll_runs ORDER BY created_at DESC`
   )
   return rows.map(mapRunRow)
@@ -110,17 +143,30 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
     [existingRun.year, existingRun.month]
   )
   const monthRuns = monthRows.map(mapRunRow)
+  const operationBatchId = await createOperationBatch(database, {
+    kind: 'monthly-payroll.archive-month',
+    targetType: 'monthly-payroll',
+    targetName: `${existingRun.year}-${String(existingRun.month).padStart(2, '0')}`,
+    reason: '工资报账月结归档',
+    meta: { id, year: existingRun.year, month: existingRun.month, archiveDir }
+  })
+  await logRecordSnapshots(database, {
+    batchId: operationBatchId,
+    tableName: 'monthly_payroll_runs',
+    action: 'archive',
+    rows: monthRows
+  })
 
   const archivedFiles = (
     await Promise.all(
       monthRuns.flatMap((run) => [
-        moveArchiveFile(run.sourceSalaryPath, archiveDir, '工资表', archiveDate),
-        moveArchiveFile(run.sourceSocialPath, archiveDir, '社保', archiveDate),
-        moveArchiveFile(run.sourceTaxPath, archiveDir, '个税', archiveDate),
-        copyArchiveFile(run.insuranceImportPath, archiveDir, '保险导入', archiveDate),
-        copyArchiveFile(run.salaryImportPath, archiveDir, '工资导入', archiveDate),
-        copyArchiveFile(run.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
-        copyArchiveFile(run.voucherImportPath, archiveDir, '凭证', archiveDate)
+        moveArchiveFile(database, operationBatchId, run.sourceSalaryPath, archiveDir, '工资表', archiveDate),
+        moveArchiveFile(database, operationBatchId, run.sourceSocialPath, archiveDir, '社保', archiveDate),
+        moveArchiveFile(database, operationBatchId, run.sourceTaxPath, archiveDir, '个税', archiveDate),
+        copyArchiveFile(database, operationBatchId, run.insuranceImportPath, archiveDir, '保险导入', archiveDate),
+        copyArchiveFile(database, operationBatchId, run.salaryImportPath, archiveDir, '工资导入', archiveDate),
+        copyArchiveFile(database, operationBatchId, run.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
+        copyArchiveFile(database, operationBatchId, run.voucherImportPath, archiveDir, '凭证', archiveDate)
       ])
     )
   ).filter((item): item is string => Boolean(item))
@@ -194,8 +240,21 @@ export async function cancelMonthlyPayrollMonthClose(id: number): Promise<Monthl
     [targetRun.year, targetRun.month]
   )
   const monthRunList = monthRows.map(mapRunRow)
+  const operationBatchId = await createOperationBatch(database, {
+    kind: 'monthly-payroll.cancel-month-close',
+    targetType: 'monthly-payroll',
+    targetName: `${targetRun.year}-${String(targetRun.month).padStart(2, '0')}`,
+    reason: '取消月结并清理生成文件',
+    meta: { id, year: targetRun.year, month: targetRun.month }
+  })
+  await logRecordSnapshots(database, {
+    batchId: operationBatchId,
+    tableName: 'monthly_payroll_runs',
+    action: 'cancel-archive',
+    rows: monthRows
+  })
   await restoreMonthlyPayrollSourceFiles(monthRunList)
-  await cleanupMonthlyPayrollGeneratedFiles(monthRunList)
+  await cleanupMonthlyPayrollGeneratedFiles(database, operationBatchId, monthRunList)
 
   await run(
     database,
@@ -217,14 +276,61 @@ export async function cancelMonthlyPayrollMonthClose(id: number): Promise<Monthl
 
 export async function deleteMonthlyPayrollRun(id: number): Promise<boolean> {
   const database = await getDatabase()
-  const rows = await all<{ id: number }>(
+  const rows = await all<Record<string, unknown>>(
     database,
-    `SELECT id FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
+    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
     [id]
   )
   if (!rows.length) return false
-  await run(database, `DELETE FROM monthly_payroll_runs WHERE id = ?`, [id])
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    const batchId = await createOperationBatch(database, {
+      kind: 'monthly-payroll.delete-run',
+      targetType: 'monthly-payroll-run',
+      targetName: String(id),
+      reason: '删除工资报账历史记录',
+      meta: { id }
+    })
+    await logRowsBeforeDelete(database, {
+      batchId,
+      tableName: 'monthly_payroll_runs',
+      action: 'delete',
+      whereSql: '"id" = ?',
+      params: [id]
+    })
+    await run(database, `DELETE FROM monthly_payroll_runs WHERE id = ?`, [id])
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    throw error
+  }
   return true
+}
+
+export async function updateMonthlyPayrollPushStatus(
+  id: number,
+  target: 'insurance' | 'salary',
+  status: MonthlyPayrollPushStatus
+): Promise<MonthlyPayrollRun> {
+  const database = await getDatabase()
+  const statusColumn = target === 'insurance' ? 'insurance_push_status' : 'salary_push_status'
+  const pushedAtColumn = target === 'insurance' ? 'insurance_pushed_at' : 'salary_pushed_at'
+  const pushedAt = status === 'success' ? new Date().toISOString() : null
+  await run(
+    database,
+    `UPDATE monthly_payroll_runs
+        SET ${statusColumn} = ?,
+            ${pushedAtColumn} = CASE WHEN ? IS NULL THEN ${pushedAtColumn} ELSE ? END
+      WHERE id = ?`,
+    [status, pushedAt, pushedAt, id]
+  )
+  const rows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
+    [id]
+  )
+  if (!rows[0]) throw new Error('未找到工资报账记录')
+  return mapRunRow(rows[0])
 }
 
 export async function getMonthlyPayrollRunReport(
@@ -302,6 +408,7 @@ export async function findSameMonthlyPayrollRun(
     `SELECT * FROM monthly_payroll_runs
      WHERE year = ? AND month = ? AND report_fingerprint = ?
        AND COALESCE(data_source_mode, 'salary-workbook') = ?
+       AND COALESCE(is_outdated, 0) = 0
      ORDER BY created_at DESC LIMIT 1`,
     [year, month, reportFingerprint, normalizeMonthlyPayrollDataSourceMode(dataSourceMode)]
   )
@@ -494,8 +601,24 @@ function mapRunRow(row: Record<string, unknown>): MonthlyPayrollRun {
     archiveDir: (row.archive_dir as string) ?? null,
     archiveManifest: parseArchiveManifest(row.archive_manifest),
     reportSnapshot,
+    isOutdated: Boolean(Number(row.is_outdated ?? 0)),
+    outdatedAt: (row.outdated_at as string) ?? null,
+    outdatedReason: (row.outdated_reason as string) ?? null,
+    insurancePushStatus: normalizeMonthlyPayrollPushStatus(row.insurance_push_status),
+    salaryPushStatus: normalizeMonthlyPayrollPushStatus(row.salary_push_status),
+    insurancePushedAt: (row.insurance_pushed_at as string) ?? null,
+    salaryPushedAt: (row.salary_pushed_at as string) ?? null,
     createdAt: String(row.created_at ?? '')
   }
+}
+
+function normalizeMonthlyPayrollPushStatus(value: unknown): MonthlyPayrollPushStatus {
+  return value === 'queued' ||
+    value === 'success' ||
+    value === 'failed' ||
+    value === 'needs-repush'
+    ? value
+    : 'not-pushed'
 }
 
 export function normalizeMonthlyPayrollDataSourceMode(
@@ -533,6 +656,8 @@ function monthlyPayrollArchiveRoot(): string {
 }
 
 async function copyArchiveFile(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  batchId: number,
   sourcePath: string | null,
   targetDir: string,
   label: string,
@@ -541,11 +666,19 @@ async function copyArchiveFile(
   if (!sourcePath || !existsSync(sourcePath)) return null
   mkdirSync(targetDir, { recursive: true })
   const targetPath = uniqueArchivePath(targetDir, archiveFileName(label, archiveDate, sourcePath))
+  await logFileOperation(database, {
+    batchId,
+    action: 'copy-to-archive',
+    filePath: sourcePath,
+    fileLabel: label
+  })
   await copyFile(sourcePath, targetPath)
   return targetPath
 }
 
 async function moveArchiveFile(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  batchId: number,
   sourcePath: string | null,
   targetDir: string,
   label: string,
@@ -554,6 +687,12 @@ async function moveArchiveFile(
   if (!sourcePath || !existsSync(sourcePath)) return null
   mkdirSync(targetDir, { recursive: true })
   const targetPath = uniqueArchivePath(targetDir, archiveFileName(label, archiveDate, sourcePath))
+  await logFileOperation(database, {
+    batchId,
+    action: 'move-to-archive',
+    filePath: sourcePath,
+    fileLabel: label
+  })
   try {
     await rename(sourcePath, targetPath)
   } catch {
@@ -567,8 +706,14 @@ function archiveFileName(label: string, archiveDate: string, sourcePath: string)
   return `${label}_${archiveDate}_${basename(sourcePath)}`
 }
 
-async function cleanupMonthlyPayrollGeneratedFiles(runs: MonthlyPayrollRun[]): Promise<void> {
+async function cleanupMonthlyPayrollGeneratedFiles(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  batchId: number,
+  runs: MonthlyPayrollRun[]
+): Promise<void> {
   const removedDirs = new Set<string>()
+  const removedFiles = new Set<string>()
+  const runIds = new Set(runs.map((run) => run.id))
   for (const run of runs) {
     // 取消月结代表当月数据需要重生成，先清理已生成的导入/凭证文件。
     for (const filePath of [
@@ -578,20 +723,58 @@ async function cleanupMonthlyPayrollGeneratedFiles(runs: MonthlyPayrollRun[]): P
       run.voucherImportPath
     ]) {
       if (!filePath) continue
+      if (removedFiles.has(filePath)) continue
+      removedFiles.add(filePath)
       if (existsSync(filePath)) {
         try {
+          if (await isFileReferencedByOtherRuns(database, filePath, runIds)) {
+            await logFileOperation(database, {
+              batchId,
+              action: 'skip-delete-generated',
+              filePath,
+              fileLabel: '生成文件',
+              error: '文件仍被其他工资报账记录引用'
+            })
+            continue
+          }
+          await logFileOperation(database, {
+            batchId,
+            action: 'delete-generated',
+            filePath,
+            fileLabel: '生成文件'
+          })
           await unlink(filePath)
         } catch (error) {
           console.warn(`删除生成文件失败：${filePath}`, error)
+          await logFileOperation(database, {
+            batchId,
+            action: 'delete-generated-failed',
+            filePath,
+            fileLabel: '生成文件',
+            error
+          })
         }
       }
     }
     for (const archivedPath of run.archiveManifest) {
       if (!archivedPath || !existsSync(archivedPath)) continue
       try {
+        await logFileOperation(database, {
+          batchId,
+          action: 'delete-archive-copy',
+          filePath: archivedPath,
+          fileLabel: '归档副本'
+        })
         await unlink(archivedPath)
       } catch (error) {
         console.warn(`删除归档副本失败：${archivedPath}`, error)
+        await logFileOperation(database, {
+          batchId,
+          action: 'delete-archive-copy-failed',
+          filePath: archivedPath,
+          fileLabel: '归档副本',
+          error
+        })
       }
     }
     if (run.archiveDir && existsSync(run.archiveDir) && !removedDirs.has(run.archiveDir)) {
@@ -606,6 +789,24 @@ async function cleanupMonthlyPayrollGeneratedFiles(runs: MonthlyPayrollRun[]): P
       }
     }
   }
+}
+
+async function isFileReferencedByOtherRuns(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  filePath: string,
+  currentRunIds: Set<number>
+): Promise<boolean> {
+  const rows = await all<{ id: number }>(
+    database,
+    `SELECT id FROM monthly_payroll_runs
+      WHERE (insurance_import_path = ?
+          OR salary_import_path = ?
+          OR payroll_backpay_path = ?
+          OR voucher_import_path = ?)
+      LIMIT 20`,
+    [filePath, filePath, filePath, filePath]
+  )
+  return rows.some((row) => !currentRunIds.has(Number(row.id)))
 }
 
 async function restoreMonthlyPayrollSourceFiles(runs: MonthlyPayrollRun[]): Promise<void> {

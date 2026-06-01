@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx'
 import { all, getDatabase, run } from '../../db/connection'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../../db/schema'
 import { getWorksheetByName, tableNameOf } from '../worksheetTable'
+import { createOperationBatch, logRowsBeforeDelete } from '../operationLog'
 
 type CellValue = string | number | boolean | Date | null | undefined
 
@@ -126,8 +127,23 @@ export async function importSocialSecurityDetail(
 
   await run(database, 'BEGIN TRANSACTION')
   try {
+    const deleteBatchId = await createOperationBatch(database, {
+      kind: 'monthly-payroll.detail-replace',
+      targetType: 'worksheet',
+      targetName: worksheet.name,
+      reason: '导入社保明细前替换同期间同单位旧明细',
+      meta: { sourceFile, periods, units }
+    })
     for (const period of periods) {
       for (const unitNum of units) {
+        await logRowsBeforeDelete(database, {
+          batchId: deleteBatchId,
+          tableName: worksheet.name,
+          worksheetName: worksheet.name,
+          action: 'delete',
+          whereSql: `${quoteIdentifier(colByField.get('费款所属期起')!)} = ? AND ${quoteIdentifier(colByField.get('单位编号')!)} = ?`,
+          params: [period, unitNum]
+        })
         await run(
           database,
           `DELETE FROM ${table} WHERE ${quoteIdentifier(colByField.get('费款所属期起')!)} = ? AND ${quoteIdentifier(colByField.get('单位编号')!)} = ?`,
@@ -247,7 +263,22 @@ export async function importTaxDetail(
 
   await run(database, 'BEGIN TRANSACTION')
   try {
+    const deleteBatchId = await createOperationBatch(database, {
+      kind: 'monthly-payroll.detail-replace',
+      targetType: 'worksheet',
+      targetName: worksheet.name,
+      reason: '导入个税明细前替换同期间同单位旧明细',
+      meta: { sourceFile, periods, unitCode }
+    })
     for (const period of periods) {
+      await logRowsBeforeDelete(database, {
+        batchId: deleteBatchId,
+        tableName: worksheet.name,
+        worksheetName: worksheet.name,
+        action: 'delete',
+        whereSql: `${quoteIdentifier(colByField.get('税款所属期起')!)} = ? AND ${quoteIdentifier(colByField.get('单位编码')!)} = ?`,
+        params: [period, unitCode]
+      })
       await run(
         database,
         `DELETE FROM ${table} WHERE ${quoteIdentifier(colByField.get('税款所属期起')!)} = ? AND ${quoteIdentifier(colByField.get('单位编码')!)} = ?`,
@@ -295,6 +326,21 @@ export async function importHousingFundDetail(
 
   await run(database, 'BEGIN TRANSACTION')
   try {
+    const deleteBatchId = await createOperationBatch(database, {
+      kind: 'monthly-payroll.detail-replace',
+      targetType: 'worksheet',
+      targetName: worksheet.name,
+      reason: '导入公积金明细前替换同年月同单位旧明细',
+      meta: { sourceFile, year, month, unitCode }
+    })
+    await logRowsBeforeDelete(database, {
+      batchId: deleteBatchId,
+      tableName: worksheet.name,
+      worksheetName: worksheet.name,
+      action: 'delete',
+      whereSql: `${quoteIdentifier(colByField.get('年')!)} = ? AND ${quoteIdentifier(colByField.get('月')!)} = ? AND ${quoteIdentifier(colByField.get('单位编码')!)} = ?`,
+      params: [year, month, unitCode]
+    })
     await run(
       database,
       `DELETE FROM ${table} WHERE ${quoteIdentifier(colByField.get('年')!)} = ? AND ${quoteIdentifier(colByField.get('月')!)} = ? AND ${quoteIdentifier(colByField.get('单位编码')!)} = ?`,

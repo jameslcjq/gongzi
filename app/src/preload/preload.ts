@@ -39,9 +39,14 @@ import type {
   WorksheetRecordsQuery,
   WorksheetRecordsResult,
   MonthlyPayrollRun,
+  MonthlyPayrollPushStatus,
+  MonthlyPayrollSourceVersion,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
   MonthlyPayrollSettings,
+  RecycleBinBatch,
+  RecycleBinRecord,
+  RecycleBinRestoreResult,
   PrintRequest,
   PrinterSummary,
   UnitSettings,
@@ -67,7 +72,8 @@ import type {
   MailDownloadRecord,
   MailCheckProgress,
   MailCheckResult,
-  LocalFileBase64
+  LocalFileBase64,
+  BudgetImportResult
 } from '../shared/types'
 
 type PivotConfigSummary = {
@@ -96,7 +102,6 @@ const salaryApi = {
   licenseGetKey: () => ipcRenderer.invoke('license:getKey'),
   licenseSaveKey: (licenseKey: string) => ipcRenderer.invoke('license:saveKey', licenseKey),
   licenseGetServerUrl: () => ipcRenderer.invoke('license:getServerUrl'),
-  licenseSetServerUrl: (serverUrl: string) => ipcRenderer.invoke('license:setServerUrl', serverUrl),
   licenseDeviceInfo: (licenseKey?: string) => ipcRenderer.invoke('license:deviceInfo', licenseKey),
   licenseExportMachineRequest: (licenseKey?: string) =>
     ipcRenderer.invoke('license:exportMachineRequest', licenseKey),
@@ -150,11 +155,6 @@ const salaryApi = {
     | { ok: true; results: Array<{ frameUrl: string; value: unknown }> }
     | { ok: false; reason: string }
   > => ipcRenderer.invoke('integration:drain-all-frames', { webContentsId, code }),
-  savePortalRecording: (
-    json: string,
-    defaultFileName?: string
-  ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> =>
-    ipcRenderer.invoke('integration:save-recording', { json, defaultFileName }),
   onWebviewDownloadDone: (
     handler: (payload: {
       ok: boolean
@@ -179,30 +179,6 @@ const salaryApi = {
     ipcRenderer.on('integration:webview-download-done', listener)
     return () => ipcRenderer.removeListener('integration:webview-download-done', listener)
   },
-  onBudgetImportDone: (
-    handler: (payload: {
-      ok: boolean
-      savedPath: string
-      totalInserted?: number
-      totalUpdated?: number
-      totalSkipped?: number
-      sheets?: Array<{
-        sheetName: string
-        worksheetName: string
-        inserted: number
-        updated: number
-        skipped: number
-        status: string
-        message?: string
-      }>
-      message?: string
-    }) => void
-  ): (() => void) => {
-    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]): void =>
-      handler(payload)
-    ipcRenderer.on('integration:budget-import-done', listener)
-    return () => ipcRenderer.removeListener('integration:budget-import-done', listener)
-  },
   onWebviewOpenTabRequest: (
     handler: (payload: { sourceWebContentsId: number; url: string; disposition?: string }) => void
   ): (() => void) => {
@@ -225,6 +201,10 @@ const salaryApi = {
     | { ok: true; base64: string; fileName: string; size: number }
     | { ok: false; reason: string }
   > => ipcRenderer.invoke('voucher-push:read-xlsx', { filePath }),
+  previewBudgetImport: (filePath: string): Promise<BudgetImportResult> =>
+    ipcRenderer.invoke('budget-import:preview', filePath),
+  commitBudgetImport: (filePath: string): Promise<BudgetImportResult> =>
+    ipcRenderer.invoke('budget-import:commit', filePath),
   saveSalaryExportXls: (
     filename: string,
     base64: string
@@ -243,6 +223,19 @@ const salaryApi = {
     ipcRenderer.invoke('monthly-payroll:settings:set', settings),
   listMonthlyPayrollRuns: (): Promise<MonthlyPayrollRun[]> =>
     ipcRenderer.invoke('monthly-payroll:list-runs'),
+  listMonthlyPayrollSourceVersions: (
+    year: number,
+    month: number
+  ): Promise<MonthlyPayrollSourceVersion[]> =>
+    ipcRenderer.invoke('monthly-payroll:list-source-versions', year, month),
+  setMonthlyPayrollSourceVersionCurrent: (id: number): Promise<MonthlyPayrollSourceVersion> =>
+    ipcRenderer.invoke('monthly-payroll:set-source-version-current', id),
+  updateMonthlyPayrollPushStatus: (
+    id: number,
+    target: 'insurance' | 'salary',
+    status: MonthlyPayrollPushStatus
+  ): Promise<MonthlyPayrollRun> =>
+    ipcRenderer.invoke('monthly-payroll:update-push-status', id, target, status),
   deleteMonthlyPayrollRun: (id: number): Promise<boolean> =>
     ipcRenderer.invoke('monthly-payroll:delete-run', id),
   archiveMonthlyPayrollRun: (id: number): Promise<MonthlyPayrollArchiveResult> =>
@@ -346,6 +339,12 @@ const salaryApi = {
     ipcRenderer.invoke('worksheet:export', worksheetId, view),
   wipeAllData: (): Promise<{ tables: number; rows: number }> =>
     ipcRenderer.invoke('system:wipe-all'),
+  listRecycleBinBatches: (limit?: number): Promise<RecycleBinBatch[]> =>
+    ipcRenderer.invoke('recycle-bin:list-batches', limit),
+  listRecycleBinRecords: (batchId: number, limit?: number): Promise<RecycleBinRecord[]> =>
+    ipcRenderer.invoke('recycle-bin:list-records', batchId, limit),
+  restoreRecycleBinBatch: (batchId: number): Promise<RecycleBinRestoreResult> =>
+    ipcRenderer.invoke('recycle-bin:restore-batch', batchId),
   saveWorksheetFields: (worksheetId: string, fields: WorksheetField[]): Promise<AppSummary> =>
     ipcRenderer.invoke('worksheet:save-fields', worksheetId, fields),
 

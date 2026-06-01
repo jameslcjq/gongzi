@@ -17,6 +17,8 @@ import type {
   MonthlyPayrollPrintSettings,
   MonthlyPayrollRun,
   MonthlyPayrollSalaryPrintPageSummary,
+  MonthlyPayrollSourceKind,
+  MonthlyPayrollSourceVersion,
   MonthlyPayrollWriteBackPreview,
   PrintRequest,
   PrinterSummary,
@@ -43,6 +45,8 @@ const activeReportSheet = ref('')
 const printPageRangeText = ref('')
 const history = ref<MonthlyPayrollRun[]>([])
 const historyLoading = ref(false)
+const sourceVersions = ref<MonthlyPayrollSourceVersion[]>([])
+const switchingSourceVersionId = ref<number | null>(null)
 const selectedReportRunId = ref<number | null>(null)
 const archivingId = ref<number | null>(null)
 const printers = ref<PrinterSummary[]>([])
@@ -124,11 +128,24 @@ async function refreshHistory(options: { autoOpenCurrentMonth?: boolean } = {}) 
   try {
     const nextHistory = await window.salaryApi.listMonthlyPayrollRuns()
     history.value = nextHistory
+    await refreshSourceVersions()
     if (options.autoOpenCurrentMonth) {
       await openLatestSelectedMonthReport(nextHistory)
     }
   } finally {
     historyLoading.value = false
+  }
+}
+
+async function refreshSourceVersions(): Promise<void> {
+  try {
+    const period = selectedPeriod.value
+    sourceVersions.value = await window.salaryApi.listMonthlyPayrollSourceVersions(
+      period.year,
+      period.month
+    )
+  } catch (error) {
+    console.warn('读取本月数据源版本失败', error)
   }
 }
 
@@ -145,6 +162,7 @@ async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> 
     ElMessage.warning('该记录没有保险/凭证文件可推送')
     return
   }
+  if (!(await confirmPushRun(row, 'insurance'))) return
   pushingInsuranceRunId.value = row.id
   try {
     const label = `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
@@ -162,7 +180,9 @@ async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> 
         steps.push({
           kind: 'insurance',
           records: parsed.records as InsuranceRecord[],
-          label
+          label,
+          runId: row.id,
+          pushTarget: 'insurance'
         })
         stepHints.push(`保险 ${parsed.records.length} 条`)
       }
@@ -179,7 +199,9 @@ async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> 
         kind: 'voucher',
         fileBase64: v.base64,
         fileName: v.fileName,
-        label
+        label,
+        runId: row.id,
+        pushTarget: 'insurance'
       })
       stepHints.push(`凭证 ${(v.size / 1024).toFixed(1)} KB`)
     }
@@ -208,6 +230,7 @@ async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<vo
     ElMessage.warning('该记录没有工资导入/补发工资文件可推送')
     return
   }
+  if (!(await confirmPushRun(row, 'salary'))) return
   pushingSalaryRunId.value = row.id
   try {
     const label = `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
@@ -223,7 +246,9 @@ async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<vo
         fileName: file.fileName,
         fileSize: file.size,
         month: String(row.month),
-        label
+        label,
+        runId: row.id,
+        pushTarget: 'salary'
       })
       stepHints.push(`工资导入 ${(file.size / 1024).toFixed(1)} KB`)
     }
@@ -236,7 +261,9 @@ async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<vo
         fileBase64: file.base64,
         fileName: file.fileName,
         fileSize: file.size,
-        label
+        label,
+        runId: row.id,
+        pushTarget: 'salary'
       })
       stepHints.push(`补发工资 ${(file.size / 1024).toFixed(1)} KB`)
     }
@@ -257,6 +284,30 @@ async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<vo
     setTimeout(() => {
       if (pushingSalaryRunId.value === row.id) pushingSalaryRunId.value = null
     }, 800)
+  }
+}
+
+async function confirmPushRun(
+  row: MonthlyPayrollRun,
+  target: 'insurance' | 'salary'
+): Promise<boolean> {
+  if (row.isOutdated) {
+    ElMessage.warning('这条报账记录已过期，请使用最新生成的记录重新推送')
+    return false
+  }
+  const status = target === 'insurance' ? row.insurancePushStatus : row.salaryPushStatus
+  if (status !== 'success' && status !== 'needs-repush') return true
+  try {
+    await ElMessageBox.confirm(
+      status === 'success'
+        ? '这条记录已经推送成功，继续会重新推送一次。'
+        : '这条记录标记为需要重新推送，继续后会覆盖原推送状态。',
+      '确认重新推送',
+      { type: 'warning', confirmButtonText: '重新推送', cancelButtonText: '取消' }
+    )
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -321,8 +372,8 @@ const selectedProcessMode = ref<ProcessMode>('salary')
 const processModeTouched = ref(false)
 
 const availableProcessModes = computed<Array<{ label: string; value: ProcessMode }>>(() => {
-  const hasSalary = Boolean(detected.value?.salaryWorkbookPath)
-  const hasSocial = Boolean(detected.value?.socialSecurityWorkbookPath)
+  const hasSalary = Boolean(effectiveSourcePath('salary', detected.value?.salaryWorkbookPath))
+  const hasSocial = Boolean(effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath))
   if (selectedDataSourceMode.value === 'integrated') {
     if (hasSocial) {
       return [
@@ -347,12 +398,15 @@ const availableProcessModes = computed<Array<{ label: string; value: ProcessMode
 
 function defaultProcessMode(): ProcessMode {
   if (selectedDataSourceMode.value === 'integrated') {
-    return detected.value?.socialSecurityWorkbookPath ? 'salary-social' : 'salary'
+    return effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath) ? 'salary-social' : 'salary'
   }
-  if (detected.value?.salaryWorkbookPath && detected.value?.socialSecurityWorkbookPath) {
+  if (
+    effectiveSourcePath('salary', detected.value?.salaryWorkbookPath) &&
+    effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath)
+  ) {
     return 'salary-social'
   }
-  if (detected.value?.socialSecurityWorkbookPath) return 'social'
+  if (effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath)) return 'social'
   return 'salary'
 }
 
@@ -423,6 +477,9 @@ function pickLatestMonthRun(rows: MonthlyPayrollRun[]): MonthlyPayrollRun | null
 const selectedPeriod = computed(() => parsePeriodKey(selectedMonth.value || currentPeriodKey.value))
 const selectedMonthLabel = computed(() => periodKey(selectedPeriod.value.year, selectedPeriod.value.month))
 const selectedMonthDisplay = computed(() => `${selectedPeriod.value.year}年${selectedPeriod.value.month}月`)
+watch(selectedMonth, () => {
+  void refreshSourceVersions()
+})
 const isSelectedMonthCurrent = computed(() => selectedMonthLabel.value === currentPeriodKey.value)
 const selectedMonthRuns = computed(() =>
   history.value.filter((row) => row.year === selectedPeriod.value.year && row.month === selectedPeriod.value.month)
@@ -461,6 +518,23 @@ function dataSourceModeTagType(mode?: MonthlyPayrollDataSourceMode | null): 'suc
   return mode === 'integrated' ? 'success' : 'warning'
 }
 
+function pushStatusText(status: MonthlyPayrollRun['insurancePushStatus']): string {
+  if (status === 'queued') return '推送中'
+  if (status === 'success') return '已推送'
+  if (status === 'failed') return '推送失败'
+  if (status === 'needs-repush') return '需重推'
+  return '未推送'
+}
+
+function pushStatusTagType(
+  status: MonthlyPayrollRun['insurancePushStatus']
+): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'success') return 'success'
+  if (status === 'queued' || status === 'needs-repush') return 'warning'
+  if (status === 'failed') return 'danger'
+  return 'info'
+}
+
 const selectedDataSourceModeText = computed(() => dataSourceModeText(selectedDataSourceMode.value))
 const canRun = computed(() =>
   availableProcessModes.value.some((item) => item.value === selectedProcessMode.value) &&
@@ -469,7 +543,7 @@ const canRun = computed(() =>
 )
 
 const modeText = computed(() => {
-  const hasTax = Boolean(detected.value?.taxWorkbookPath)
+  const hasTax = Boolean(effectiveSourcePath('tax', detected.value?.taxWorkbookPath))
   const sourcePrefix = selectedDataSourceMode.value === 'integrated' ? '三张表' : '工资表'
   if (selectedProcessMode.value === 'salary-social') {
     return hasTax ? `${sourcePrefix} + 社保 + 个税` : `${sourcePrefix} + 社保`
@@ -480,33 +554,99 @@ const modeText = computed(() => {
   return hasTax ? `${sourcePrefix}工资 + 个税` : `${sourcePrefix}工资`
 })
 
+function currentSourceVersion(kind: MonthlyPayrollSourceKind): MonthlyPayrollSourceVersion | null {
+  return sourceVersions.value.find((item) => item.kind === kind && item.status === 'current') ?? null
+}
+
+function sourceVersionPath(version: MonthlyPayrollSourceVersion): string {
+  return version.archivePath || version.filePath
+}
+
+function effectiveSourcePath(kind: MonthlyPayrollSourceKind, detectedPath?: string): string | undefined {
+  const version = currentSourceVersion(kind)
+  return detectedPath || (version ? sourceVersionPath(version) : undefined) || undefined
+}
+
+function effectiveSourceName(kind: MonthlyPayrollSourceKind, detectedName?: string): string | undefined {
+  return detectedName || currentSourceVersion(kind)?.fileName || undefined
+}
+
+function sourceVersionHint(kind: MonthlyPayrollSourceKind, fallback: string, detectedPath?: string): string {
+  if (detectedPath) return fallback
+  const version = currentSourceVersion(kind)
+  if (!version) return fallback
+  return `当前有效版本：${version.fileName}，${version.rowCount} 行，合计 ${formatMoney(version.totalAmount)}`
+}
+
+function sourceKindText(kind: MonthlyPayrollSourceKind): string {
+  if (kind === 'social') return '社保'
+  if (kind === 'tax') return '个税'
+  return '工资表'
+}
+
+function canSwitchSourceVersion(version: MonthlyPayrollSourceVersion): boolean {
+  return version.status === 'replaced' && isSelectedMonthCurrent.value && !isSelectedMonthArchived.value
+}
+
+async function switchSourceVersion(version: MonthlyPayrollSourceVersion): Promise<void> {
+  if (!canSwitchSourceVersion(version)) return
+  try {
+    await ElMessageBox.confirm(
+      `切回 ${sourceKindText(version.kind)} 的历史版本后，本月已生成的工资报账记录会标记为过期，需要重新生成并重新推送。`,
+      '切回源文件版本',
+      {
+        type: 'warning',
+        confirmButtonText: '切回',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    return
+  }
+
+  switchingSourceVersionId.value = version.id
+  try {
+    await window.salaryApi.setMonthlyPayrollSourceVersionCurrent(version.id)
+    ElMessage.success('已切回源文件版本')
+    await refreshHistory()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '切回失败')
+  } finally {
+    switchingSourceVersionId.value = null
+  }
+}
+
 const fileRows = computed(() => [
   {
     label: '工资表 Excel',
     required: selectedDataSourceMode.value === 'salary-workbook' && selectedProcessMode.value !== 'social',
-    name: detected.value?.salaryWorkbookName,
-    path: detected.value?.salaryWorkbookPath,
-    hint: selectedProcessMode.value === 'social'
+    name: effectiveSourceName('salary', detected.value?.salaryWorkbookName),
+    path: effectiveSourcePath('salary', detected.value?.salaryWorkbookPath),
+    hint: sourceVersionHint('salary', selectedProcessMode.value === 'social'
       ? '本次只报社保，工资表仅用于同时生成工资凭证'
       : selectedDataSourceMode.value === 'salary-workbook'
       ? '兼容模式主数据来源，报账金额按工资表 Excel 汇总'
-      : '可选附件、页数统计和辅助核对；报账金额主来源为工资数据三张表'
+      : '可选附件、页数统计和辅助核对；报账金额主来源为工资数据三张表',
+      detected.value?.salaryWorkbookPath
+    )
   },
   {
     label: '社保未申报汇总',
     required: selectedProcessMode.value !== 'salary',
-    name: detected.value?.socialSecurityWorkbookName,
-    path: detected.value?.socialSecurityWorkbookPath,
-    hint: selectedProcessMode.value === 'salary'
+    name: effectiveSourceName('social', detected.value?.socialSecurityWorkbookName),
+    path: effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath),
+    hint: sourceVersionHint('social', selectedProcessMode.value === 'salary'
       ? '本次只报工资，社保后续单独处理'
-      : '只处理社保时需要放入社保未申报汇总文件'
+      : '只处理社保时需要放入社保未申报汇总文件',
+      detected.value?.socialSecurityWorkbookPath
+    )
   },
   {
     label: '个税计算表',
     required: false,
-    name: detected.value?.taxWorkbookName,
-    path: detected.value?.taxWorkbookPath,
-    hint: '未检测到时跳过个税扣款和补发工资'
+    name: effectiveSourceName('tax', detected.value?.taxWorkbookName),
+    path: effectiveSourcePath('tax', detected.value?.taxWorkbookPath),
+    hint: sourceVersionHint('tax', '未检测到时跳过个税扣款和补发工资', detected.value?.taxWorkbookPath)
   }
 ])
 
@@ -549,9 +689,11 @@ function currentPayload(options: { confirmWriteBack?: boolean } = {}): WorkflowR
   const processScope = selectedProcessMode.value
   return {
     monthlyPayroll: {
-      salaryWorkbookPath: detected.value?.salaryWorkbookPath,
-      socialSecurityWorkbookPath: processScope === 'salary' ? undefined : detected.value?.socialSecurityWorkbookPath,
-      taxWorkbookPath: detected.value?.taxWorkbookPath,
+      salaryWorkbookPath: effectiveSourcePath('salary', detected.value?.salaryWorkbookPath),
+      socialSecurityWorkbookPath: processScope === 'salary'
+        ? undefined
+        : effectiveSourcePath('social', detected.value?.socialSecurityWorkbookPath),
+      taxWorkbookPath: effectiveSourcePath('tax', detected.value?.taxWorkbookPath),
       year: period.year,
       month: period.month,
       confirmWriteBack: options.confirmWriteBack,
@@ -612,6 +754,7 @@ async function runPreprocess(): Promise<void> {
     if (!payload) return
     const next = await window.salaryApi.runWorkflow('monthly-payroll.preprocess', payload)
     result.value = next
+    await refreshSourceVersions()
     const writeBack = next.monthlyPayrollWriteBack
     if (writeBack?.requiresConfirmation && writeBack.syncableCount > 0) {
       const confirmed = await confirmMonthlyPayrollWriteBack(writeBack)
@@ -626,6 +769,7 @@ async function runPreprocess(): Promise<void> {
         confirmedPayload
       )
       result.value = confirmedResult
+      await refreshSourceVersions()
       if (confirmedResult.ok && confirmedResult.warnings.length === 0) {
         ElMessage.success('回写复核通过，开始生成报表')
         await runGenerate()
@@ -675,6 +819,7 @@ async function runGenerate(): Promise<void> {
     const nextReport = await window.salaryApi.generateMonthlyPayrollReportView(payload)
     generateResult.value = next
     report.value = nextReport
+    await refreshSourceVersions()
     activeReportSheet.value = firstVisibleSheetName(nextReport.sheets)
     selectedMonth.value = selectedMonthLabel.value
     if (next.ok) {
@@ -857,7 +1002,9 @@ const canPrintAll = computed(() => {
 
 async function printAllReports(): Promise<void> {
   const targets = availablePrintAllSheets.value
-  const salaryPath = selectedProcessMode.value === 'social' ? undefined : detected.value?.salaryWorkbookPath
+  const salaryPath = selectedProcessMode.value === 'social'
+    ? undefined
+    : effectiveSourcePath('salary', detected.value?.salaryWorkbookPath)
   if (targets.length === 0 && !salaryPath) {
     ElMessage.warning('没有可打印的报表')
     return
@@ -883,7 +1030,7 @@ async function printAllReports(): Promise<void> {
       await window.salaryApi.printSalaryWorkbookViaExcel({
         salaryWorkbookPath: salaryPath,
         salaryWorkbookFallbackPaths: getArchivedSalaryWorkbookPaths(selectedHistoryRun.value),
-        taxWorkbookPath: detected.value?.taxWorkbookPath,
+        taxWorkbookPath: effectiveSourcePath('tax', detected.value?.taxWorkbookPath),
         printerName: printSettings.value.reportPrinterName
       })
       count += 1
@@ -943,13 +1090,19 @@ async function buildVoucherPrintPageSummary(): Promise<{
 }
 
 async function getSalaryPrintPageSummary(): Promise<MonthlyPayrollSalaryPrintPageSummary | null> {
-  const salaryWorkbookPath = detected.value?.salaryWorkbookPath || selectedHistoryRun.value?.sourceSalaryPath || ''
+  const salaryWorkbookPath =
+    effectiveSourcePath('salary', detected.value?.salaryWorkbookPath) ||
+    selectedHistoryRun.value?.sourceSalaryPath ||
+    ''
   if (!salaryWorkbookPath) return null
   try {
     return await window.salaryApi.getSalaryWorkbookPrintPageSummary({
       salaryWorkbookPath,
       salaryWorkbookFallbackPaths: getArchivedSalaryWorkbookPaths(selectedHistoryRun.value),
-      taxWorkbookPath: detected.value?.taxWorkbookPath || selectedHistoryRun.value?.sourceTaxPath || undefined,
+      taxWorkbookPath:
+        effectiveSourcePath('tax', detected.value?.taxWorkbookPath) ||
+        selectedHistoryRun.value?.sourceTaxPath ||
+        undefined,
       printerName: printSettings.value.reportPrinterName
     })
   } catch (error) {
@@ -1360,6 +1513,34 @@ function isCustomStyledSheet(name: string): boolean {
       </div>
     </div>
 
+    <div v-if="sourceVersions.length" class="source-version-panel">
+      <strong>本月数据源版本</strong>
+      <div class="source-version-list">
+        <div
+          v-for="version in sourceVersions"
+          :key="version.id"
+          class="source-version-item"
+          :class="{ replaced: version.status === 'replaced' }"
+        >
+          <el-tag :type="version.status === 'current' ? 'success' : 'info'" effect="plain">
+            {{ sourceKindText(version.kind) }} {{ version.status === 'current' ? '当前' : '已替换' }}
+          </el-tag>
+          <span class="version-name" :title="sourceVersionPath(version)">{{ version.fileName }}</span>
+          <span>{{ version.rowCount }} 行</span>
+          <span>{{ formatMoney(version.totalAmount) }}</span>
+          <small>{{ version.createdAt }}</small>
+          <el-button
+            v-if="canSwitchSourceVersion(version)"
+            size="small"
+            text
+            type="primary"
+            :loading="switchingSourceVersionId === version.id"
+            @click="switchSourceVersion(version)"
+          >切回</el-button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="availableProcessModes.length" class="process-mode-panel">
       <strong>处理范围</strong>
       <el-radio-group v-model="selectedProcessMode" size="small" @change="markProcessModeTouched">
@@ -1416,9 +1597,23 @@ function isCustomStyledSheet(name: string): boolean {
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.archivedAt ? 'info' : 'success'" effect="plain">
-              {{ row.archivedAt ? '已月结' : '可处理' }}
-            </el-tag>
+            <div class="status-tags">
+              <el-tag :type="row.archivedAt ? 'info' : row.isOutdated ? 'warning' : 'success'" effect="plain">
+                {{ row.archivedAt ? '已月结' : row.isOutdated ? '已过期' : '可处理' }}
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="推送" width="150">
+          <template #default="{ row }">
+            <div class="status-tags">
+              <el-tag :type="pushStatusTagType(row.insurancePushStatus)" effect="plain">
+                保险 {{ pushStatusText(row.insurancePushStatus) }}
+              </el-tag>
+              <el-tag :type="pushStatusTagType(row.salaryPushStatus)" effect="plain">
+                工资 {{ pushStatusText(row.salaryPushStatus) }}
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="数据来源" width="120">
@@ -2121,6 +2316,52 @@ function isCustomStyledSheet(name: string): boolean {
 
 .history-actions .el-button {
   margin-left: 0;
+}
+
+.status-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.source-version-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #f8fafc;
+}
+
+.source-version-panel > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.source-version-list {
+  display: grid;
+  gap: 6px;
+}
+
+.source-version-item {
+  display: grid;
+  grid-template-columns: 92px minmax(160px, 1fr) 70px 110px 155px 56px;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.source-version-item.replaced {
+  color: var(--text-3);
+}
+
+.version-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .report-toolbar {

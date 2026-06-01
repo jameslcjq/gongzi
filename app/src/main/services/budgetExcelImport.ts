@@ -1,5 +1,5 @@
 /**
- * 一体化预算导出 xls 自动入库。
+ * 一体化预算导出 xls 预览 / 确认入库。
  *
  * xls 是多 sheet 多行表头的"江苏省预算编制人员信息表"模板，包含 6 张可见 sheet：
  *   综合信息情况表（一）  ← 跳过，不入库
@@ -22,6 +22,7 @@ import { getDatabase, run, get } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import type { WorksheetMeta } from '../../shared/types'
+import { createOperationBatch, logRecordSnapshots } from './operationLog'
 
 export const BUDGET_SHEET_TO_WORKSHEET: Record<string, string> = {
   '行政在职在编人员信息情况表': '预算行政在职',
@@ -115,7 +116,8 @@ async function importOneSheet(
   database: Database,
   sheet: xlsx.WorkSheet,
   sheetName: string,
-  worksheet: WorksheetMeta
+  worksheet: WorksheetMeta,
+  options: { commit: boolean; batchId?: number }
 ): Promise<BudgetSheetImportResult> {
   const result: BudgetSheetImportResult = {
     sheetName,
@@ -228,34 +230,67 @@ async function importOneSheet(
           if (typeof v === 'number') return v
           return String(v)
         })
-      await run(
-        database,
-        `UPDATE ${quoteIdentifier(tableName)}
-         SET ${setClause}, "md_updated_at" = datetime('now')
-         WHERE id = ?`,
-        [...updateValues, existing.id]
-      )
+      if (!setClause) {
+        result.skipped++
+        continue
+      }
+      if (options.commit) {
+        if (options.batchId) {
+          const before = await get<Record<string, unknown>>(
+            database,
+            `SELECT * FROM ${quoteIdentifier(tableName)} WHERE id = ? LIMIT 1`,
+            [existing.id]
+          )
+          if (before) {
+            await logRecordSnapshots(database, {
+              batchId: options.batchId,
+              tableName,
+              worksheetName: worksheet.name,
+              action: 'update',
+              rows: [before]
+            })
+          }
+        }
+        await run(
+          database,
+          `UPDATE ${quoteIdentifier(tableName)}
+           SET ${setClause}, "md_updated_at" = datetime('now')
+           WHERE id = ?`,
+          [...updateValues, existing.id]
+        )
+      }
       result.updated++
     } else {
       // INSERT
-      await run(
-        database,
-        `INSERT INTO ${quoteIdentifier(tableName)}
-         ("md_row_id", "md_created_at", "md_updated_at", ${insertCols})
-         VALUES (?, datetime('now'), datetime('now'), ${placeholders})`,
-        [keyValue, ...values]
-      )
+      if (options.commit) {
+        await run(
+          database,
+          `INSERT INTO ${quoteIdentifier(tableName)}
+           ("md_row_id", "md_created_at", "md_updated_at", ${insertCols})
+           VALUES (?, datetime('now'), datetime('now'), ${placeholders})`,
+          [keyValue, ...values]
+        )
+      }
       result.inserted++
     }
   }
 
-  result.message = `匹配 ${matchedCount}/${xlsFullNames.length} 列；插入 ${result.inserted}，更新 ${result.updated}，跳过 ${result.skipped}`
+  result.message = `匹配 ${matchedCount}/${xlsFullNames.length} 列；${options.commit ? '插入' : '将插入'} ${result.inserted}，${options.commit ? '更新' : '将更新'} ${result.updated}，跳过 ${result.skipped}`
   return result
 }
 
-export async function importBudgetXls(filePath: string): Promise<BudgetImportResult> {
+async function processBudgetXls(filePath: string, commit: boolean): Promise<BudgetImportResult> {
   const database = await getDatabase()
   const meta = readWorksheetMetadata()
+  const batchId = commit
+    ? await createOperationBatch(database, {
+        kind: 'budget.import',
+        targetType: 'budget-xls',
+        targetName: filePath,
+        reason: '预算 xls 确认入库',
+        meta: { filePath }
+      })
+    : undefined
   // 中文路径下 xlsx.readFile 偶尔报 Cannot access file，统一走 fs.readFileSync
   const wb = xlsx.read(readFileSync(filePath), { type: 'buffer' })
 
@@ -282,7 +317,7 @@ export async function importBudgetXls(filePath: string): Promise<BudgetImportRes
     }
 
     try {
-      const r = await importOneSheet(database, wb.Sheets[sheetName], sheetName, ws)
+      const r = await importOneSheet(database, wb.Sheets[sheetName], sheetName, ws, { commit, batchId })
       sheets.push(r)
     } catch (error) {
       sheets.push({
@@ -310,4 +345,12 @@ export async function importBudgetXls(filePath: string): Promise<BudgetImportRes
     totalSkipped,
     message: hasError ? '部分 sheet 导入失败，详见 sheets' : undefined
   }
+}
+
+export async function previewBudgetXls(filePath: string): Promise<BudgetImportResult> {
+  return processBudgetXls(filePath, false)
+}
+
+export async function importBudgetXls(filePath: string): Promise<BudgetImportResult> {
+  return processBudgetXls(filePath, true)
 }

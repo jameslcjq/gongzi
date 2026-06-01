@@ -29,6 +29,7 @@ import {
 import { readUnitSettings } from './unitSettings'
 import { readMonthlyPayrollSettings } from './monthly-payroll/monthlyPayrollSettings'
 import { applyIntegratedComputedFieldsToRows } from './monthly-payroll/integratedPayrollRules'
+import { createOperationBatch, logRowsBeforeDelete } from './operationLog'
 import {
   getIdentityColumnName,
   getPersonnelStatusColumnName,
@@ -1288,6 +1289,17 @@ export async function rollbackImportBatch(batchId: number): Promise<ImportBatchS
   await run(database, 'BEGIN TRANSACTION')
   let removed = 0
   try {
+    const rollbackBatchId = await createOperationBatch(database, {
+      kind: 'import.rollback',
+      targetType: 'import_batch',
+      targetName: String(batchId),
+      reason: '回滚导入批次',
+      meta: {
+        batchId,
+        sourceName: batch.source_name,
+        worksheetName: batch.worksheet_name
+      }
+    })
     const rows = await all<{ worksheet_name: string; record_id: number; action: string | null; previous_values: string | null }>(
       database,
       `SELECT worksheet_name, record_id, action, previous_values FROM import_batch_rows WHERE batch_id = ?`,
@@ -1324,6 +1336,14 @@ export async function rollbackImportBatch(batchId: number): Promise<ImportBatchS
       const tableName = quoteIdentifier(worksheetName)
       for (const chunk of chunkArray(ids, 400)) {
         const placeholders = chunk.map(() => '?').join(', ')
+        await logRowsBeforeDelete(database, {
+          batchId: rollbackBatchId,
+          tableName: worksheetName,
+          worksheetName,
+          action: 'delete',
+          whereSql: `"id" IN (${placeholders})`,
+          params: chunk
+        })
         await run(database, `DELETE FROM ${tableName} WHERE "id" IN (${placeholders})`, chunk)
         removed += chunk.length
       }

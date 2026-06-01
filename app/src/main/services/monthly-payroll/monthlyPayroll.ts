@@ -55,6 +55,7 @@ import {
   persistMonthlyPayrollRun,
   resolvePayrollPeriod
 } from './monthlyPayrollRuns'
+import { registerMonthlyPayrollSources } from './monthlyPayrollSources'
 import {
   buildInsuranceVoucherUsage,
   buildSalaryVoucherUsage,
@@ -88,7 +89,8 @@ export {
   cancelMonthlyPayrollMonthClose,
   deleteMonthlyPayrollRun,
   getMonthlyPayrollRunReport,
-  listMonthlyPayrollRuns
+  listMonthlyPayrollRuns,
+  updateMonthlyPayrollPushStatus
 } from './monthlyPayrollRuns'
 
 type MonthlyPayrollBusinessSummary = {
@@ -335,6 +337,7 @@ export async function preprocessMonthlyPayroll(
           taxByIdCard
         )
       : undefined
+    await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
     const [integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
       recomputeIntegratedOtherLikeWorksheet('一体化其他'),
       recomputeIntegratedOtherLikeWorksheet('一体化退休')
@@ -630,6 +633,7 @@ export async function generateMonthlyPayrollReports(
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
     const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
+    await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
     const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
     const useIntegratedDataSource = dataSourceMode === 'integrated'
     const integratedPersonalInsurance = await loadIntegratedActivePersonalInsuranceTotals()
@@ -727,6 +731,7 @@ export async function generateMonthlyPayrollReportView(
   const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
   const useIntegratedDataSource = dataSourceMode === 'integrated'
   const salary = rawSalary ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax)) : undefined
+  await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
   const taxByIdCard = buildTaxByIdCardFromSummary(tax)
   const [integratedActiveSummary, integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
     summarizeIntegratedActive(taxByIdCard),
