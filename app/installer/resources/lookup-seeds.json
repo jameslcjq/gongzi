@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "C:\\Users\\work\\AppData\\Roaming\\salary-system-electron\\salary-system.sqlite",
+  "source": "packaged-lookup-seeds",
   "generatedAt": "2026-05-22T01:47:40.013Z",
   "tables": {
     "岗位工资对照": [

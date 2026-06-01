@@ -279,13 +279,6 @@ export type LocalFileBase64 = {
   size: number
 }
 
-export type SalaryExportTarget = {
-  saltype_id: string
-  saltype_name: string
-  salbatch_id: string
-  salbatch_name: string
-}
-
 /** v4 之后只需配置类别，批次在运行时通过 getBatchAgency 自动发现 */
 export type SalaryExportSaltype = {
   saltype_id: string
@@ -363,8 +356,6 @@ export type UnitSettings = {
   housingPayeeName: string
   housingPayeeBank: string
   housingPayeeAccount: string
-  /** @deprecated v4 起改用 salaryExportSaltypes；保留仅为旧数据兼容 */
-  salaryExportTargets?: SalaryExportTarget[]
   /** 一键导出工资时要遍历的"工资类别"列表（批次自动发现） */
   salaryExportSaltypes?: SalaryExportSaltype[]
 }

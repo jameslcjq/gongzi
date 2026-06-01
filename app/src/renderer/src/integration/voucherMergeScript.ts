@@ -281,7 +281,7 @@ ${pdfLibBundle}
     return { doc, targetElement }
   }
 
-  function findLegacyTopNavMount(doc) {
+  function findAlternateTopNavMount(doc) {
     const topNav = doc.getElementById('topnav')
     if (!topNav) return null
 
@@ -303,8 +303,8 @@ ${pdfLibBundle}
       const voucherRegisteredTabMount = findVoucherRegisteredTabMount(doc)
       if (voucherRegisteredTabMount) return voucherRegisteredTabMount
 
-      const legacyTopNavMount = findLegacyTopNavMount(doc)
-      if (legacyTopNavMount) return legacyTopNavMount
+      const alternateTopNavMount = findAlternateTopNavMount(doc)
+      if (alternateTopNavMount) return alternateTopNavMount
 
       const frames = win.frames
       for (let i = 0; i < frames.length; i++) {

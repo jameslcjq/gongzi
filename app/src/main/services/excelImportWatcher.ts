@@ -1,6 +1,6 @@
 import { dialog, shell } from 'electron'
 import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
-import { basename, extname, join, normalize } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { all, get, getDatabase, run } from '../db/connection'
 import type {
@@ -12,7 +12,7 @@ import type {
 import { commitExcelImport } from './excelImport'
 import { inferWorksheet } from './worksheetInference'
 import { isPersonnelExpensePlanWorkbook } from './budget/personnelExpensePlanPrefill'
-import { getDataPath, importFolder, legacyImportFolders } from '../config/paths'
+import { getDataPath, importFolder } from '../config/paths'
 
 const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
@@ -280,20 +280,10 @@ async function readPersistedImportFolder(): Promise<string | undefined> {
       [importFolderSettingKey]
     )
     const value = row?.value || undefined
-    if (isLegacyImportFolder(value)) {
-      await persistImportFolder(preferredImportFolder)
-      return preferredImportFolder
-    }
     return value
   } catch {
     return undefined
   }
-}
-
-function isLegacyImportFolder(value: string | undefined): boolean {
-  if (!value) return false
-  const normalizedValue = normalize(value).toLowerCase()
-  return legacyImportFolders.some((folder) => normalize(folder).toLowerCase() === normalizedValue)
 }
 
 async function persistImportFolder(value: string): Promise<void> {

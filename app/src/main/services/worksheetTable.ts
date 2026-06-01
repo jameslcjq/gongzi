@@ -2,18 +2,8 @@ import { readWorksheetMetadata } from '../db/metadata'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import type { WorksheetMeta } from '../../shared/types'
 
-const worksheetNameAliases = new Map<string, string>([
-  ['一体化在职', '在职工资'],
-  ['一体化退休', '退休工资'],
-  ['一体化其他', '其他工资'],
-  ['在职工资', '一体化在职'],
-  ['退休工资', '一体化退休'],
-  ['其他工资', '一体化其他']
-])
-
 export function getWorksheetByName(name: string): WorksheetMeta {
-  const candidates = [name, worksheetNameAliases.get(name)].filter((item): item is string => Boolean(item))
-  const worksheet = readWorksheetMetadata().find((item) => candidates.includes(item.name))
+  const worksheet = readWorksheetMetadata().find((item) => item.name === name)
   if (!worksheet) throw new Error(`未找到工作表：${name}`)
   return worksheet
 }

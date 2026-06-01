@@ -8,13 +8,7 @@
 !macroend
 
 !macro customInit
-  ; 旧版数据曾放在程序目录旁边的 D:\laojiu\gzxt\data。
-  ; 新版固定迁移到 D:\laojiu\gzdata，避免升级/卸载程序时误删数据。
   CreateDirectory "D:\laojiu"
-  IfFileExists "D:\laojiu\gzdata\salary-system.sqlite" data_migrate_done 0
-  IfFileExists "D:\laojiu\gzxt\data\salary-system.sqlite" 0 data_migrate_done
-    Rename "D:\laojiu\gzxt\data" "D:\laojiu\gzdata"
-  data_migrate_done:
 
   ${If} $INSTDIR == ""
     StrCpy $INSTDIR "D:\laojiu\gzxt"
@@ -25,12 +19,13 @@
 
 !macro customInstall
   CreateDirectory "D:\laojiu\gzdata"
-  CreateDirectory "D:\laojiu\gzdata\工资存档"
+  CreateDirectory "D:\laojiu\gzdata\工资数据"
   CreateDirectory "D:\laojiu\工资导入"
   CreateDirectory "D:\laojiu\工资导入\imported"
   CreateDirectory "D:\laojiu\工资导入\failed"
   CreateDirectory "D:\laojiu\工资导入\templates"
   CreateShortcut "$DESKTOP\工资导入.lnk" "D:\laojiu\工资导入"
+  CreateShortcut "$DESKTOP\工资数据.lnk" "D:\laojiu\gzdata\工资数据"
 !macroend
 
 !macro customRemoveFiles

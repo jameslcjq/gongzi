@@ -3,7 +3,6 @@ import { readWorksheetMetadata } from '../db/metadata'
 import { quoteIdentifier } from '../db/schema'
 import type {
   SalaryExportSaltype,
-  SalaryExportTarget,
   UnitSettings,
   UnitSettingsLockState
 } from '../../shared/types'
@@ -16,12 +15,6 @@ export const defaultSalaryExportSaltypes: SalaryExportSaltype[] = [
   { saltype_id: '2', saltype_name: '002事业' },
   // 实测：内网下拉里 "006事业退休" 的真实 saltypeid 是 5
   { saltype_id: '5', saltype_name: '事业退休' }
-]
-
-/** @deprecated 仅留作旧数据迁移参考 */
-export const defaultSalaryExportTargets: SalaryExportTarget[] = [
-  { saltype_id: '2', saltype_name: '002事业', salbatch_id: '1', salbatch_name: '批次001' },
-  { saltype_id: '5', saltype_name: '事业退休', salbatch_id: '1', salbatch_name: '批次001' }
 ]
 
 export const defaultUnitSettings: UnitSettings = {
@@ -53,28 +46,7 @@ export async function readUnitSettings(): Promise<UnitSettings> {
   if (!row?.value) return { ...defaultUnitSettings }
   try {
     const parsed = JSON.parse(row.value) as Partial<UnitSettings>
-    const merged: UnitSettings = { ...defaultUnitSettings, ...parsed }
-    // 迁移：旧版本只有 salaryExportTargets，没有 salaryExportSaltypes
-    if (
-      (!merged.salaryExportSaltypes || merged.salaryExportSaltypes.length === 0) &&
-      parsed.salaryExportTargets &&
-      parsed.salaryExportTargets.length
-    ) {
-      const seen = new Set<string>()
-      merged.salaryExportSaltypes = []
-      for (const t of parsed.salaryExportTargets) {
-        if (!t.saltype_id || seen.has(t.saltype_id)) continue
-        seen.add(t.saltype_id)
-        merged.salaryExportSaltypes.push({
-          saltype_id: t.saltype_id,
-          saltype_name: t.saltype_name || t.saltype_id
-        })
-      }
-      if (!merged.salaryExportSaltypes.length) {
-        merged.salaryExportSaltypes = defaultSalaryExportSaltypes.map((t) => ({ ...t }))
-      }
-    }
-    return merged
+    return { ...defaultUnitSettings, ...parsed }
   } catch {
     return { ...defaultUnitSettings }
   }
