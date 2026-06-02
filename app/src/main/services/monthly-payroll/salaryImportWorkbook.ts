@@ -13,6 +13,21 @@ type TemplateColumn = {
 }
 
 const MIN_SALARY_IMPORT_COLUMNS = 45
+const FIXED_HEADER_END_INDEX = 12
+const SALARY_IMPORT_FIELD_COLUMNS: Record<string, number[]> = {
+  岗位工资: [13],
+  薪级工资: [14],
+  岗位津贴: [15],
+  生活补贴: [16],
+  '教（工）龄补贴': [19],
+  住房补贴: [23],
+  其他一: [27, 44],
+  公积金: [31],
+  养老保险缴费: [32],
+  职业年金缴费: [33],
+  医疗保险: [34],
+  失业保险: [35]
+}
 
 export type SalaryImportWorkbookOptions = {
   includedFields?: string[]
@@ -27,6 +42,9 @@ export async function writeSalaryImportWorkbook(
 
   const template = await loadIntegratedActiveTemplate()
   const includedFields = options.includedFields ? new Set(options.includedFields) : undefined
+  const includedColumns = options.includedFields
+    ? buildIncludedColumnIndexes(options.includedFields)
+    : undefined
   const rows = salary.activePeople.map((person, index) => {
     const row = new Array<string | number>(template.headers.length).fill('')
     const assignField = (fieldName: string, columnIndex: number, value: string | number): void => {
@@ -63,7 +81,8 @@ export async function writeSalaryImportWorkbook(
   })
 
   const workbook = XLSX.utils.book_new()
-  const worksheet = XLSX.utils.aoa_to_sheet([template.headers, ...rows])
+  const headers = filterHeaders(template.headers, includedColumns)
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
   XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(text(template.values[2]) || '002'))
   appendLookupSheets(workbook, template.values)
   writeFileSync(filePath, XLSX.write(workbook, { bookType: 'xls', type: 'buffer' }))
@@ -104,6 +123,23 @@ function ensureMinimumColumns(columns: TemplateColumn[]): void {
     const label = columnLabel(columns.length)
     columns.push({ header: label, columnName: label, fieldName: label })
   }
+}
+
+function buildIncludedColumnIndexes(fields: string[]): Set<number> {
+  const columnIndexes = new Set<number>()
+  for (const field of fields) {
+    for (const columnIndex of SALARY_IMPORT_FIELD_COLUMNS[field] ?? []) {
+      columnIndexes.add(columnIndex)
+    }
+  }
+  return columnIndexes
+}
+
+function filterHeaders(headers: string[], includedColumns: Set<number> | undefined): string[] {
+  if (!includedColumns) return headers
+  return headers.map((header, index) =>
+    index <= FIXED_HEADER_END_INDEX || includedColumns.has(index) ? header : ''
+  )
 }
 
 function selectTemplateRow(
