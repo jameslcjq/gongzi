@@ -63,13 +63,13 @@ async function loadIntegratedActiveTemplate(): Promise<{
 }> {
   const worksheet = getWorksheetByName('在职工资')
   const columns: TemplateColumn[] = getWorksheetLocalColumns(worksheet).map((column) => ({
-    header: salaryImportHeaderName(column.field.importSource || column.field.name),
+    header: column.field.importSource || column.field.name,
     columnName: column.columnName,
     fieldName: column.field.name
   }))
   ensureMinimumColumns(columns)
 
-  const batchColumn = columns.find((column) => column.fieldName === '工资批次')?.columnName
+  const batchColumn = columns.find((column) => column.fieldName === '工资批次编码')?.columnName
   const database = await getDatabase()
   const rows = await all<Record<string, unknown>>(
     database,
@@ -84,10 +84,6 @@ async function loadIntegratedActiveTemplate(): Promise<{
     headers: columns.map((column) => column.header),
     values: columns.map((column) => normalizeCell(templateRow[column.columnName]))
   }
-}
-
-function salaryImportHeaderName(name: string): string {
-  return name === '工资批次' ? '工资批次编码' : name
 }
 
 function ensureMinimumColumns(columns: TemplateColumn[]): void {

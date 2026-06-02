@@ -151,7 +151,7 @@ export async function applyTaxAndRecomputeIntegratedActive(
   const payCols = INTEGRATED_ACTIVE_PAY_FIELDS.map((name) => findColumnByName(worksheet, name))
   const deductionCols = INTEGRATED_ACTIVE_DEDUCT_FIELDS.map((name) => findColumnByName(worksheet, name))
   const columns = getWorksheetLocalColumns(worksheet)
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
+  const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
   const table = tableNameOf(worksheet)
   const database = await getDatabase()
 
@@ -417,7 +417,7 @@ async function buildIntegratedWorksheetWriteBackPlan(
   const columns = getWorksheetLocalColumns(worksheet)
   const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
   const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
+  const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
   if (!idColumn) throw new Error(missingIdCardMessage)
 
   const fieldColumns = new Map(columns.map((column) => [column.field.name, column]))
@@ -689,7 +689,7 @@ export async function loadIntegratedRows(worksheetName: string): Promise<Integra
   const columns = getWorksheetLocalColumns(worksheet)
   const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
   const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
+  const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
   if (!idColumn) throw new Error(`${worksheetName} 缺少证件号码字段`)
 
   const database = await getDatabase()

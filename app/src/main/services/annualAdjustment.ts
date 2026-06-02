@@ -314,7 +314,7 @@ async function buildPersonalTaxRows(incomeFields: string[]): Promise<PersonalTax
   const colByField = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const idColumn = colByField.get('证件号码')
   const nameColumn = colByField.get('姓名')
-  const batchColumn = colByField.get('工资批次')
+  const batchColumn = colByField.get('工资批次编码')
   if (!idColumn || !nameColumn) throw new Error('在职工资缺少姓名或证件号码字段')
 
   const missingIncomeFields = incomeFields.filter((field) => !colByField.has(field))
@@ -377,7 +377,7 @@ async function buildSocialInsuranceBaseRows(baseFields: string[]): Promise<Socia
   const colByField = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const idColumn = colByField.get('证件号码')
   const nameColumn = colByField.get('姓名')
-  const batchColumn = colByField.get('工资批次')
+  const batchColumn = colByField.get('工资批次编码')
   if (!idColumn || !nameColumn) throw new Error('在职工资缺少姓名或证件号码字段')
 
   const missingBaseFields = baseFields.filter((field) => !colByField.has(field))
@@ -775,7 +775,7 @@ async function buildAnnualIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Pr
   const columns = getWorksheetLocalColumns(worksheet)
   const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
   const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
-  const batchColumn = columns.find((column) => column.field.name === '工资批次')?.columnName
+  const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
   if (!idColumn) throw new Error('在职工资缺少证件号码字段')
   const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const database = await getDatabase()

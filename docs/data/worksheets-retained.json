@@ -62,7 +62,7 @@
       },
       {
         "fieldId": "67a81e1c8d1d42d0db2efee5",
-        "name": "工资批次",
+        "name": "工资批次编码",
         "type": "文本框",
         "controlType": 2,
         "desc": "String 文本"
@@ -533,7 +533,7 @@
       },
       {
         "fieldId": "68d1363b4b3cd60c8a8cc89d-new-工资批次",
-        "name": "工资批次",
+        "name": "工资批次编码",
         "type": "文本框",
         "controlType": 2,
         "desc": "String 文本"
@@ -794,7 +794,7 @@
       },
       {
         "fieldId": "other-integrated-8",
-        "name": "工资批次",
+        "name": "工资批次编码",
         "type": "文本框",
         "controlType": 2,
         "desc": "String 文本"

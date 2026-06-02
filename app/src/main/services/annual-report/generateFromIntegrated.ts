@@ -54,7 +54,7 @@ export async function generateAnnualReportFromIntegrated(
     name: findColumnByName(sourceWorksheet, '姓名'),
     year: tryFindColumnByName(sourceWorksheet, '业务年度'),
     month: tryFindColumnByName(sourceWorksheet, '月份'),
-    batch: tryFindColumnByName(sourceWorksheet, '工资批次')
+    batch: tryFindColumnByName(sourceWorksheet, '工资批次编码')
   })
   if (rows.length === 0) throw new Error('在职工资没有可生成工资年报的数据')
 

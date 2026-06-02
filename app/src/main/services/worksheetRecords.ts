@@ -407,7 +407,7 @@ function getIntegratedBatchViewCondition(worksheet: WorksheetMeta, view: string)
   const code = batchCodeByView[view]
   if (!code) return ''
   const batchColumn = getWorksheetLocalColumns(worksheet).find(
-    (column) => column.field.name === '工资批次'
+    (column) => column.field.name === '工资批次编码'
   )
   if (!batchColumn) return ''
   return `${quoteIdentifier(batchColumn.columnName)} = '${code}'`

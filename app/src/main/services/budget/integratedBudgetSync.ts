@@ -822,7 +822,7 @@ function getSheetCtx(name: string): SheetCtx {
 
 async function loadLatestSourceRows(source: SheetCtx): Promise<Row[]> {
   const idCardColumn = findIdCardColumn(source)
-  const batchColumn = source.columns.get('工资批次')
+  const batchColumn = source.columns.get('工资批次编码')
   const database = await getDatabase()
   const rows = await all<Row>(database, `SELECT * FROM ${source.table}`)
   const byIdCard = new Map<string, Row>()
