@@ -409,6 +409,13 @@ function buildBusinessSummaryMessages(summary: MonthlyPayrollBusinessSummary): s
   ]
 }
 
+function appendBusinessSummaryMessages(
+  messages: string[],
+  summary: MonthlyPayrollBusinessSummary
+): string[] {
+  return [...messages, ...buildBusinessSummaryMessages(summary)]
+}
+
 export async function preprocessMonthlyPayroll(
   payload?: { monthlyPayroll?: MonthlyPayrollWorkflowInput }
 ): Promise<RuleResult> {
@@ -494,7 +501,7 @@ export async function preprocessMonthlyPayroll(
         ...insuranceCheck.messages
       ]
       const messages = insuranceCheck.warnings.length === 0 && salary
-        ? buildBusinessSummaryMessages(buildBusinessSummary({
+        ? appendBusinessSummaryMessages(detailMessages, buildBusinessSummary({
             active: activePaySummary,
             survivor: integratedOtherPaySummary,
             retiredHousing: integratedRetiredPaySummary
@@ -544,14 +551,11 @@ export async function preprocessMonthlyPayroll(
         ...insuranceCheck.warnings
       ]
       const messages = warnings.length === 0
-        ? [
-            '权威来源：本地在职工资、退休工资、其他工资',
-            ...buildBusinessSummaryMessages(buildBusinessSummary({
-              active: integratedActiveRecompute,
-              survivor: integratedOtherPaySummary,
-              retiredHousing: integratedRetiredPaySummary
-            }))
-          ]
+        ? appendBusinessSummaryMessages(detailMessages, buildBusinessSummary({
+            active: integratedActiveRecompute,
+            survivor: integratedOtherPaySummary,
+            retiredHousing: integratedRetiredPaySummary
+          }))
         : detailMessages
 
       return okRule(
@@ -691,7 +695,7 @@ export async function preprocessMonthlyPayroll(
       ...insuranceCheck.warnings
     ]
     const messages = warnings.length === 0
-      ? buildBusinessSummaryMessages(buildBusinessSummary({
+      ? appendBusinessSummaryMessages(detailMessages, buildBusinessSummary({
           active: integratedActiveRecompute,
           survivor: integratedOtherPaySummary,
           retiredHousing: integratedRetiredPaySummary
