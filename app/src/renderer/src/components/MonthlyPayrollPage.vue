@@ -1579,7 +1579,7 @@ function isCustomStyledSheet(name: string): boolean {
         <el-table-column label="单位" prop="unitFullName" min-width="180" show-overflow-tooltip />
         <el-table-column label="在职" prop="activeCount" width="70" align="right" />
         <el-table-column label="遗补" prop="survivorCount" width="70" align="right" />
-        <el-table-column label="退休" prop="retiredHousingCount" width="70" align="right" />
+        <el-table-column label="退休房补" prop="retiredHousingCount" width="90" align="right" />
         <el-table-column label="在职实发" width="120" align="right">
           <template #default="{ row }">{{ formatMoney(row.activeActualPay) }}</template>
         </el-table-column>

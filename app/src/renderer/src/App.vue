@@ -492,7 +492,11 @@ function pushWorkflowNotice(result: WorkflowRunResult) {
 async function showLookupFailureDetails(log: ExcelImportLog) {
   if (!log.ok) {
     if (log.worksheetName === '工作流') {
-      await loadLookupFailureDetails(`${log.fileName} 查询失败详情`, log.fileName)
+      await ElMessageBox.alert(
+        formatNotificationDetails(log.message || '无详细提醒内容'),
+        `${log.fileName}详情`,
+        { type: 'warning', confirmButtonText: '关闭', customClass: 'import-error-dialog' }
+      )
     } else {
       // 普通 Excel 导入失败：直接展示错误信息
       await ElMessageBox.alert(
@@ -502,6 +506,14 @@ async function showLookupFailureDetails(log: ExcelImportLog) {
       )
     }
   }
+}
+
+function formatNotificationDetails(message: string): string {
+  return message
+    .split('；')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join('\n')
 }
 
 async function showAllLookupFailures() {
@@ -2085,6 +2097,10 @@ onUnmounted(() => {
   color: var(--text-muted);
   text-align: center;
   font-size: 12.5px;
+}
+
+:global(.import-error-dialog .el-message-box__message) {
+  white-space: pre-line;
 }
 
 .md-icon-btn {

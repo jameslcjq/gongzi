@@ -273,70 +273,68 @@ export async function summarizeIntegratedActive(
 export async function recomputeIntegratedOtherLikeWorksheet(
   worksheetName: '其他工资' | '退休工资'
 ): Promise<IntegratedSimplePaySummary> {
+  const worksheet = getWorksheetByName(worksheetName)
+  const columns = getWorksheetLocalColumns(worksheet)
+  const colByName = (name: string): string | undefined =>
+    columns.find((column) => column.field.name === name)?.columnName
+  const idColumn = colByName('证件号码')
+  const payableColumn = colByName('应发工资小计')
+  const deductionColumn = colByName('代扣工资')
+  const actualPayColumn = colByName('实发合计')
+  if (!idColumn || !actualPayColumn) {
+    throw new Error(`${worksheetName} 缺少证件号码或实发合计字段`)
+  }
+  const payColumns = integratedSimplePayFields
+    .map((name) => colByName(name))
+    .filter((column): column is string => Boolean(column))
+
+  const database = await getDatabase()
+  const table = tableNameOf(worksheet)
+  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${table}`)
+  const latestById = new Map<string, Record<string, unknown>>()
+  for (const row of rows) {
+    const idCard = normalizeIdCard(row[idColumn])
+    if (!idCard) continue
+    const previous = latestById.get(idCard)
+    if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
+  }
+
+  const latest = Array.from(latestById.values())
+  let actualPayTotal = 0
+  const now = new Date().toISOString()
+  await run(database, 'BEGIN TRANSACTION')
   try {
-    const worksheet = getWorksheetByName(worksheetName)
-    const columns = getWorksheetLocalColumns(worksheet)
-    const colByName = (name: string): string | undefined =>
-      columns.find((column) => column.field.name === name)?.columnName
-    const idColumn = colByName('证件号码')
-    const payableColumn = colByName('应发工资小计')
-    const deductionColumn = colByName('代扣工资')
-    const actualPayColumn = colByName('实发合计')
-    if (!idColumn || !actualPayColumn) return { rowCount: 0, actualPayTotal: 0 }
-    const payColumns = integratedSimplePayFields
-      .map((name) => colByName(name))
-      .filter((column): column is string => Boolean(column))
-
-    const database = await getDatabase()
-    const table = tableNameOf(worksheet)
-    const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${table}`)
-    const latestById = new Map<string, Record<string, unknown>>()
-    for (const row of rows) {
-      const idCard = normalizeIdCard(row[idColumn])
-      if (!idCard) continue
-      const previous = latestById.get(idCard)
-      if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
+    for (const row of latest) {
+      const payable = roundMoney(payColumns.reduce((sum, column) => sum + num(row[column]), 0))
+      const actual = roundMoney(payable - (deductionColumn ? num(row[deductionColumn]) : 0))
+      actualPayTotal = roundMoney(actualPayTotal + actual)
+      const assignments = [
+        ...(payableColumn ? [`${quoteIdentifier(payableColumn)} = ?`] : []),
+        `${quoteIdentifier(actualPayColumn)} = ?`,
+        '"md_updated_at" = ?'
+      ].join(', ')
+      const params = [
+        ...(payableColumn ? [payable] : []),
+        actual,
+        now,
+        row.id
+      ]
+      await run(
+        database,
+        `UPDATE ${table}
+           SET ${assignments}
+         WHERE "id" = ?`,
+        params
+      )
     }
-
-    const latest = Array.from(latestById.values())
-    let actualPayTotal = 0
-    const now = new Date().toISOString()
-    await run(database, 'BEGIN TRANSACTION')
-    try {
-      for (const row of latest) {
-        const payable = roundMoney(payColumns.reduce((sum, column) => sum + num(row[column]), 0))
-        const actual = roundMoney(payable - (deductionColumn ? num(row[deductionColumn]) : 0))
-        actualPayTotal = roundMoney(actualPayTotal + actual)
-        const assignments = [
-          ...(payableColumn ? [`${quoteIdentifier(payableColumn)} = ?`] : []),
-          `${quoteIdentifier(actualPayColumn)} = ?`,
-          '"md_updated_at" = ?'
-        ].join(', ')
-        const params = [
-          ...(payableColumn ? [payable] : []),
-          actual,
-          now,
-          row.id
-        ]
-        await run(
-          database,
-          `UPDATE ${table}
-             SET ${assignments}
-           WHERE "id" = ?`,
-          params
-        )
-      }
-      await run(database, 'COMMIT')
-    } catch (error) {
-      await run(database, 'ROLLBACK')
-      throw error
-    }
-    return {
-      rowCount: latest.length,
-      actualPayTotal
-    }
-  } catch {
-    return { rowCount: 0, actualPayTotal: 0 }
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    throw error
+  }
+  return {
+    rowCount: latest.length,
+    actualPayTotal
   }
 }
 

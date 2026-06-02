@@ -1035,11 +1035,9 @@ function resolveMonthCloseAdjustmentTarget(
 }
 
 async function recomputeMonthlyPayrollWorksheetsAfterAdjustmentChange(): Promise<void> {
-  await Promise.all([
-    applyTaxAndRecomputeIntegratedActive({}),
-    recomputeIntegratedOtherLikeWorksheet('退休工资'),
-    recomputeIntegratedOtherLikeWorksheet('其他工资')
-  ])
+  await applyTaxAndRecomputeIntegratedActive({})
+  await recomputeIntegratedOtherLikeWorksheet('退休工资')
+  await recomputeIntegratedOtherLikeWorksheet('其他工资')
 }
 
 async function latestArchiveOperationBatch(

@@ -405,7 +405,7 @@ function buildBusinessSummaryMessages(summary: MonthlyPayrollBusinessSummary): s
   return [
     `在职 ${summary.activeCount} 人，应发 ${formatMoney(summary.activePayableTotal)} 元，实发 ${formatMoney(summary.activeActualPay)} 元`,
     `遗补 ${summary.survivorCount} 人，实发 ${formatMoney(summary.survivorActualPay)} 元`,
-    `退休 ${summary.retiredHousingCount} 人，实发 ${formatMoney(summary.retiredHousingActualPay)} 元`
+    `退休房补 ${summary.retiredHousingCount} 人，实发 ${formatMoney(summary.retiredHousingActualPay)} 元`
   ]
 }
 
@@ -454,10 +454,8 @@ export async function preprocessMonthlyPayroll(
         )
       : undefined
     await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
-    const [integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
-      recomputeIntegratedOtherLikeWorksheet('其他工资'),
-      recomputeIntegratedOtherLikeWorksheet('退休工资')
-    ])
+    const integratedOtherPaySummary = await recomputeIntegratedOtherLikeWorksheet('其他工资')
+    const integratedRetiredPaySummary = await recomputeIntegratedOtherLikeWorksheet('退休工资')
 
     await runDetailImports(input, salary)
 
@@ -770,11 +768,9 @@ export async function generateMonthlyPayrollReportView(
     ? applyTaxToSalarySummary(rawSalary, taxByIdCard, { clearTaxWhenMissing: !tax })
     : undefined
   await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
-  const [integratedActiveSummary, integratedOtherPaySummary, integratedRetiredPaySummary] = await Promise.all([
-    applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax }),
-    recomputeIntegratedOtherLikeWorksheet('其他工资'),
-    recomputeIntegratedOtherLikeWorksheet('退休工资')
-  ])
+  const integratedActiveSummary = await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
+  const integratedOtherPaySummary = await recomputeIntegratedOtherLikeWorksheet('其他工资')
+  const integratedRetiredPaySummary = await recomputeIntegratedOtherLikeWorksheet('退休工资')
 
   const [
     retired,
