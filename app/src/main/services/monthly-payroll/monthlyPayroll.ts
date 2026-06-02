@@ -39,7 +39,6 @@ import {
   formatCompareMessage,
   formatCompareWarning,
   getActiveCompareFields,
-  initialIntegratedWriteBackPlan,
   mergeAppliedWriteBackPreview,
   mergeIntegratedWriteBackPlans,
   recomputeIntegratedOtherLikeWorksheet,
@@ -609,20 +608,6 @@ export async function preprocessMonthlyPayroll(
       requiresConfirmation: writeBackPlan.changes.length > 0 && !input.confirmWriteBack,
       applied: false
     })
-    let autoAppliedPlan = mergeIntegratedWriteBackPlans()
-
-    if (writeBackPlan.changes.length > 0 && !input.confirmWriteBack) {
-      const initialPlan = initialIntegratedWriteBackPlan(writeBackPlan)
-      if (initialPlan.changes.length > 0) {
-        await applyIntegratedWriteBackPlan(initialPlan)
-        await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
-        autoAppliedPlan = initialPlan
-        activeWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
-        survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
-        writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
-        writeBackPreview = mergeAppliedWriteBackPreview(autoAppliedPlan, writeBackPlan)
-      }
-    }
 
     if (writeBackPlan.changes.length > 0 && !input.confirmWriteBack) {
       const pendingPreview = buildMonthlyPayrollWriteBackPreview(writeBackPlan, {
@@ -633,9 +618,6 @@ export async function preprocessMonthlyPayroll(
         workflowName,
         salary.activePeople.length + salary.survivorPeople.length + (socialSecurity?.rowCount ?? 0) + (tax?.rows.length ?? 0),
         [
-          ...(autoAppliedPlan.changes.length > 0
-            ? [`工资表首次落库金额已自动回写 ${autoAppliedPlan.changes.length} 项，系统已先完成一次复核`]
-            : []),
           `发现工资表与本地工资数据有 ${writeBackPlan.changes.length} 项金额差异可自动回写，涉及 ${pendingPreview.personCount} 人`,
           ...pendingPreview.examples.map((item) => `可回写：${item}`),
           ...(writeBackPlan.manual.length > 0

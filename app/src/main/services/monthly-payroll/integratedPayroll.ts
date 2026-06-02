@@ -512,16 +512,6 @@ export function mergeIntegratedWriteBackPlans(...plans: IntegratedWriteBackPlan[
   }
 }
 
-export function initialIntegratedWriteBackPlan(plan: IntegratedWriteBackPlan): IntegratedWriteBackPlan {
-  return {
-    changes: plan.changes.filter((change) =>
-      Math.abs(roundMoney(change.targetValue)) < 0.01 &&
-      Math.abs(roundMoney(change.sourceValue)) >= 0.01
-    ),
-    manual: []
-  }
-}
-
 export async function applyIntegratedWriteBackPlan(plan: IntegratedWriteBackPlan): Promise<void> {
   if (plan.changes.length === 0) return
   const worksheetCache = new Map<string, {
