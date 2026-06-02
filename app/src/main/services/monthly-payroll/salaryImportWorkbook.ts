@@ -112,8 +112,11 @@ export async function writeSalaryImportWorkbook(
   })
 
   const workbook = XLSX.utils.book_new()
-  const headers = filterHeaders(template.headers, includedColumns)
-  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
+  const columnIndexes = outputColumnIndexes(template.headers, includedColumns)
+  const worksheetRows = [template.headers, ...rows].map((row) =>
+    columnIndexes.map((columnIndex) => row[columnIndex] ?? '')
+  )
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetRows)
   XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(text(template.values[2]) || '002'))
   appendLookupSheets(workbook, template.values)
   writeFileSync(filePath, XLSX.write(workbook, { bookType: 'xls', type: 'buffer' }))
@@ -166,11 +169,10 @@ function buildIncludedColumnIndexes(fields: string[]): Set<number> {
   return columnIndexes
 }
 
-function filterHeaders(headers: string[], includedColumns: Set<number> | undefined): string[] {
-  if (!includedColumns) return headers
-  return headers.map((header, index) =>
-    index <= FIXED_HEADER_END_INDEX || includedColumns.has(index) ? header : ''
-  )
+function outputColumnIndexes(headers: string[], includedColumns: Set<number> | undefined): number[] {
+  return headers
+    .map((_, index) => index)
+    .filter((index) => !includedColumns || index <= FIXED_HEADER_END_INDEX || includedColumns.has(index))
 }
 
 function selectTemplateRow(
