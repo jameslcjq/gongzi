@@ -393,7 +393,7 @@ export async function buildIntegratedActiveWriteBackPlan(
     '在职工资',
     getActiveCompareFields(taxField),
     '在职工资 缺少证件号码字段',
-    (targetFieldName) => targetFieldName === taxField ? '001' : undefined
+    () => '001'
   )
 }
 
@@ -509,6 +509,16 @@ export function mergeIntegratedWriteBackPlans(...plans: IntegratedWriteBackPlan[
   return {
     changes: plans.flatMap((plan) => plan.changes),
     manual: plans.flatMap((plan) => plan.manual)
+  }
+}
+
+export function initialIntegratedWriteBackPlan(plan: IntegratedWriteBackPlan): IntegratedWriteBackPlan {
+  return {
+    changes: plan.changes.filter((change) =>
+      Math.abs(roundMoney(change.targetValue)) < 0.01 &&
+      Math.abs(roundMoney(change.sourceValue)) >= 0.01
+    ),
+    manual: []
   }
 }
 
