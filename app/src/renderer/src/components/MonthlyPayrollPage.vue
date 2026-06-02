@@ -820,7 +820,7 @@ async function runGenerate(): Promise<void> {
       if (latest) {
         await loadHistoryReport(latest, false)
       }
-      ElMessage.success(next.messages[1] ?? '月度工资报账汇总生成完成')
+      ElMessage.success(next.messages[0] ?? '月度工资报账汇总生成完成')
     } else {
       ElMessage.error(next.warnings[0] ?? '月度工资报账汇总生成失败')
     }
