@@ -427,11 +427,15 @@ export type MonthlyPayrollRun = {
   outdatedAt: string | null
   outdatedReason: string | null
   insurancePushStatus: MonthlyPayrollPushStatus
+  voucherPushStatus: MonthlyPayrollPushStatus
   salaryPushStatus: MonthlyPayrollPushStatus
   insurancePushedAt: string | null
+  voucherPushedAt: string | null
   salaryPushedAt: string | null
   createdAt: string
 }
+
+export type MonthlyPayrollPushTarget = 'insurance' | 'voucher' | 'salary'
 
 export type MonthlyPayrollPushStatus =
   | 'not-pushed'

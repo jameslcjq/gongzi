@@ -7,7 +7,6 @@ import {
   CircleClose,
   Lock,
   Setting,
-  SwitchButton,
   Tickets,
   Upload,
   User
@@ -1151,12 +1150,6 @@ function handleLogin() {
   void bootstrapLicense()
 }
 
-function handleLogout() {
-  localStorage.removeItem(loginStorageKey)
-  loginForm.value.password = ''
-  isLoggedIn.value = false
-}
-
 async function loadAppVersion() {
   try {
     appVersion.value = await window.salaryApi.getAppVersion()
@@ -1244,7 +1237,7 @@ onMounted(() => {
     if (document.visibilityState === 'hidden') return
     if (!importWatcherLoading.value) void refreshImportWatcher()
   }, 5000)
-  // 注册"切换到一体化对接"回调，供 MonthlyPayrollPage 推送保险时跳转用
+  // 注册"切换到一体化对接"回调，供 MonthlyPayrollPage 推送队列跳转用
   setSwitchToIntegration(() => {
     activeModuleKey.value = 'integration'
   })
@@ -1390,11 +1383,6 @@ onUnmounted(() => {
         <el-tooltip content="设置 / 备份" placement="bottom">
           <button class="md-icon-btn" @click="settingsDialogVisible = true">
             <el-icon><Setting /></el-icon>
-          </button>
-        </el-tooltip>
-        <el-tooltip content="退出登录" placement="bottom">
-          <button class="md-icon-btn" @click="handleLogout">
-            <el-icon><SwitchButton /></el-icon>
           </button>
         </el-tooltip>
       </div>
@@ -1699,9 +1687,6 @@ onUnmounted(() => {
           </el-button>
           <el-button @click="settingsDialogVisible = true">
             单位设置
-          </el-button>
-          <el-button @click="handleLogout">
-            退出登录
           </el-button>
         </div>
       </el-form>

@@ -6,7 +6,6 @@ import MailAttachmentPage from './MailAttachmentPage.vue'
 import type {
   BackupSummary,
   ImportWatcherStatus,
-  MonthlyPayrollRun,
   RecycleBinBatch,
   SalaryExportSaltype,
   UnitSettings,
@@ -32,9 +31,6 @@ const wiping = ref(false)
 const recycleBatches = ref<RecycleBinBatch[]>([])
 const recycleLoading = ref(false)
 const recycleRestoringId = ref<number | null>(null)
-const monthCloseRuns = ref<MonthlyPayrollRun[]>([])
-const monthCloseLoading = ref(false)
-const cancelingMonthCloseId = ref<number | null>(null)
 const activeTab = ref('unit')
 const appVersion = ref('dev')
 
@@ -96,7 +92,6 @@ watch(
     if (visible) {
       void refreshBackups()
       void refreshRecycleBin()
-      void refreshMonthCloseRuns()
       void loadUnitSettings()
       void loadAppVersion()
     }
@@ -226,51 +221,6 @@ async function refreshRecycleBin() {
     recycleBatches.value = await window.salaryApi.listRecycleBinBatches(200)
   } finally {
     recycleLoading.value = false
-  }
-}
-
-async function refreshMonthCloseRuns() {
-  monthCloseLoading.value = true
-  try {
-    const runs = await window.salaryApi.listMonthlyPayrollRuns()
-    monthCloseRuns.value = runs.filter((item: MonthlyPayrollRun) => item.archivedAt)
-  } finally {
-    monthCloseLoading.value = false
-  }
-}
-
-async function openMonthCloseFolder(row: MonthlyPayrollRun) {
-  if (!row.archiveDir) return
-  const err = await window.salaryApi.openLocalPath(row.archiveDir)
-  if (err) ElMessage.error(`无法打开：${err}`)
-}
-
-async function cancelMonthClose(row: MonthlyPayrollRun) {
-  try {
-    await ElMessageBox.confirm(
-      `取消 ${row.year}年${row.month}月 的月结后，该月所有历史记录都会解除月结锁定，工资、社保、个税源文件会放回监控文件夹，可以重新预处理和生成报表。`,
-      '取消月结',
-      {
-        type: 'warning',
-        confirmButtonText: '取消月结',
-        cancelButtonText: '保留月结',
-        confirmButtonClass: 'el-button--danger'
-      }
-    )
-  } catch {
-    return
-  }
-
-  cancelingMonthCloseId.value = row.id
-  try {
-    await window.salaryApi.cancelMonthlyPayrollMonthClose(row.id)
-    ElMessage.success('已取消月结')
-    await refreshMonthCloseRuns()
-    emit('changed')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '取消月结失败')
-  } finally {
-    cancelingMonthCloseId.value = null
   }
 }
 
@@ -418,9 +368,6 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-function formatMoney(value: number): string {
-  return value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 </script>
 
 <template>
@@ -576,46 +523,6 @@ function formatMoney(value: number): string {
             </div>
           </el-form>
         </div>
-      </el-tab-pane>
-
-      <el-tab-pane label="工资月结" name="monthClose">
-        <div class="settings-section">
-          <h4>工资月结管理</h4>
-          <p>取消月结会解除本月锁定，并把工资、社保、个税源文件放回监控文件夹；最终报表文件会从月结目录清理，重新生成后再归档。</p>
-          <div>
-            <el-button @click="refreshMonthCloseRuns">刷新月结列表</el-button>
-          </div>
-        </div>
-
-        <el-table :data="monthCloseRuns" v-loading="monthCloseLoading" border size="small" height="420">
-          <el-table-column label="年月" width="110">
-            <template #default="{ row }">{{ row.year }}-{{ String(row.month).padStart(2, '0') }}</template>
-          </el-table-column>
-          <el-table-column prop="archivedAt" label="月结时间" min-width="170" />
-          <el-table-column prop="unitFullName" label="单位" min-width="180" show-overflow-tooltip />
-          <el-table-column label="实发" width="120" align="right">
-            <template #default="{ row }">{{ formatMoney(row.actualPay) }}</template>
-          </el-table-column>
-          <el-table-column prop="archiveDir" label="月结目录" min-width="220" show-overflow-tooltip />
-          <el-table-column label="操作" width="180" fixed="right">
-            <template #default="{ row }">
-              <el-button
-                v-if="row.archiveDir"
-                size="small"
-                text
-                type="primary"
-                @click="openMonthCloseFolder(row)"
-              >打开目录</el-button>
-              <el-button
-                size="small"
-                text
-                type="danger"
-                :loading="cancelingMonthCloseId === row.id"
-                @click="cancelMonthClose(row)"
-              >取消月结</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
       </el-tab-pane>
 
       <el-tab-pane label="一致性审计" name="audit">

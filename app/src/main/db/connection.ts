@@ -336,8 +336,10 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       outdated_at TEXT,
       outdated_reason TEXT,
       insurance_push_status TEXT NOT NULL DEFAULT 'not-pushed',
+      voucher_push_status TEXT NOT NULL DEFAULT 'not-pushed',
       salary_push_status TEXT NOT NULL DEFAULT 'not-pushed',
       insurance_pushed_at TEXT,
+      voucher_pushed_at TEXT,
       salary_pushed_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -547,7 +549,7 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'previous_values', definition: 'TEXT' }
   ])
   await ensureColumns(database, 'import_logs', [{ name: 'batch_id', definition: 'INTEGER' }])
-  await ensureColumns(database, 'monthly_payroll_runs', [
+  const addedMonthlyPayrollColumns = await ensureColumns(database, 'monthly_payroll_runs', [
     { name: 'retired_housing_count', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'active_actual_pay', definition: 'REAL NOT NULL DEFAULT 0' },
     { name: 'survivor_actual_pay', definition: 'REAL NOT NULL DEFAULT 0' },
@@ -564,10 +566,23 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'outdated_at', definition: 'TEXT' },
     { name: 'outdated_reason', definition: 'TEXT' },
     { name: 'insurance_push_status', definition: 'TEXT NOT NULL DEFAULT \'not-pushed\'' },
+    { name: 'voucher_push_status', definition: 'TEXT NOT NULL DEFAULT \'not-pushed\'' },
     { name: 'salary_push_status', definition: 'TEXT NOT NULL DEFAULT \'not-pushed\'' },
     { name: 'insurance_pushed_at', definition: 'TEXT' },
+    { name: 'voucher_pushed_at', definition: 'TEXT' },
     { name: 'salary_pushed_at', definition: 'TEXT' }
   ])
+  if (addedMonthlyPayrollColumns.includes('voucher_push_status')) {
+    await exec(
+      database,
+      `UPDATE monthly_payroll_runs
+          SET voucher_push_status = insurance_push_status,
+              voucher_pushed_at = insurance_pushed_at
+        WHERE voucher_import_path IS NOT NULL
+          AND voucher_push_status = 'not-pushed'
+          AND insurance_push_status <> 'not-pushed'`
+    )
+  }
   await ensureColumns(database, 'monthly_payroll_source_versions', [
     { name: 'archive_path', definition: 'TEXT' }
   ])
@@ -591,14 +606,17 @@ async function ensureColumns(
   database: sqlite3.Database,
   tableName: string,
   expected: Array<{ name: string; definition: string }>
-): Promise<void> {
+): Promise<string[]> {
   const existing = await all<{ name: string }>(database, `PRAGMA table_info(${tableName})`)
   const existingNames = new Set(existing.map((column) => column.name))
+  const added: string[] = []
   for (const column of expected) {
     if (!existingNames.has(column.name)) {
       await exec(database, `ALTER TABLE ${tableName} ADD COLUMN ${column.name} ${column.definition}`)
+      added.push(column.name)
     }
   }
+  return added
 }
 
 async function ensurePerformanceIndexes(database: sqlite3.Database): Promise<void> {

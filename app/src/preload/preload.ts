@@ -40,6 +40,7 @@ import type {
   WorksheetRecordsResult,
   MonthlyPayrollRun,
   MonthlyPayrollPushStatus,
+  MonthlyPayrollPushTarget,
   MonthlyPayrollSourceVersion,
   MonthlyPayrollSourcePeriodInspection,
   MonthlyPayrollSalaryPrintPageSummary,
@@ -237,7 +238,7 @@ const salaryApi = {
     ipcRenderer.invoke('monthly-payroll:set-source-version-current', id),
   updateMonthlyPayrollPushStatus: (
     id: number,
-    target: 'insurance' | 'salary',
+    target: MonthlyPayrollPushTarget,
     status: MonthlyPayrollPushStatus
   ): Promise<MonthlyPayrollRun> =>
     ipcRenderer.invoke('monthly-payroll:update-push-status', id, target, status),

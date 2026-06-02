@@ -161,6 +161,7 @@ import type {
   LookupFailureEntry,
   MonthlyPayrollRun,
   MonthlyPayrollPushStatus,
+  MonthlyPayrollPushTarget,
   MonthlyPayrollSourceVersion,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
@@ -668,7 +669,7 @@ export function registerAppIpc(): void {
     (
       _event,
       id: number,
-      target: 'insurance' | 'salary',
+      target: MonthlyPayrollPushTarget,
       status: MonthlyPayrollPushStatus
     ): Promise<MonthlyPayrollRun> => updateMonthlyPayrollPushStatus(id, target, status)
   )

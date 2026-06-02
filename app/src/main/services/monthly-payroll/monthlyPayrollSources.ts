@@ -302,6 +302,7 @@ async function markMonthlyPayrollRunsOutdatedForSourceChange(
             outdated_at = COALESCE(outdated_at, ?),
             outdated_reason = COALESCE(outdated_reason, ?),
             insurance_push_status = CASE WHEN insurance_push_status = 'success' THEN 'needs-repush' ELSE insurance_push_status END,
+            voucher_push_status = CASE WHEN voucher_push_status = 'success' THEN 'needs-repush' ELSE voucher_push_status END,
             salary_push_status = CASE WHEN salary_push_status = 'success' THEN 'needs-repush' ELSE salary_push_status END
       WHERE year = ? AND month = ? AND archived_at IS NULL`,
     [new Date().toISOString(), reason, year, month]

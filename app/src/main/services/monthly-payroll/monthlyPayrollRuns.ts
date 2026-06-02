@@ -10,6 +10,7 @@ import type {
   MonthlyPayrollArchiveResult,
   MonthlyPayrollDataSourceMode,
   MonthlyPayrollPushStatus,
+  MonthlyPayrollPushTarget,
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
   MonthlyPayrollRun,
@@ -34,8 +35,10 @@ export type MonthlyPayrollRunInput = Omit<
   | 'outdatedAt'
   | 'outdatedReason'
   | 'insurancePushStatus'
+  | 'voucherPushStatus'
   | 'salaryPushStatus'
   | 'insurancePushedAt'
+  | 'voucherPushedAt'
   | 'salaryPushedAt'
 >
 
@@ -60,6 +63,7 @@ export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput):
             outdated_at = COALESCE(outdated_at, ?),
             outdated_reason = COALESCE(outdated_reason, ?),
             insurance_push_status = CASE WHEN insurance_push_status = 'success' THEN 'needs-repush' ELSE insurance_push_status END,
+            voucher_push_status = CASE WHEN voucher_push_status = 'success' THEN 'needs-repush' ELSE voucher_push_status END,
             salary_push_status = CASE WHEN salary_push_status = 'success' THEN 'needs-repush' ELSE salary_push_status END
       WHERE year = ? AND month = ? AND archived_at IS NULL AND is_outdated = 0`,
     [
@@ -148,7 +152,8 @@ export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
       insurance_import_path, voucher_import_path, salary_import_path, payroll_backpay_path,
       report_fingerprint, tax_field, data_source_mode, archived_at, archive_dir, archive_manifest,
       is_outdated, outdated_at, outdated_reason,
-      insurance_push_status, salary_push_status, insurance_pushed_at, salary_pushed_at,
+      insurance_push_status, voucher_push_status, salary_push_status,
+      insurance_pushed_at, voucher_pushed_at, salary_pushed_at,
       created_at
      FROM monthly_payroll_runs ORDER BY created_at DESC`
   )
@@ -447,12 +452,16 @@ export async function deleteMonthlyPayrollRun(id: number): Promise<boolean> {
 
 export async function updateMonthlyPayrollPushStatus(
   id: number,
-  target: 'insurance' | 'salary',
+  target: MonthlyPayrollPushTarget,
   status: MonthlyPayrollPushStatus
 ): Promise<MonthlyPayrollRun> {
   const database = await getDatabase()
-  const statusColumn = target === 'insurance' ? 'insurance_push_status' : 'salary_push_status'
-  const pushedAtColumn = target === 'insurance' ? 'insurance_pushed_at' : 'salary_pushed_at'
+  const columns: Record<MonthlyPayrollPushTarget, { status: string; pushedAt: string }> = {
+    insurance: { status: 'insurance_push_status', pushedAt: 'insurance_pushed_at' },
+    voucher: { status: 'voucher_push_status', pushedAt: 'voucher_pushed_at' },
+    salary: { status: 'salary_push_status', pushedAt: 'salary_pushed_at' }
+  }
+  const { status: statusColumn, pushedAt: pushedAtColumn } = columns[target]
   const pushedAt = status === 'success' ? new Date().toISOString() : null
   await run(
     database,
@@ -767,8 +776,10 @@ function mapRunRow(row: Record<string, unknown>): MonthlyPayrollRun {
     outdatedAt: (row.outdated_at as string) ?? null,
     outdatedReason: (row.outdated_reason as string) ?? null,
     insurancePushStatus: normalizeMonthlyPayrollPushStatus(row.insurance_push_status),
+    voucherPushStatus: normalizeMonthlyPayrollPushStatus(row.voucher_push_status),
     salaryPushStatus: normalizeMonthlyPayrollPushStatus(row.salary_push_status),
     insurancePushedAt: (row.insurance_pushed_at as string) ?? null,
+    voucherPushedAt: (row.voucher_pushed_at as string) ?? null,
     salaryPushedAt: (row.salary_pushed_at as string) ?? null,
     createdAt: String(row.created_at ?? '')
   }

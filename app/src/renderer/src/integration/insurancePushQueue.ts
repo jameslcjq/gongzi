@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { InsuranceRecord } from './pushInsuranceScript'
+import type { MonthlyPayrollPushTarget } from '@shared/types'
 
 /**
  * 跨页面共享的"推送队列"：MonthlyPayrollPage 把要做的步骤塞进去，
@@ -17,7 +18,7 @@ export type InsurancePushStep = {
   records: InsuranceRecord[]
   label: string
   runId?: number
-  pushTarget?: 'insurance' | 'salary'
+  pushTarget?: MonthlyPayrollPushTarget
 }
 
 export type VoucherPushStep = {
@@ -26,7 +27,7 @@ export type VoucherPushStep = {
   fileName: string
   label: string
   runId?: number
-  pushTarget?: 'insurance' | 'salary'
+  pushTarget?: MonthlyPayrollPushTarget
 }
 
 export type SalarySystemImportPushStep = {
@@ -38,7 +39,7 @@ export type SalarySystemImportPushStep = {
   month?: string
   label: string
   runId?: number
-  pushTarget?: 'insurance' | 'salary'
+  pushTarget?: MonthlyPayrollPushTarget
 }
 
 export type PushStep = InsurancePushStep | VoucherPushStep | SalarySystemImportPushStep

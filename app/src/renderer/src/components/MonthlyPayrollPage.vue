@@ -20,6 +20,7 @@ import type {
   MonthlyPayrollSourcePeriodInspection,
   MonthlyPayrollSourceKind,
   MonthlyPayrollSourceVersion,
+  MonthlyPayrollPushTarget,
   MonthlyPayrollWriteBackPreview,
   PrintRequest,
   PrinterSummary,
@@ -51,6 +52,7 @@ const sourceVersions = ref<MonthlyPayrollSourceVersion[]>([])
 const switchingSourceVersionId = ref<number | null>(null)
 const selectedReportRunId = ref<number | null>(null)
 const archivingId = ref<number | null>(null)
+const cancelingMonthCloseId = ref<number | null>(null)
 const printers = ref<PrinterSummary[]>([])
 const printSettings = ref<MonthlyPayrollPrintSettings>({
   reportPrinterName: '',
@@ -160,67 +162,173 @@ async function openHistoryFile(path: string | null) {
 }
 
 const pushingInsuranceRunId = ref<number | null>(null)
+const pushingVoucherRunId = ref<number | null>(null)
 const pushingSalaryRunId = ref<number | null>(null)
-async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> {
-  if (!row.insuranceImportPath && !row.voucherImportPath) {
-    ElMessage.warning('该记录没有保险/凭证文件可推送')
+const pushingAllRunId = ref<number | null>(null)
+
+function historyPushLabel(row: MonthlyPayrollRun): string {
+  return `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
+}
+
+function pushStatusForTarget(
+  row: MonthlyPayrollRun,
+  target: MonthlyPayrollPushTarget
+): MonthlyPayrollRun['insurancePushStatus'] {
+  if (target === 'voucher') return row.voucherPushStatus
+  if (target === 'salary') return row.salaryPushStatus
+  return row.insurancePushStatus
+}
+
+function pushTargetText(target: MonthlyPayrollPushTarget): string {
+  if (target === 'voucher') return '凭证'
+  if (target === 'salary') return '工资'
+  return '保险'
+}
+
+function pushTargetsForRow(row: MonthlyPayrollRun): MonthlyPayrollPushTarget[] {
+  const targets: MonthlyPayrollPushTarget[] = []
+  if (row.salaryImportPath || row.payrollBackpayPath) targets.push('salary')
+  if (row.insuranceImportPath) targets.push('insurance')
+  if (row.voucherImportPath) targets.push('voucher')
+  return targets
+}
+
+function canPushAll(row: MonthlyPayrollRun): boolean {
+  return pushTargetsForRow(row).length > 0
+}
+
+function enqueueIntegratedPush(steps: PushStep[], stepHints: string[], label: string): void {
+  if (!steps.length) {
+    ElMessage.warning('没有可推送的文件')
     return
   }
-  if (!(await confirmPushRun(row, 'insurance'))) return
-  pushingInsuranceRunId.value = row.id
+  pendingPushQueue.value = steps
+  ElMessage.info(
+    `已准备 ${steps.length} 步${label}（${stepHints.join('、')}），正在跳转到"一体化对接"...`
+  )
+  requestSwitchToIntegration()
+}
+
+async function appendInsurancePushStep(
+  row: MonthlyPayrollRun,
+  label: string,
+  steps: PushStep[],
+  stepHints: string[]
+): Promise<void> {
+  if (!row.insuranceImportPath) return
+  const parsed = await window.salaryApi.parseInsuranceImportXlsx(row.insuranceImportPath)
+  if (!parsed.ok) {
+    throw new Error('解析保险 xlsx 失败：' + parsed.reason)
+  }
+  if (!parsed.records.length) return
+  steps.push({
+    kind: 'insurance',
+    records: parsed.records as InsuranceRecord[],
+    label,
+    runId: row.id,
+    pushTarget: 'insurance'
+  })
+  stepHints.push(`保险 ${parsed.records.length} 条`)
+}
+
+async function appendVoucherPushStep(
+  row: MonthlyPayrollRun,
+  label: string,
+  steps: PushStep[],
+  stepHints: string[]
+): Promise<void> {
+  if (!row.voucherImportPath) return
+  const file = await window.salaryApi.readVoucherXlsx(row.voucherImportPath)
+  if (!file.ok) {
+    throw new Error('读取凭证 xlsx 失败：' + file.reason)
+  }
+  steps.push({
+    kind: 'voucher',
+    fileBase64: file.base64,
+    fileName: file.fileName,
+    label,
+    runId: row.id,
+    pushTarget: 'voucher'
+  })
+  stepHints.push(`凭证 ${(file.size / 1024).toFixed(1)} KB`)
+}
+
+async function appendSalaryPushSteps(
+  row: MonthlyPayrollRun,
+  label: string,
+  steps: PushStep[],
+  stepHints: string[]
+): Promise<void> {
+  if (row.salaryImportPath) {
+    const file = await window.salaryApi.readLocalFileBase64(row.salaryImportPath)
+    steps.push({
+      kind: 'salary-system-import',
+      mode: 'salary',
+      fileBase64: file.base64,
+      fileName: file.fileName,
+      fileSize: file.size,
+      month: String(row.month),
+      label,
+      runId: row.id,
+      pushTarget: 'salary'
+    })
+    stepHints.push(`工资导入 ${(file.size / 1024).toFixed(1)} KB`)
+  }
+
+  if (row.payrollBackpayPath) {
+    const file = await window.salaryApi.readLocalFileBase64(row.payrollBackpayPath)
+    steps.push({
+      kind: 'salary-system-import',
+      mode: 'backpay',
+      fileBase64: file.base64,
+      fileName: file.fileName,
+      fileSize: file.size,
+      label,
+      runId: row.id,
+      pushTarget: 'salary'
+    })
+    stepHints.push(`补发工资 ${(file.size / 1024).toFixed(1)} KB`)
+  }
+}
+
+async function pushAllToIntegrated(row: MonthlyPayrollRun): Promise<void> {
+  const targets = pushTargetsForRow(row)
+  if (!targets.length) {
+    ElMessage.warning('该记录没有可推送到一体化的文件')
+    return
+  }
+  if (!(await confirmPushTargets(row, targets))) return
+  pushingAllRunId.value = row.id
   try {
-    const label = `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
-    // 保险和凭证共用一次跳转：先把任务排进队列，再交给一体化页面按顺序执行。
+    const label = historyPushLabel(row)
     const steps: PushStep[] = []
     const stepHints: string[] = []
+    await appendSalaryPushSteps(row, label, steps, stepHints)
+    await appendInsurancePushStep(row, label, steps, stepHints)
+    await appendVoucherPushStep(row, label, steps, stepHints)
+    enqueueIntegratedPush(steps, stepHints, '全部推送')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    setTimeout(() => {
+      if (pushingAllRunId.value === row.id) pushingAllRunId.value = null
+    }, 800)
+  }
+}
 
-    // 步骤 1：保险
-    if (row.insuranceImportPath) {
-      const parsed = await window.salaryApi.parseInsuranceImportXlsx(row.insuranceImportPath)
-      if (!parsed.ok) {
-        ElMessage.error('解析保险 xlsx 失败：' + parsed.reason)
-        return
-      }
-      if (parsed.records.length) {
-        steps.push({
-          kind: 'insurance',
-          records: parsed.records as InsuranceRecord[],
-          label,
-          runId: row.id,
-          pushTarget: 'insurance'
-        })
-        stepHints.push(`保险 ${parsed.records.length} 条`)
-      }
-    }
-
-    // 步骤 2：凭证
-    if (row.voucherImportPath) {
-      const v = await window.salaryApi.readVoucherXlsx(row.voucherImportPath)
-      if (!v.ok) {
-        ElMessage.error('读取凭证 xlsx 失败：' + v.reason)
-        return
-      }
-      steps.push({
-        kind: 'voucher',
-        fileBase64: v.base64,
-        fileName: v.fileName,
-        label,
-        runId: row.id,
-        pushTarget: 'insurance'
-      })
-      stepHints.push(`凭证 ${(v.size / 1024).toFixed(1)} KB`)
-    }
-
-    if (!steps.length) {
-      ElMessage.warning('保险/凭证均无内容')
-      return
-    }
-
-    pendingPushQueue.value = steps
-    ElMessage.info(
-      `已准备 ${steps.length} 步推送（${stepHints.join('、')}），正在跳转到"一体化对接"...`
-    )
-    requestSwitchToIntegration()
+async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> {
+  if (!row.insuranceImportPath) {
+    ElMessage.warning('该记录没有保险导入文件可推送')
+    return
+  }
+  if (!(await confirmPushTargets(row, ['insurance']))) return
+  pushingInsuranceRunId.value = row.id
+  try {
+    const label = historyPushLabel(row)
+    const steps: PushStep[] = []
+    const stepHints: string[] = []
+    await appendInsurancePushStep(row, label, steps, stepHints)
+    enqueueIntegratedPush(steps, stepHints, '保险推送')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : String(error))
   } finally {
@@ -230,59 +338,41 @@ async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> 
   }
 }
 
+async function pushVoucherToIntegrated(row: MonthlyPayrollRun): Promise<void> {
+  if (!row.voucherImportPath) {
+    ElMessage.warning('该记录没有凭证文件可推送')
+    return
+  }
+  if (!(await confirmPushTargets(row, ['voucher']))) return
+  pushingVoucherRunId.value = row.id
+  try {
+    const label = historyPushLabel(row)
+    const steps: PushStep[] = []
+    const stepHints: string[] = []
+    await appendVoucherPushStep(row, label, steps, stepHints)
+    enqueueIntegratedPush(steps, stepHints, '凭证推送')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    setTimeout(() => {
+      if (pushingVoucherRunId.value === row.id) pushingVoucherRunId.value = null
+    }, 800)
+  }
+}
+
 async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<void> {
   if (!row.salaryImportPath && !row.payrollBackpayPath) {
     ElMessage.warning('该记录没有工资导入/补发工资文件可推送')
     return
   }
-  if (!(await confirmPushRun(row, 'salary'))) return
+  if (!(await confirmPushTargets(row, ['salary']))) return
   pushingSalaryRunId.value = row.id
   try {
-    const label = `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
+    const label = historyPushLabel(row)
     const steps: PushStep[] = []
     const stepHints: string[] = []
-
-    if (row.salaryImportPath) {
-      const file = await window.salaryApi.readLocalFileBase64(row.salaryImportPath)
-      steps.push({
-        kind: 'salary-system-import',
-        mode: 'salary',
-        fileBase64: file.base64,
-        fileName: file.fileName,
-        fileSize: file.size,
-        month: String(row.month),
-        label,
-        runId: row.id,
-        pushTarget: 'salary'
-      })
-      stepHints.push(`工资导入 ${(file.size / 1024).toFixed(1)} KB`)
-    }
-
-    if (row.payrollBackpayPath) {
-      const file = await window.salaryApi.readLocalFileBase64(row.payrollBackpayPath)
-      steps.push({
-        kind: 'salary-system-import',
-        mode: 'backpay',
-        fileBase64: file.base64,
-        fileName: file.fileName,
-        fileSize: file.size,
-        label,
-        runId: row.id,
-        pushTarget: 'salary'
-      })
-      stepHints.push(`补发工资 ${(file.size / 1024).toFixed(1)} KB`)
-    }
-
-    if (!steps.length) {
-      ElMessage.warning('没有可推送的工资导入文件')
-      return
-    }
-
-    pendingPushQueue.value = steps
-    ElMessage.info(
-      `已准备 ${steps.length} 步工资推送（${stepHints.join('、')}），正在跳转到"一体化对接"...`
-    )
-    requestSwitchToIntegration()
+    await appendSalaryPushSteps(row, label, steps, stepHints)
+    enqueueIntegratedPush(steps, stepHints, '工资推送')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : String(error))
   } finally {
@@ -292,21 +382,22 @@ async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<vo
   }
 }
 
-async function confirmPushRun(
+async function confirmPushTargets(
   row: MonthlyPayrollRun,
-  target: 'insurance' | 'salary'
+  targets: MonthlyPayrollPushTarget[]
 ): Promise<boolean> {
   if (row.isOutdated) {
     ElMessage.warning('这条报账记录已过期，请使用最新生成的记录重新推送')
     return false
   }
-  const status = target === 'insurance' ? row.insurancePushStatus : row.salaryPushStatus
-  if (status !== 'success' && status !== 'needs-repush') return true
+  const repushTargets = targets.filter((target) => {
+    const status = pushStatusForTarget(row, target)
+    return status === 'success' || status === 'needs-repush'
+  })
+  if (!repushTargets.length) return true
   try {
     await ElMessageBox.confirm(
-      status === 'success'
-        ? '这条记录已经推送成功，继续会重新推送一次。'
-        : '这条记录标记为需要重新推送，继续后会覆盖原推送状态。',
+      `${repushTargets.map(pushTargetText).join('、')}已经推送过或标记为需要重推，继续会重新推送并覆盖原推送状态。`,
       '确认重新推送',
       { type: 'warning', confirmButtonText: '重新推送', cancelButtonText: '取消' }
     )
@@ -979,6 +1070,35 @@ async function archiveHistoryRun(row: MonthlyPayrollRun | null): Promise<void> {
   }
 }
 
+async function cancelHistoryMonthClose(row: MonthlyPayrollRun): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `反月结 ${row.year}年${row.month}月 后，该月所有历史记录都会解除月结锁定，工资、社保、个税源文件会放回监控文件夹，可以重新预处理和生成报表。`,
+      '反月结',
+      {
+        type: 'warning',
+        confirmButtonText: '确认反月结',
+        cancelButtonText: '保留月结',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+  } catch {
+    return
+  }
+
+  cancelingMonthCloseId.value = row.id
+  try {
+    const updated = await window.salaryApi.cancelMonthlyPayrollMonthClose(row.id)
+    ElMessage.success('已反月结')
+    await refreshHistory()
+    await loadHistoryReport(updated, false)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '反月结失败')
+  } finally {
+    cancelingMonthCloseId.value = null
+  }
+}
+
 function canArchiveHistoryRun(row: MonthlyPayrollRun | null): boolean {
   return Boolean(row && !row.archivedAt && row.sourceSocialPath && row.insuranceImportPath)
 }
@@ -1608,12 +1728,28 @@ function isCustomStyledSheet(name: string): boolean {
               <span class="history-action-label">操作</span>
               <div class="history-actions">
                 <el-button
+                  v-if="canPushAll(row)"
+                  size="small"
+                  text
+                  type="success"
+                  :loading="pushingAllRunId === row.id"
+                  @click="pushAllToIntegrated(row)"
+                >全部推送</el-button>
+                <el-button
                   v-if="row.voucherImportPath"
                   size="small"
                   text
                   type="primary"
                   @click="openHistoryFile(row.voucherImportPath)"
                 >凭证</el-button>
+                <el-button
+                  v-if="row.voucherImportPath"
+                  size="small"
+                  text
+                  type="success"
+                  :loading="pushingVoucherRunId === row.id"
+                  @click="pushVoucherToIntegrated(row)"
+                >推送凭证</el-button>
                 <el-button
                   v-if="row.insuranceImportPath"
                   size="small"
@@ -1622,20 +1758,13 @@ function isCustomStyledSheet(name: string): boolean {
                   @click="openHistoryFile(row.insuranceImportPath)"
                 >保险导入</el-button>
                 <el-button
-                  v-if="row.insuranceImportPath || row.voucherImportPath"
+                  v-if="row.insuranceImportPath"
                   size="small"
                   text
                   type="success"
                   :loading="pushingInsuranceRunId === row.id"
                   @click="pushInsuranceToIntegrated(row)"
-                >推送到一体化</el-button>
-                <el-button
-                  v-if="row.payrollBackpayPath"
-                  size="small"
-                  text
-                  type="primary"
-                  @click="openHistoryFile(row.payrollBackpayPath)"
-                >补发工资</el-button>
+                >推送保险</el-button>
                 <el-button
                   v-if="row.salaryImportPath"
                   size="small"
@@ -1643,6 +1772,13 @@ function isCustomStyledSheet(name: string): boolean {
                   type="primary"
                   @click="openHistoryFile(row.salaryImportPath)"
                 >工资导入</el-button>
+                <el-button
+                  v-if="row.payrollBackpayPath"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openHistoryFile(row.payrollBackpayPath)"
+                >补发工资</el-button>
                 <el-button
                   v-if="row.salaryImportPath || row.payrollBackpayPath"
                   size="small"
@@ -1655,9 +1791,10 @@ function isCustomStyledSheet(name: string): boolean {
                   v-if="row.archiveDir"
                   size="small"
                   text
-                  type="primary"
-                  @click="openHistoryFile(row.archiveDir)"
-                >月结</el-button>
+                  type="danger"
+                  :loading="cancelingMonthCloseId === row.id"
+                  @click="cancelHistoryMonthClose(row)"
+                >反月结</el-button>
                 <el-button
                   v-else
                   size="small"
@@ -1710,9 +1847,12 @@ function isCustomStyledSheet(name: string): boolean {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="推送" width="150">
+        <el-table-column label="推送" width="220">
           <template #default="{ row }">
             <div class="status-tags">
+              <el-tag :type="pushStatusTagType(row.voucherPushStatus)" effect="plain">
+                凭证 {{ pushStatusText(row.voucherPushStatus) }}
+              </el-tag>
               <el-tag :type="pushStatusTagType(row.insurancePushStatus)" effect="plain">
                 保险 {{ pushStatusText(row.insurancePushStatus) }}
               </el-tag>
