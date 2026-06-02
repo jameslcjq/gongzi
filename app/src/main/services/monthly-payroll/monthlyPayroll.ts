@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import * as XLSX from 'xlsx'
 import { failRule, okRule } from '../ruleResult'
@@ -23,7 +23,7 @@ import {
   loadRetiredSummary,
   runDetailImports
 } from './monthlyPayrollDataLoaders'
-import { getMonthlyOutputPath } from '../../config/paths'
+import { getMonthlyPayrollTempPath } from '../../config/paths'
 import {
   parseSalaryWorkbook,
   parseSocialSecurityWorkbook,
@@ -50,6 +50,7 @@ import {
 import { readMonthlyPayrollSettings } from './monthlyPayrollSettings'
 import {
   findSameMonthlyPayrollRun,
+  findMonthlyPayrollSourceSalaryOriginalPath,
   fingerprintReportSheets,
   isMonthlyPayrollMonthArchived,
   normalizeMonthlyPayrollDataSourceMode,
@@ -779,7 +780,6 @@ export async function generateMonthlyPayrollReportView(
   const salary = rawSalary
     ? applyTaxToSalarySummary(rawSalary, taxByIdCard, { clearTaxWhenMissing: !tax })
     : undefined
-  await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
   const integratedActiveSummary = await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
   const integratedOtherPaySummary = await recomputeIntegratedOtherLikeWorksheet('其他工资')
   const integratedRetiredPaySummary = await recomputeIntegratedOtherLikeWorksheet('退休工资')
@@ -849,20 +849,31 @@ export async function generateMonthlyPayrollReportView(
       salaryImportIdCards.length > 0
   )
   const shouldWriteTaxSalaryWorkbook = Boolean(
-    salary && !useIntegratedDataSource && tax && input.salaryWorkbookPath
+    rawSalary && salary && !useIntegratedDataSource && tax && input.salaryWorkbookPath
   )
+  const stamp = timestamp()
+  const existingSalaryOriginalPath = shouldWriteTaxSalaryWorkbook && input.salaryWorkbookPath
+    ? await findMonthlyPayrollSourceSalaryOriginalPath(period.year, period.month, input.salaryWorkbookPath)
+    : null
+  const taxWriteBackupPath = shouldWriteTaxSalaryWorkbook && rawSalary && input.salaryWorkbookPath
+    ? await backupAndWriteTaxToSalaryWorkbook(
+        input.salaryWorkbookPath,
+        rawSalary,
+        taxByIdCard,
+        period,
+        stamp,
+        existingSalaryOriginalPath
+      )
+    : null
+  const sourceSalaryOriginalPath = taxWriteBackupPath ?? existingSalaryOriginalPath
+  await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
   const previousRun = await findSameMonthlyPayrollRun(
     period.year,
     period.month,
     reportFingerprint,
     dataSourceMode
   )
-  if (
-    previousRun &&
-    !shouldGenerateSalaryImport &&
-    (!shouldWriteTaxSalaryWorkbook ||
-      Boolean(previousRun.sourceSalaryPath && previousRun.sourceSalaryPath !== input.salaryWorkbookPath))
-  ) {
+  if (previousRun && !shouldGenerateSalaryImport) {
     return {
       ok: true,
       message: '本次报表内容无变化，未重新生成文件，已沿用上次输出结果',
@@ -878,12 +889,9 @@ export async function generateMonthlyPayrollReportView(
     }
   }
 
-  const outputDir = getMonthlyOutputPath()
+  const outputDir = getMonthlyPayrollTempPath(period.year, period.month)
   mkdirSync(outputDir, { recursive: true })
-  const stamp = timestamp()
-  const sourceSalaryPath = shouldWriteTaxSalaryWorkbook && input.salaryWorkbookPath
-    ? await createTaxWrittenSalaryWorkbookCopy(input.salaryWorkbookPath, taxByIdCard, stamp)
-    : input.salaryWorkbookPath ?? null
+  const sourceSalaryPath = input.salaryWorkbookPath ?? null
   const insuranceImportPath = socialSecurity ? join(outputDir, `工资报账_保险导入_${stamp}.xlsx`) : undefined
   const salaryImportPath = shouldGenerateSalaryImport ? join(outputDir, `工资报账_工资导入_${stamp}.xls`) : undefined
   const backpaySheet = sheets.find((sheet) => sheet.name === '补发工资')
@@ -927,7 +935,8 @@ export async function generateMonthlyPayrollReportView(
     insuranceImportPath ? '保险导入文件' : '',
     salaryImportPath ? '工资导入文件' : '',
     payrollBackpayPath ? '补发工资文件' : '',
-    voucherImportPath ? '凭证导入文件' : ''
+    voucherImportPath ? '凭证导入文件' : '',
+    taxWriteBackupPath ? '工资表个税已直接回写' : ''
   ].filter(Boolean)
   const businessSummary = useIntegratedDataSource
     ? buildBusinessSummary({
@@ -977,6 +986,7 @@ export async function generateMonthlyPayrollReportView(
       salaryImportPath,
       payrollBackpayPath,
       voucherImportPath,
+      sourceSalaryOriginalPath: sourceSalaryOriginalPath ?? undefined,
       taxField,
       processScope: input.processScope,
       dataSourceMode,
@@ -992,6 +1002,7 @@ export async function generateMonthlyPayrollReportView(
     salaryImportPath,
     payrollBackpayPath,
     voucherImportPath,
+    sourceSalaryOriginalPath: sourceSalaryOriginalPath ?? undefined,
     taxField,
     processScope: input.processScope,
     dataSourceMode,
@@ -2012,23 +2023,61 @@ function timestamp(): string {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 }
 
-async function createTaxWrittenSalaryWorkbookCopy(
+async function backupAndWriteTaxToSalaryWorkbook(
   salaryWorkbookPath: string,
+  salary: SalarySummary,
   taxByIdCard: Record<string, number>,
-  stamp: string
-): Promise<string> {
-  if (Object.keys(taxByIdCard).length === 0) return salaryWorkbookPath
-  const outputDir = getMonthlyOutputPath()
-  mkdirSync(outputDir, { recursive: true })
-  const extension = extname(salaryWorkbookPath) || '.xlsx'
-  const baseName = basename(salaryWorkbookPath, extension).replace(/[<>:"/\\|?*]+/g, '_') || '工资表'
-  const targetPath = join(outputDir, `工资报账_工资表已写个税_${stamp}_${baseName}${extension}`)
-  copyFileSync(salaryWorkbookPath, targetPath)
+  period: { year: number; month: number },
+  stamp: string,
+  existingOriginalPath: string | null = null
+): Promise<string | null> {
+  if (!salaryWorkbookNeedsTaxWrite(salary, taxByIdCard)) return null
+  const backupPath = existingOriginalPath && existsSync(existingOriginalPath)
+    ? existingOriginalPath
+    : backupSalaryWorkbookBeforeTaxWrite(salaryWorkbookPath, period, stamp)
   await writeTaxToSalaryWorkbookViaExcel({
-    salaryWorkbookPath: targetPath,
+    salaryWorkbookPath,
     taxByIdCard
   })
-  return targetPath
+  return backupPath
+}
+
+function salaryWorkbookNeedsTaxWrite(
+  salary: SalarySummary,
+  taxByIdCard: Record<string, number>
+): boolean {
+  if (Object.keys(taxByIdCard).length === 0) return false
+  return salary.activePeople.some((person) => {
+    if (!Object.prototype.hasOwnProperty.call(taxByIdCard, person.idCard)) return false
+    return num(person.values['当月个人所得税']) !== roundMoney(taxByIdCard[person.idCard])
+  })
+}
+
+function backupSalaryWorkbookBeforeTaxWrite(
+  salaryWorkbookPath: string,
+  period: { year: number; month: number },
+  stamp: string
+): string {
+  const backupDir = getMonthlyPayrollTempPath(period.year, period.month, '工资表回写备份')
+  mkdirSync(backupDir, { recursive: true })
+  const extension = extname(salaryWorkbookPath) || '.xlsx'
+  const baseName = basename(salaryWorkbookPath, extension).replace(/[<>:"/\\|?*]+/g, '_') || '工资表'
+  const backupPath = uniqueLocalPath(backupDir, `个税回写前_${stamp}_${baseName}${extension}`)
+  copyFileSync(salaryWorkbookPath, backupPath)
+  return backupPath
+}
+
+function uniqueLocalPath(targetDir: string, fileName: string): string {
+  let candidate = join(targetDir, fileName)
+  if (!existsSync(candidate)) return candidate
+
+  const dotIndex = fileName.lastIndexOf('.')
+  const stem = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName
+  const extension = dotIndex > 0 ? fileName.slice(dotIndex) : ''
+  for (let index = 2; ; index += 1) {
+    candidate = join(targetDir, `${stem}_${index}${extension}`)
+    if (!existsSync(candidate)) return candidate
+  }
 }
 
 function dateStamp(): string {

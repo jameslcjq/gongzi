@@ -1127,10 +1127,19 @@ async function getSalaryPrintPageSummary(): Promise<MonthlyPayrollSalaryPrintPag
 function getArchivedSalaryWorkbookPaths(run: MonthlyPayrollRun | null): string[] {
   if (!run?.sourceSalaryPath) return []
   const sourceName = fileNameOf(run.sourceSalaryPath)
-  return run.archiveManifest.filter((filePath) => {
-    const name = fileNameOf(filePath)
-    return name === `工资表_${sourceName}` || (name.startsWith('工资表_') && name.endsWith(`_${sourceName}`))
-  })
+  return run.archiveManifest.filter((filePath) =>
+    ['写入个税工资表', '工资表'].some((label) =>
+      isArchivedFileForLabel(fileNameOf(filePath), label, sourceName)
+    )
+  )
+}
+
+function isArchivedFileForLabel(name: string, label: string, originalName: string): boolean {
+  return (
+    name === `${label}_${originalName}` ||
+    (name.startsWith(`${label}_`) && name.endsWith(`_${originalName}`)) ||
+    (name.startsWith(`工资报账月结_${label}_`) && name.endsWith(`_${originalName}`))
+  )
 }
 
 function fileNameOf(filePath: string): string {

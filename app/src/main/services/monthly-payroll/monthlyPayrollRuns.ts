@@ -227,19 +227,57 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
   })
   await cleanupMonthlyPayrollGeneratedFiles(database, operationBatchId, outdatedRuns)
 
-  const archivedFiles = (
-    await Promise.all(
-      [
-        moveArchiveFile(database, operationBatchId, finalRun.sourceSalaryPath, archiveDir, '工资表', archiveDate),
-        moveArchiveFile(database, operationBatchId, finalRun.sourceSocialPath, archiveDir, '社保', archiveDate),
-        moveArchiveFile(database, operationBatchId, finalRun.sourceTaxPath, archiveDir, '个税', archiveDate),
-        copyArchiveFile(database, operationBatchId, finalRun.insuranceImportPath, archiveDir, '保险导入', archiveDate),
-        copyArchiveFile(database, operationBatchId, finalRun.salaryImportPath, archiveDir, '工资导入', archiveDate),
-        copyArchiveFile(database, operationBatchId, finalRun.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
-        copyArchiveFile(database, operationBatchId, finalRun.voucherImportPath, archiveDir, '凭证', archiveDate)
-      ]
-    )
-  ).filter((item): item is string => Boolean(item))
+  const [
+    archivedOriginalSalaryPath,
+    archivedSalaryPath,
+    archivedSocialPath,
+    archivedTaxPath,
+    archivedInsuranceImportPath,
+    archivedSalaryImportPath,
+    archivedPayrollBackpayPath,
+    archivedVoucherImportPath
+  ] = await Promise.all([
+    moveArchiveFile(
+      database,
+      operationBatchId,
+      finalRun.reportSnapshot?.sourceSalaryOriginalPath ?? null,
+      archiveDir,
+      '原始工资表',
+      archiveDate,
+      finalRun.sourceSalaryPath ?? undefined
+    ),
+    moveArchiveFile(
+      database,
+      operationBatchId,
+      finalRun.sourceSalaryPath,
+      archiveDir,
+      finalRun.reportSnapshot?.sourceSalaryOriginalPath ? '写入个税工资表' : '工资表',
+      archiveDate
+    ),
+    moveArchiveFile(database, operationBatchId, finalRun.sourceSocialPath, archiveDir, '社保', archiveDate),
+    moveArchiveFile(database, operationBatchId, finalRun.sourceTaxPath, archiveDir, '个税', archiveDate),
+    moveArchiveFile(database, operationBatchId, finalRun.insuranceImportPath, archiveDir, '保险导入', archiveDate),
+    moveArchiveFile(database, operationBatchId, finalRun.salaryImportPath, archiveDir, '工资导入', archiveDate),
+    moveArchiveFile(database, operationBatchId, finalRun.payrollBackpayPath, archiveDir, '补发工资', archiveDate),
+    moveArchiveFile(database, operationBatchId, finalRun.voucherImportPath, archiveDir, '凭证', archiveDate)
+  ])
+  const archivedFiles = [
+    archivedOriginalSalaryPath,
+    archivedSalaryPath,
+    archivedSocialPath,
+    archivedTaxPath,
+    archivedInsuranceImportPath,
+    archivedSalaryImportPath,
+    archivedPayrollBackpayPath,
+    archivedVoucherImportPath
+  ].filter((item): item is string => Boolean(item))
+  const archivedGeneratedPaths = {
+    insuranceImportPath: archivedInsuranceImportPath ?? finalRun.insuranceImportPath,
+    salaryImportPath: archivedSalaryImportPath ?? finalRun.salaryImportPath,
+    payrollBackpayPath: archivedPayrollBackpayPath ?? finalRun.payrollBackpayPath,
+    voucherImportPath: archivedVoucherImportPath ?? finalRun.voucherImportPath,
+    sourceSalaryOriginalPath: archivedOriginalSalaryPath ?? finalRun.reportSnapshot?.sourceSalaryOriginalPath ?? null
+  }
 
   const archivedAt = new Date().toISOString()
   const manifestPath = uniqueArchivePath(archiveDir, `工资报账月结_清单_${archiveDate}.json`)
@@ -279,9 +317,26 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
   await run(
     database,
     `UPDATE monthly_payroll_runs
-       SET archived_at = ?, archive_dir = ?, archive_manifest = ?
+       SET archived_at = ?,
+           archive_dir = ?,
+           archive_manifest = ?,
+           insurance_import_path = ?,
+           salary_import_path = ?,
+           payroll_backpay_path = ?,
+           voucher_import_path = ?,
+           report_snapshot = ?
      WHERE id = ?`,
-    [archivedAt, archiveDir, JSON.stringify(archivedFiles), finalRun.id]
+    [
+      archivedAt,
+      archiveDir,
+      JSON.stringify(archivedFiles),
+      archivedGeneratedPaths.insuranceImportPath,
+      archivedGeneratedPaths.salaryImportPath,
+      archivedGeneratedPaths.payrollBackpayPath,
+      archivedGeneratedPaths.voucherImportPath,
+      stringifyReportSnapshotWithArchivePaths(finalRun.reportSnapshot, archivedGeneratedPaths),
+      finalRun.id
+    ]
   )
   await run(
     database,
@@ -498,6 +553,29 @@ export async function findSameMonthlyPayrollRun(
   return rows[0] ? mapRunRow(rows[0]) : null
 }
 
+export async function findMonthlyPayrollSourceSalaryOriginalPath(
+  year: number,
+  month: number,
+  sourceSalaryPath: string
+): Promise<string | null> {
+  const database = await getDatabase()
+  const rows = await all<Record<string, unknown>>(
+    database,
+    `SELECT report_snapshot
+       FROM monthly_payroll_runs
+      WHERE year = ? AND month = ? AND source_salary_path = ?
+        AND report_snapshot IS NOT NULL
+      ORDER BY created_at ASC LIMIT 20`,
+    [year, month, sourceSalaryPath]
+  )
+  for (const row of rows) {
+    const snapshot = parseReportSnapshot(row.report_snapshot)
+    const originalPath = snapshot?.sourceSalaryOriginalPath
+    if (originalPath && existsSync(originalPath)) return originalPath
+  }
+  return null
+}
+
 function loadHistoryExportSheets(run: MonthlyPayrollRun): MonthlyPayrollReportSheet[] {
   const sheets: MonthlyPayrollReportSheet[] = []
   if (run.voucherImportPath) sheets.push(...readExportWorkbookSheets(run.voucherImportPath, '凭证'))
@@ -578,10 +656,11 @@ async function buildSnapshotVoucherPageCounts(
 function archivedSalaryWorkbookPaths(payrollRun: MonthlyPayrollRun): string[] {
   if (!payrollRun.sourceSalaryPath) return []
   const sourceName = basename(payrollRun.sourceSalaryPath)
-  return payrollRun.archiveManifest.filter((filePath) => {
-    const name = basename(filePath)
-    return name === `工资表_${sourceName}` || (name.startsWith('工资表_') && name.endsWith(`_${sourceName}`))
-  })
+  return payrollRun.archiveManifest.filter((filePath) =>
+    ['写入个税工资表', '工资表'].some((label) =>
+      isArchivedFileForLabel(basename(filePath), label, sourceName)
+    )
+  )
 }
 
 function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): number {
@@ -733,38 +812,21 @@ function monthlyPayrollArchiveDir(run: MonthlyPayrollRun): string {
   return getPeriodOutputPath(run.year, run.month)
 }
 
-async function copyArchiveFile(
-  database: Awaited<ReturnType<typeof getDatabase>>,
-  batchId: number,
-  sourcePath: string | null,
-  targetDir: string,
-  label: string,
-  archiveDate: string
-): Promise<string | null> {
-  if (!sourcePath || !existsSync(sourcePath)) return null
-  mkdirSync(targetDir, { recursive: true })
-  const targetPath = uniqueArchivePath(targetDir, archiveFileName(label, archiveDate, sourcePath))
-  await logFileOperation(database, {
-    batchId,
-    action: 'copy-to-archive',
-    filePath: sourcePath,
-    fileLabel: label
-  })
-  await copyFile(sourcePath, targetPath)
-  return targetPath
-}
-
 async function moveArchiveFile(
   database: Awaited<ReturnType<typeof getDatabase>>,
   batchId: number,
   sourcePath: string | null,
   targetDir: string,
   label: string,
-  archiveDate: string
+  archiveDate: string,
+  archiveNameSourcePath?: string
 ): Promise<string | null> {
   if (!sourcePath || !existsSync(sourcePath)) return null
   mkdirSync(targetDir, { recursive: true })
-  const targetPath = uniqueArchivePath(targetDir, archiveFileName(label, archiveDate, sourcePath))
+  const targetPath = uniqueArchivePath(
+    targetDir,
+    archiveFileName(label, archiveDate, archiveNameSourcePath ?? sourcePath)
+  )
   await logFileOperation(database, {
     batchId,
     action: 'move-to-archive',
@@ -782,6 +844,27 @@ async function moveArchiveFile(
 
 function archiveFileName(label: string, archiveDate: string, sourcePath: string): string {
   return `工资报账月结_${label}_${archiveDate}_${basename(sourcePath)}`
+}
+
+function stringifyReportSnapshotWithArchivePaths(
+  snapshot: MonthlyPayrollReportResult | null | undefined,
+  paths: {
+    insuranceImportPath: string | null
+    salaryImportPath: string | null
+    payrollBackpayPath: string | null
+    voucherImportPath: string | null
+    sourceSalaryOriginalPath: string | null
+  }
+): string | null {
+  if (!snapshot) return null
+  return JSON.stringify({
+    ...snapshot,
+    insuranceImportPath: paths.insuranceImportPath ?? snapshot.insuranceImportPath,
+    salaryImportPath: paths.salaryImportPath ?? snapshot.salaryImportPath,
+    payrollBackpayPath: paths.payrollBackpayPath ?? snapshot.payrollBackpayPath,
+    voucherImportPath: paths.voucherImportPath ?? snapshot.voucherImportPath,
+    sourceSalaryOriginalPath: paths.sourceSalaryOriginalPath ?? snapshot.sourceSalaryOriginalPath
+  })
 }
 
 async function cleanupMonthlyPayrollGeneratedFiles(
@@ -1095,7 +1178,7 @@ async function isFileReferencedByOtherRuns(
 async function restoreMonthlyPayrollSourceFiles(runs: MonthlyPayrollRun[]): Promise<void> {
   const restoredTargets = new Set<string>()
   for (const run of runs) {
-    await restoreArchiveSourceFile(run, run.sourceSalaryPath, '工资表', restoredTargets)
+    await restoreArchiveSourceFile(run, run.sourceSalaryPath, ['原始工资表', '工资表', '写入个税工资表'], restoredTargets)
     await restoreArchiveSourceFile(run, run.sourceSocialPath, '社保', restoredTargets)
     await restoreArchiveSourceFile(run, run.sourceTaxPath, '个税', restoredTargets)
   }
@@ -1104,7 +1187,7 @@ async function restoreMonthlyPayrollSourceFiles(runs: MonthlyPayrollRun[]): Prom
 async function restoreArchiveSourceFile(
   run: MonthlyPayrollRun,
   originalPath: string | null,
-  label: string,
+  label: string | string[],
   restoredTargets: Set<string>
 ): Promise<void> {
   if (!originalPath || restoredTargets.has(originalPath) || existsSync(originalPath)) return
@@ -1125,17 +1208,22 @@ async function restoreArchiveSourceFile(
 function findArchivedSourcePath(
   run: MonthlyPayrollRun,
   originalPath: string,
-  label: string
+  label: string | string[]
 ): string | null {
   const originalName = basename(originalPath)
-  const match = run.archiveManifest.find((filePath) => {
-    const name = basename(filePath)
-    return (
-      name === `${label}_${originalName}` ||
-      (name.startsWith(`${label}_`) && name.endsWith(`_${originalName}`))
-    )
-  })
+  const labels = Array.isArray(label) ? label : [label]
+  const match = run.archiveManifest.find((filePath) =>
+    labels.some((item) => isArchivedFileForLabel(basename(filePath), item, originalName))
+  )
   return match ?? null
+}
+
+function isArchivedFileForLabel(name: string, label: string, originalName: string): boolean {
+  return (
+    name === `${label}_${originalName}` ||
+    (name.startsWith(`${label}_`) && name.endsWith(`_${originalName}`)) ||
+    (name.startsWith(`工资报账月结_${label}_`) && name.endsWith(`_${originalName}`))
+  )
 }
 
 function uniqueArchivePath(targetDir: string, fileName: string): string {

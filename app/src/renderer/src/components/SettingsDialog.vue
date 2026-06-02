@@ -581,7 +581,7 @@ function formatMoney(value: number): string {
       <el-tab-pane label="工资月结" name="monthClose">
         <div class="settings-section">
           <h4>工资月结管理</h4>
-          <p>取消月结会解除本月锁定，并把工资、社保、个税源文件放回监控文件夹；已生成的报表文件仍保留在月结目录。</p>
+          <p>取消月结会解除本月锁定，并把工资、社保、个税源文件放回监控文件夹；最终报表文件会从月结目录清理，重新生成后再归档。</p>
           <div>
             <el-button @click="refreshMonthCloseRuns">刷新月结列表</el-button>
           </div>

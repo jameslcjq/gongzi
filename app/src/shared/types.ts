@@ -506,6 +506,7 @@ export type MonthlyPayrollReportResult = {
   salaryImportPath?: string
   payrollBackpayPath?: string
   voucherImportPath?: string
+  sourceSalaryOriginalPath?: string
   taxField?: MonthlyPayrollTaxField
   processScope?: MonthlyPayrollProcessScope
   dataSourceMode?: MonthlyPayrollDataSourceMode

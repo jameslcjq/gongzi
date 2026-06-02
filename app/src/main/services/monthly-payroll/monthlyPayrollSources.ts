@@ -4,7 +4,7 @@ import { copyFile, mkdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { Database } from 'sqlite3'
 import { all, getDatabase, run } from '../../db/connection'
-import { getDataPath } from '../../config/paths'
+import { getTempPath } from '../../config/paths'
 import type {
   MonthlyPayrollSourceKind,
   MonthlyPayrollSourceVersion,
@@ -366,7 +366,7 @@ async function copySourceVersionFile(
   sourcePath: string,
   sha256: string
 ): Promise<string> {
-  const folder = getDataPath(
+  const folder = getTempPath(
     'source-versions',
     `${year}-${String(month).padStart(2, '0')}`,
     kind

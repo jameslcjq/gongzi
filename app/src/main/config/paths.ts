@@ -11,6 +11,7 @@ export const dataRoot = process.env.PAYROLL_DATA_ROOT ||
 export const desktopInstallRoot = join(laojiuRoot, isDevelopmentDataMode ? 'gzxt-dev' : 'gzxt')
 export const importFolder = process.env.PAYROLL_IMPORT_ROOT || join(laojiuRoot, '工资导入')
 export const outputRoot = process.env.PAYROLL_OUTPUT_ROOT || join(dataRoot, '工资数据')
+export const tempRoot = process.env.PAYROLL_TEMP_ROOT || join(dataRoot, 'temp')
 export const archiveRoot = outputRoot
 
 export function getDataPath(...segments: string[]): string {
@@ -29,6 +30,10 @@ export function getOutputPath(...segments: string[]): string {
   return join(outputRoot, ...segments)
 }
 
+export function getTempPath(...segments: string[]): string {
+  return join(tempRoot, ...segments)
+}
+
 export function getMonthlyOutputPath(...segments: string[]): string {
   return join(outputRoot, outputMonthKey(), ...segments)
 }
@@ -37,12 +42,21 @@ export function getPeriodOutputPath(year: number, month: number, ...segments: st
   return join(outputRoot, outputMonthKey(year, month), ...segments)
 }
 
+export function getMonthlyPayrollTempPath(
+  year: number,
+  month: number,
+  ...segments: string[]
+): string {
+  return join(tempRoot, '工资报账', outputMonthKey(year, month), ...segments)
+}
+
 export function ensureBusinessFolders(): void {
   for (const folder of [
     dataRoot,
     desktopInstallRoot,
     importFolder,
     outputRoot,
+    tempRoot,
     getImportPath('imported'),
     getImportPath('failed'),
     getImportPath('templates')
