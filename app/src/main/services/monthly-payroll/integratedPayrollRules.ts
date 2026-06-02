@@ -39,13 +39,6 @@ export const integratedActiveInsuranceFields = [
   '失业保险'
 ]
 
-export const integratedActiveOtherDeductFields = [
-  '支出一',
-  '支出二',
-  '支出三',
-  '代扣工资'
-]
-
 export const integratedSimplePayFields = ['住房补贴', '补发工资', '其他一']
 
 const integratedComputedWorksheetNames = new Set([
@@ -133,25 +126,25 @@ export function applyIntegratedComputedFieldsToRow(
 function applyIntegratedActiveComputedFields(
   columns: WorksheetColumn[],
   row: Record<string, WorksheetRecordValue>,
-  taxField: MonthlyPayrollTaxField
+  _taxField: MonthlyPayrollTaxField
 ): boolean {
   const fieldToColumn = fieldColumnMap(columns)
   const payableColumn = fieldToColumn.get('应发工资')
+  const deductionColumn = fieldToColumn.get('代扣工资')
   const withholdingColumn = fieldToColumn.get('代扣合计')
   const actualColumn = fieldToColumn.get('实发合计')
-  if (!payableColumn && !withholdingColumn && !actualColumn) return false
+  if (!payableColumn && !deductionColumn && !withholdingColumn && !actualColumn) return false
 
   const payable = sumFields(row, fieldToColumn, integratedActivePayFields)
-  const tax = valueOf(row, fieldToColumn, taxField)
-  const withholding = roundMoney(
+  const deduction = roundMoney(
     sumFields(row, fieldToColumn, integratedActiveInsuranceFields) +
-      sumFields(row, fieldToColumn, integratedActiveOtherDeductFields) +
-      tax
+      valueOf(row, fieldToColumn, '补扣工资')
   )
-  const actual = roundMoney(payable - withholding)
+  const actual = roundMoney(payable - deduction)
 
   if (payableColumn) row[payableColumn] = payable
-  if (withholdingColumn) row[withholdingColumn] = withholding
+  if (deductionColumn) row[deductionColumn] = deduction
+  if (withholdingColumn) row[withholdingColumn] = 0
   if (actualColumn) row[actualColumn] = actual
   return true
 }
@@ -178,7 +171,7 @@ function computedFieldColumns(
   columns: WorksheetColumn[]
 ): Array<[string, string]> {
   const names = worksheetName === '在职工资'
-    ? ['应发工资', '代扣合计', '实发合计']
+    ? ['应发工资', '代扣工资', '代扣合计', '实发合计']
     : ['应发工资小计', '实发合计']
   const byField = fieldColumnMap(columns)
   return names

@@ -177,7 +177,10 @@ const unitCodeHeaderNames = new Set([
 // \u540c\u4e00\u8868\u5185\uff0c\u9664\u552f\u4e00\u5217\u5916\u8fd8\u9700\u4f5c\u4e3a\u53bb\u91cd\u7ef4\u5ea6\u7684\u5b57\u6bb5\u3002
 // \u4f8b\uff1a\u4e00\u4f53\u5316\u5728\u804c \u540c\u4e00\u4eba\u4f1a\u540c\u65f6\u5b58\u5728 \u5de5\u8d44\u6279\u6b21 001/002 \u4e24\u7b14\u8bb0\u5f55\uff0c\u53bb\u91cd\u5fc5\u987b\u6309 (\u8bc1\u4ef6\u53f7\u7801, \u5de5\u8d44\u6279\u6b21) \u800c\u975e\u4ec5 \u8bc1\u4ef6\u53f7\u7801\u3002
 const worksheetPartitionFieldNames = new Map<string, string[]>([
-  ['\u4e00\u4f53\u5316\u5728\u804c', ['\u5de5\u8d44\u6279\u6b21']]
+  ['\u4e00\u4f53\u5316\u5728\u804c', ['\u5de5\u8d44\u6279\u6b21']],
+  ['在职工资', ['工资批次编码']],
+  ['退休工资', ['工资批次编码']],
+  ['其他工资', ['工资批次编码']]
 ])
 
 export async function chooseExcelFile(): Promise<{ filePath: string; fileName: string } | null> {

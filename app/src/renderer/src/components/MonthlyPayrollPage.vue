@@ -35,6 +35,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   refresh: []
+  workflowNotice: [result: WorkflowRunResult]
 }>()
 
 const running = ref(false)
@@ -125,7 +126,7 @@ async function saveTaxRuleSettings(): Promise<void> {
   }
 }
 
-async function refreshHistory(options: { autoOpenCurrentMonth?: boolean } = {}) {
+async function refreshHistory(options: { autoOpenCurrentMonth?: boolean } = {}): Promise<MonthlyPayrollRun[]> {
   historyLoading.value = true
   try {
     const nextHistory = await window.salaryApi.listMonthlyPayrollRuns()
@@ -134,6 +135,7 @@ async function refreshHistory(options: { autoOpenCurrentMonth?: boolean } = {}) 
     if (options.autoOpenCurrentMonth) {
       await openLatestSelectedMonthReport(nextHistory)
     }
+    return nextHistory
   } finally {
     historyLoading.value = false
   }
@@ -741,6 +743,7 @@ async function runPreprocess(): Promise<void> {
     if (!payload) return
     const next = await window.salaryApi.runWorkflow('monthly-payroll.preprocess', payload)
     result.value = next
+    emit('workflowNotice', next)
     await refreshSourceVersions()
     const writeBack = next.monthlyPayrollWriteBack
     if (writeBack?.requiresConfirmation && writeBack.syncableCount > 0) {
@@ -756,12 +759,13 @@ async function runPreprocess(): Promise<void> {
         confirmedPayload
       )
       result.value = confirmedResult
+      emit('workflowNotice', confirmedResult)
       await refreshSourceVersions()
       if (confirmedResult.ok && confirmedResult.warnings.length === 0) {
         ElMessage.success('回写复核通过，开始生成报表')
         await runGenerate()
       } else if (confirmedResult.ok) {
-        ElMessage.warning(confirmedResult.warnings[0] ?? '回写后仍有差异，请人工介入')
+        ElMessage.warning('预处理存在提醒，已停止自动生成报表；请查看页面结果或系统通知')
       } else {
         ElMessage.error(confirmedResult.warnings[0] ?? '月度工资报账预处理失败')
       }
@@ -771,6 +775,8 @@ async function runPreprocess(): Promise<void> {
       ElMessage.success('月度工资报账预处理完成')
       if (next.warnings.length === 0) {
         await runGenerate()
+      } else {
+        ElMessage.warning('预处理存在提醒，已停止自动生成报表；请查看页面结果或系统通知')
       }
     } else {
       ElMessage.error(next.warnings[0] ?? '月度工资报账预处理失败')
@@ -803,15 +809,18 @@ async function runGenerate(): Promise<void> {
     const payload = currentPayload()
     if (!payload) return
     const next = await window.salaryApi.runWorkflow('monthly-payroll.generate', payload)
-    const nextReport = await window.salaryApi.generateMonthlyPayrollReportView(payload)
     generateResult.value = next
-    report.value = nextReport
-    await refreshSourceVersions()
-    activeReportSheet.value = firstVisibleSheetName(nextReport.sheets)
-    selectedMonth.value = selectedMonthLabel.value
+    emit('workflowNotice', next)
     if (next.ok) {
-      ElMessage.success(nextReport.message)
-      void refreshHistory()
+      selectedMonth.value = selectedMonthLabel.value
+      const nextHistory = await refreshHistory()
+      const latest = pickLatestMonthRun(
+        nextHistory.filter((row) => row.year === selectedPeriod.value.year && row.month === selectedPeriod.value.month)
+      )
+      if (latest) {
+        await loadHistoryReport(latest, false)
+      }
+      ElMessage.success(next.messages[1] ?? '月度工资报账汇总生成完成')
     } else {
       ElMessage.error(next.warnings[0] ?? '月度工资报账汇总生成失败')
     }
@@ -1525,6 +1534,25 @@ function isCustomStyledSheet(name: string): boolean {
       </div>
     </div>
 
+    <div v-if="result && !generateResult" class="result-panel" :class="{ failed: !result.ok, blocked: result.ok && result.warnings.length > 0 }">
+      <div class="result-title">
+        <strong>{{ result.workflowName }}</strong>
+        <el-tag
+          :type="result.ok ? (result.warnings.length > 0 ? 'warning' : 'success') : 'danger'"
+          effect="plain"
+        >
+          {{ result.ok ? (result.warnings.length > 0 ? '有提醒' : '完成') : '失败' }}
+        </el-tag>
+      </div>
+      <div class="result-lines">
+        <p v-if="result.ok && result.warnings.length > 0" class="warning">
+          预处理已完成，但存在需要先处理的提醒，系统未自动生成报表。
+        </p>
+        <p v-for="message in result.messages" :key="message">{{ message }}</p>
+        <p v-for="warning in result.warnings" :key="warning" class="warning">{{ warning }}</p>
+      </div>
+    </div>
+
     <div v-if="generateResult" class="result-panel generated" :class="{ failed: !generateResult.ok }">
       <div class="result-title">
         <strong>{{ generateResult.workflowName }}</strong>
@@ -2217,6 +2245,11 @@ function isCustomStyledSheet(name: string): boolean {
   background: var(--danger-soft);
 }
 
+.result-panel.blocked {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
 .result-panel.generated {
   background: var(--surface);
 }
@@ -2241,6 +2274,10 @@ function isCustomStyledSheet(name: string): boolean {
 }
 
 .result-lines .warning {
+  color: #b45309;
+}
+
+.result-panel.failed .result-lines .warning {
   color: var(--danger);
 }
 

@@ -717,104 +717,19 @@ export async function generateMonthlyPayrollReports(
   payload?: { monthlyPayroll?: MonthlyPayrollWorkflowInput }
 ): Promise<RuleResult> {
   try {
-    const input = normalizeMonthlyPayrollInput(payload?.monthlyPayroll)
-    const targetDate = assertCurrentPayrollPeriod(input)
-    if (await isMonthlyPayrollMonthArchived(targetDate.year, targetDate.month)) {
-      return {
-        ok: false,
-        affectedRows: 0,
-        messages: [],
-        warnings: [`${targetDate.year}年${targetDate.month}月工资已月结，不能重新生成报表。请在历史报表中查看月结记录。`]
-      }
-    }
-    const sourceError = missingSourceMessage(input)
-    if (sourceError) {
-      return {
-        ok: false,
-        affectedRows: 0,
-        messages: [],
-        warnings: [sourceError]
-      }
-    }
-
-    const [rawSalary, socialSecurity, tax] = await Promise.all([
-      input.salaryWorkbookPath
-        ? parseSalaryWorkbook(input.salaryWorkbookPath)
-        : Promise.resolve<SalarySummary | undefined>(undefined),
-      input.socialSecurityWorkbookPath
-        ? parseSocialSecurityWorkbook(input.socialSecurityWorkbookPath)
-        : Promise.resolve<SocialSecuritySummary | undefined>(undefined),
-      input.taxWorkbookPath
-        ? parseTaxWorkbook(input.taxWorkbookPath)
-        : Promise.resolve<TaxSummary | undefined>(undefined)
-    ])
-    validateMonthlyPayrollSourcePeriods(targetDate, socialSecurity, tax)
-    const salary = rawSalary
-      ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax), { clearTaxWhenMissing: !tax })
-      : undefined
-    await registerMonthlyPayrollSources(input, { salary, socialSecurity, tax })
-    const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
-    const useIntegratedDataSource = dataSourceMode === 'integrated'
-    const integratedPersonalInsurance = await loadIntegratedActivePersonalInsuranceTotals()
-    const insuranceCheck = buildPersonalInsuranceCheck(
-      socialSecurity,
-      useIntegratedDataSource ? undefined : salary,
-      integratedPersonalInsurance
-    )
-    const socialTotal = socialSecurity
-      ? roundMoney(Object.values(socialSecurity.byItem).reduce((sum, value) => sum + value, 0))
-      : 0
-    const taxTotal = tax?.totalTax ?? 0
-    const salaryBackpayRows = !useIntegratedDataSource ? salary?.activePeople.filter(
-      (person) => num(person.values['基本补发']) !== 0 || num(person.values['绩效补发']) !== 0
-    ) ?? [] : []
-    const socialItems = socialSecurity
-      ? Object.entries(socialSecurity.byItem)
-          .sort((left, right) => right[1] - left[1])
-          .slice(0, 8)
-          .map(([item, amount]) => `${item} ${formatMoney(amount)}`)
-      : []
-
-    const messages = [
-      input.processScope === 'social'
-        ? useIntegratedDataSource
-          ? '社保报账汇总已生成预览：工资凭证按本地工资数据生成，本次不生成工资打印报表'
-          : salary
-          ? '社保报账汇总已生成预览：工资表仅用于同时生成工资凭证，本次不生成工资打印报表'
-          : '社保报账汇总已生成预览：本次只生成五险一金相关凭证'
-        : useIntegratedDataSource
-        ? '工资报账汇总已生成预览：权威来源为本地在职工资、退休工资、其他工资'
-        : salary
-        ? `工资报账汇总已生成预览：在职 ${salary.activePeople.length} 人，遗补 ${salary.survivorPeople.length} 人`
-        : '社保报账汇总已生成预览：本次只处理五险一金',
-      ...(salary && !useIntegratedDataSource && input.processScope !== 'social'
-        ? [
-            `工资汇总：岗位工资 ${formatMoney(salary.active['岗位工资'])}，薪级工资 ${formatMoney(salary.active['薪级工资'])}，岗位津贴 ${formatMoney(salary.active['岗位津贴'])}，生活补贴 ${formatMoney(salary.active['生活补贴'])}`,
-            `补贴汇总：乡镇补贴 ${formatMoney(salary.active['乡镇补贴'])}，住房补贴 ${formatMoney(salary.active['住房补贴'])}，交通补贴 ${formatMoney(salary.active['交通补贴'])}`,
-            `遗补汇总：人数 ${formatMoney(salary.survivor['人数'] ?? 0)}，金额 ${formatMoney(salary.survivor['合计'] ?? 0)}`
-          ]
-        : []),
-      socialSecurity
-        ? `社保汇总：${socialSecurity.rowCount} 行，合计 ${formatMoney(socialTotal)}；${socialItems.join('；')}`
-        : '社保汇总：未检测到社保文件，本次只生成工资阶段结果；补齐社保后重新点击工资报账即可生成最终结果，未补齐前不能月结',
-      tax
-        ? `个税汇总：${tax.rows.length} 人，合计 ${formatMoney(taxTotal)}，扣税金额将在补发工资文件中按人写入岗位工资列为负数`
-        : useIntegratedDataSource
-        ? '个税汇总：未检测到个税文件，本次不报个税'
-        : '个税汇总：未检测到个税文件，本次不生成扣税补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
-      useIntegratedDataSource
-        ? '补发工资：按在职工资当前补发工资和个税字段生成'
-        : salaryBackpayRows.length
-        ? `工资表补发：${salaryBackpayRows.length} 人，基本补发写入岗位工资列，绩效补发写入薪级工资列`
-        : '工资表补发：未检测到基本补发或绩效补发',
-      ...insuranceCheck.messages
-    ]
-
+    const report = await generateMonthlyPayrollReportView(payload?.monthlyPayroll)
+    const affectedRows = report.sheets.reduce((total, sheet) => total + sheet.rows.length, 0)
+    const outputMessages = [
+      report.insuranceImportPath ? `保险导入：${report.insuranceImportPath}` : '',
+      report.salaryImportPath ? `工资导入：${report.salaryImportPath}` : '',
+      report.payrollBackpayPath ? `补发工资：${report.payrollBackpayPath}` : '',
+      report.voucherImportPath ? `凭证导入：${report.voucherImportPath}` : ''
+    ].filter(Boolean)
     return okRule(
       generateWorkflowName,
-      (salary?.activePeople.length ?? 0) + (salary?.survivorPeople.length ?? 0) + (socialSecurity?.rowCount ?? 0) + (tax?.rows.length ?? 0),
-      messages,
-      insuranceCheck.warnings
+      affectedRows,
+      [report.message, ...outputMessages],
+      []
     )
   } catch (error) {
     return failRule(generateWorkflowName, error)

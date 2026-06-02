@@ -34,9 +34,16 @@ type SheetCtx = {
 }
 
 type DerivedHrValues = Partial<Record<FieldName, string>>
+type SourceCandidate = {
+  idCard: string
+  name: string
+  sourceRecordId: number
+  derived: DerivedHrValues
+}
 
 const sourceName = '在职工资'
 const masterName = '人事信息'
+const excludedSalaryBatchCodes = new Set(['002'])
 
 export async function previewHrMasterSyncFromIntegrated(): Promise<HrMasterSyncPreview> {
   return buildHrMasterSyncPreview()
@@ -113,7 +120,7 @@ async function buildHrMasterSyncPreview(): Promise<HrMasterSyncPreview> {
   const jobByAmount = await loadLookupByAmount('岗位工资对照', '金额')
   const salaryByAmount = await loadLookupByAmount('薪级工资对照', '薪级工资')
 
-  const sourceRows = await all<Row>(database, `SELECT * FROM ${source.tableName}`)
+  const sourceRows = await all<Row>(database, `SELECT * FROM ${source.tableName} ORDER BY "id" ASC`)
   const masterRows = await all<Row>(database, `SELECT * FROM ${master.tableName}`)
   const masterByIdCard = new Map<string, Row>()
   for (const row of masterRows) {
@@ -121,11 +128,13 @@ async function buildHrMasterSyncPreview(): Promise<HrMasterSyncPreview> {
     if (idCard) masterByIdCard.set(idCard, row)
   }
 
-  const diffs: HrMasterSyncDiff[] = []
+  const sourceByIdCard = new Map<string, SourceCandidate>()
   let missingIdCardRows = 0
   let missingLookupRows = 0
 
   for (const row of sourceRows) {
+    if (isExcludedSalaryBatch(row, source)) continue
+
     const idCard = normalizeIdCard(readValue(source, row, '证件号码'))
     if (!idCard) {
       missingIdCardRows += 1
@@ -138,14 +147,26 @@ async function buildHrMasterSyncPreview(): Promise<HrMasterSyncPreview> {
       continue
     }
 
-    const masterRow = masterByIdCard.get(idCard)
-    const changes = buildChanges(master, masterRow, derived)
-    if (changes.length === 0) continue
-
-    diffs.push({
+    const candidate: SourceCandidate = {
       idCard,
       name: text(readValue(source, row, '姓名')),
       sourceRecordId: numberOrZero(row.id),
+      derived
+    }
+    const existing = sourceByIdCard.get(idCard)
+    sourceByIdCard.set(idCard, existing ? mergeSourceCandidate(existing, candidate) : candidate)
+  }
+
+  const diffs: HrMasterSyncDiff[] = []
+  for (const candidate of sourceByIdCard.values()) {
+    const masterRow = masterByIdCard.get(candidate.idCard)
+    const changes = buildChanges(master, masterRow, candidate.derived)
+    if (changes.length === 0) continue
+
+    diffs.push({
+      idCard: candidate.idCard,
+      name: candidate.name,
+      sourceRecordId: candidate.sourceRecordId,
       masterRecordId: typeof masterRow?.id === 'number' ? masterRow.id : numberOrUndefined(masterRow?.id),
       action: masterRow ? 'update' : 'insert',
       changes
@@ -223,6 +244,31 @@ function getSheetCtx(name: string): SheetCtx {
   return { name, tableName: tableNameOf(worksheet), columns }
 }
 
+function isExcludedSalaryBatch(row: Row, source: SheetCtx): boolean {
+  const batchCode =
+    normalizeSalaryBatchCode(readValue(source, row, '工资批次编码')) ||
+    normalizeSalaryBatchCode(readValue(source, row, '工资批次'))
+  return excludedSalaryBatchCodes.has(batchCode)
+}
+
+function mergeSourceCandidate(current: SourceCandidate, next: SourceCandidate): SourceCandidate {
+  return {
+    idCard: current.idCard,
+    name: next.name || current.name,
+    sourceRecordId: next.sourceRecordId || current.sourceRecordId,
+    derived: mergeDerivedValues(current.derived, next.derived)
+  }
+}
+
+function mergeDerivedValues(current: DerivedHrValues, next: DerivedHrValues): DerivedHrValues {
+  const merged: DerivedHrValues = { ...current }
+  for (const fieldName of ['单位名称', '职称', '职级', '薪级'] as FieldName[]) {
+    const nextValue = text(next[fieldName])
+    if (nextValue) merged[fieldName] = nextValue
+  }
+  return merged
+}
+
 function deriveHrValues(
   row: Row,
   source: SheetCtx,
@@ -298,6 +344,12 @@ function normalizeIdCard(value: unknown): string {
 
 function normalizeCompare(value: string): string {
   return value.replace(/\s+/g, '').toUpperCase()
+}
+
+function normalizeSalaryBatchCode(value: unknown): string {
+  const normalized = text(value).replace(/\s+/g, '')
+  if (!/^\d+$/.test(normalized)) return normalized
+  return normalized.padStart(3, '0')
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

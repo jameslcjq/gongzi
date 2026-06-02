@@ -8,6 +8,9 @@ const N = {
   integratedActive: '\u4e00\u4f53\u5316\u5728\u804c',
   integratedRetired: '\u4e00\u4f53\u5316\u9000\u4f11',
   integratedOther: '\u4e00\u4f53\u5316\u5176\u4ed6',
+  activeSalary: '\u5728\u804c\u5de5\u8d44',
+  retiredSalary: '\u9000\u4f11\u5de5\u8d44',
+  otherSalary: '\u5176\u4ed6\u5de5\u8d44',
   budgetActive: '\u9884\u7b97\u5728\u804c',
   budgetRetired: '\u9884\u7b97\u9000\u4f11',
   budgetOther: '\u9884\u7b97\u5176\u4ed6',
@@ -20,6 +23,7 @@ const N = {
 const F = {
   unitFullName: '\u5355\u4f4d\u5168\u79f0',
   unitName: '\u5355\u4f4d\u540d\u79f0',
+  salaryTypeName: '\u5de5\u8d44\u7c7b\u522b\u540d\u79f0',
   salaryBatch: '\u5de5\u8d44\u6279\u6b21',
   salaryBatchCode: '\u5de5\u8d44\u6279\u6b21\u7f16\u7801',
   newRentSubsidyOld: '\u65b0\u804c\u5de5\u9010\u6708\u8865\u8d34',
@@ -211,6 +215,14 @@ export const splitConfigs: SplitConfig[] = [
       { match: 'non-empty', target: N.integratedOther },
       { match: 'empty', target: N.integratedRetired }
     ]
+  },
+  {
+    worksheetName: N.retiredSalary,
+    field: F.remark1,
+    rules: [
+      { match: 'non-empty', target: N.otherSalary },
+      { match: 'empty', target: N.retiredSalary }
+    ]
   }
 ]
 
@@ -250,6 +262,8 @@ export function inferWorksheet(filePath: string): WorksheetInferenceResult {
   const matches = getSignatureMatches(headerRow.headers, worksheets)
   if (matches.length === 1) return { worksheet: matches[0].worksheet }
   if (matches.length > 1) {
+    const salaryMatch = pickSalaryWorksheetMatch(fileName, aoa, headerRow, matches)
+    if (salaryMatch) return { worksheet: salaryMatch }
     const best = pickUniqueBestMatch(matches)
     if (best) return { worksheet: best }
     return { reason: `header matched multiple worksheets: ${matches.map((item) => item.worksheet.name).join(', ')}` }
@@ -336,6 +350,45 @@ function pickUniqueBestMatch(matches: SignatureMatch[]): WorksheetMeta | undefin
   const tied = sorted.filter((m) => m.matchedCount === topScore)
   const withSplit = tied.find((m) => splitConfigs.some((c) => c.worksheetName === m.worksheet.name))
   if (withSplit) return withSplit.worksheet
+  return undefined
+}
+
+function pickSalaryWorksheetMatch(
+  fileName: string,
+  aoa: unknown[][],
+  headerRow: { rowIndex: number; headers: string[] },
+  matches: SignatureMatch[]
+): WorksheetMeta | undefined {
+  const salaryMatches = matches.filter((item) =>
+    [N.activeSalary, N.retiredSalary, N.otherSalary].includes(item.worksheet.name)
+  )
+  if (salaryMatches.length < 2) return undefined
+
+  const targetName = inferSalaryWorksheetName(fileName, aoa, headerRow)
+  if (!targetName) return undefined
+  return salaryMatches.find((item) => item.worksheet.name === targetName)?.worksheet
+}
+
+function inferSalaryWorksheetName(
+  fileName: string,
+  aoa: unknown[][],
+  headerRow: { rowIndex: number; headers: string[] }
+): string | undefined {
+  const fileKey = normalize(fileName)
+  if (/退休|离休/.test(fileKey)) return N.retiredSalary
+  if (/其他|遗属|遗补/.test(fileKey)) return N.otherSalary
+
+  const typeIndex = headerRow.headers.findIndex((header) => header === normalize(F.salaryTypeName))
+  if (typeIndex === -1) return undefined
+
+  for (let rowIndex = headerRow.rowIndex + 1; rowIndex < aoa.length; rowIndex += 1) {
+    const salaryTypeName = normalize(aoa[rowIndex]?.[typeIndex])
+    if (!salaryTypeName) continue
+    if (/退休|离休/.test(salaryTypeName)) return N.retiredSalary
+    if (/其他|遗属|遗补/.test(salaryTypeName)) return N.otherSalary
+    return N.activeSalary
+  }
+
   return undefined
 }
 

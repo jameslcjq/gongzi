@@ -244,6 +244,11 @@ const failedImportCount = computed(
   () => importLogs.value.filter((log) => !log.ok).length
 )
 
+function noticeKindText(log: ExcelImportLog): string {
+  if (log.worksheetName === '工作流') return log.ok ? '工作流完成' : '系统提醒'
+  return log.ok ? '导入成功' : '导入失败'
+}
+
 watch(activeModuleKey, () => {
   const tables = tablesInModule.value
   if (tables.length > 0) {
@@ -703,7 +708,17 @@ async function promptHrMasterSync() {
     }
 
     const isEmptyMaster = preview.masterRows === 0
-    const title = isEmptyMaster ? '更新人事信息主表' : '发现人事信息差异'
+    if (isEmptyMaster) {
+      const result = await window.salaryApi.applyHrMasterSyncFromIntegrated()
+      ElMessage.success(
+        `已更新人事信息：新增 ${result.insertedRows} 人，更新 ${result.updatedRows} 人`
+      )
+      await loadSummary()
+      await loadRecords()
+      return
+    }
+
+    const title = '发现人事信息差异'
     const selections = await openSyncDiffDialog(
       title,
       appendSyncSummaryWarnings(`${displayWorksheetName('在职工资')}：新增 ${preview.insertRows} 人，更新 ${preview.updateRows} 人`, warnings),
@@ -1304,10 +1319,10 @@ onUnmounted(() => {
                 <el-icon><Bell /></el-icon>
               </el-badge>
               <span v-if="failedImportCount > 0" class="md-import-notice-text">
-                {{ failedImportCount }} 个失败
+                {{ failedImportCount }} 个提醒
               </span>
               <span v-else-if="latestImportLog" class="md-import-notice-text">
-                {{ latestImportLog.ok ? '导入成功' : '导入失败' }}
+                {{ noticeKindText(latestImportLog) }}
               </span>
               <span v-else class="md-import-notice-text">系统通知</span>
             </button>
@@ -1316,7 +1331,7 @@ onUnmounted(() => {
           <div class="md-import-popover">
             <div class="md-import-popover-title">
               <strong>系统通知</strong>
-              <small v-if="failedImportCount > 0">失败优先显示</small>
+              <small v-if="failedImportCount > 0">提醒优先显示</small>
               <button
                 class="md-import-clear"
                 @click="showAllLookupFailures"
@@ -1433,6 +1448,7 @@ onUnmounted(() => {
             :loading="importWatcherLoading"
             :refresh-key="monthlyPayrollRefreshKey"
             @refresh="refreshImportWatcher"
+            @workflow-notice="pushWorkflowNotice"
           />
           <PerformancePayrollPage v-else-if="payrollSubTab === 'performance'" />
           <AnnualAdjustmentPage

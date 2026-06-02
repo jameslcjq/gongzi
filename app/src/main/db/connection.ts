@@ -675,7 +675,9 @@ const identityNonUniqueWorksheetIds = new Set([
 ])
 
 const identityCompositeFieldNames = new Map<string, string[]>([
-  ['在职工资', ['\u5de5\u8d44\u6279\u6b21\u7f16\u7801']]
+  ['在职工资', ['\u5de5\u8d44\u6279\u6b21\u7f16\u7801']],
+  ['退休工资', ['\u5de5\u8d44\u6279\u6b21\u7f16\u7801']],
+  ['其他工资', ['\u5de5\u8d44\u6279\u6b21\u7f16\u7801']]
 ])
 
 export type IdentityDuplicateIssue = {

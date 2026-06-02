@@ -6,7 +6,6 @@ import type { PayrollPerson } from './monthlyPayrollTypes'
 import { inactiveMonthlyPayrollTaxField, readMonthlyPayrollSettings } from './monthlyPayrollSettings'
 import {
   integratedActiveInsuranceFields,
-  integratedActiveOtherDeductFields,
   integratedActivePayFields,
   integratedSimplePayFields
 } from './integratedPayrollRules'
@@ -108,11 +107,6 @@ const INTEGRATED_ACTIVE_PAY_FIELDS = [
   ...integratedActivePayFields
 ]
 
-const INTEGRATED_ACTIVE_DEDUCT_FIELDS = [
-  ...integratedActiveInsuranceFields,
-  ...integratedActiveOtherDeductFields
-]
-
 const INTEGRATED_NUMERIC_REPRESENTATIVE_FIELDS = new Set([
   '月份',
   '部门内序号',
@@ -146,10 +140,12 @@ export async function applyTaxAndRecomputeIntegratedActive(
   const taxCol = findColumnByName(worksheet, taxField)
   const inactiveTaxCol = findColumnByName(worksheet, inactiveTaxField)
   const payableCol = findColumnByName(worksheet, '应发工资')
+  const deductionCol = findColumnByName(worksheet, '代扣工资')
   const withholdingCol = findColumnByName(worksheet, '代扣合计')
   const actualCol = findColumnByName(worksheet, '实发合计')
   const payCols = INTEGRATED_ACTIVE_PAY_FIELDS.map((name) => findColumnByName(worksheet, name))
-  const deductionCols = INTEGRATED_ACTIVE_DEDUCT_FIELDS.map((name) => findColumnByName(worksheet, name))
+  const insuranceCols = integratedActiveInsuranceFields.map((name) => findColumnByName(worksheet, name))
+  const taxDeductionCol = findColumnByName(worksheet, '补扣工资')
   const columns = getWorksheetLocalColumns(worksheet)
   const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
   const table = tableNameOf(worksheet)
@@ -196,15 +192,22 @@ export async function applyTaxAndRecomputeIntegratedActive(
           ? (receivesOverrideTax ? overrideTax : 0)
           : options.clearTaxWhenMissing ? 0 : num(row[taxCol])
         const payable = payCols.reduce((sum, col) => sum + num(row[col]), 0)
-        const deductionsSum = deductionCols.reduce((sum, col) => sum + num(row[col]), 0)
-        const withholding = roundMoney(deductionsSum + taxAmount)
-        const actual = roundMoney(payable - withholding)
+        const taxDeduction = taxDeductionCol === taxCol
+          ? taxAmount
+          : shouldRewriteTax && taxDeductionCol === inactiveTaxCol
+            ? 0
+            : num(row[taxDeductionCol])
+        const deduction = roundMoney(
+          insuranceCols.reduce((sum, col) => sum + num(row[col]), 0) + taxDeduction
+        )
+        const actual = roundMoney(payable - deduction)
         const payableRounded = roundMoney(payable)
 
         const assignments = [
           `${quoteIdentifier(taxCol)} = ?`,
           ...(shouldRewriteTax ? [`${quoteIdentifier(inactiveTaxCol)} = ?`] : []),
           `${quoteIdentifier(payableCol)} = ?`,
+          `${quoteIdentifier(deductionCol)} = ?`,
           `${quoteIdentifier(withholdingCol)} = ?`,
           `${quoteIdentifier(actualCol)} = ?`,
           '"md_updated_at" = ?'
@@ -213,7 +216,8 @@ export async function applyTaxAndRecomputeIntegratedActive(
           taxAmount,
           ...(shouldRewriteTax ? [0] : []),
           payableRounded,
-          withholding,
+          deduction,
+          0,
           actual,
           now,
           row.id

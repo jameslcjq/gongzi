@@ -182,6 +182,7 @@ async function importExcelFile(filePath: string): Promise<void> {
     return
   }
 
+  let commitFailureLogged = false
   try {
     const result = inferWorksheet(filePath)
     if (!result.worksheet) {
@@ -189,7 +190,13 @@ async function importExcelFile(filePath: string): Promise<void> {
     }
     const worksheet = result.worksheet
 
-    const summary = await commitExcelImport(filePath, worksheet.worksheetId)
+    let summary: Awaited<ReturnType<typeof commitExcelImport>>
+    try {
+      summary = await commitExcelImport(filePath, worksheet.worksheetId)
+    } catch (error) {
+      commitFailureLogged = true
+      throw error
+    }
     moveProcessedFile(filePath, 'imported')
     pushMemoryLog({
       fileName: basename(filePath),
@@ -210,7 +217,9 @@ async function importExcelFile(filePath: string): Promise<void> {
       message,
       createdAt: new Date().toISOString()
     })
-    await persistFailedLog(basename(filePath), message)
+    if (!commitFailureLogged) {
+      await persistFailedLog(basename(filePath), message)
+    }
   }
 }
 
@@ -410,6 +419,7 @@ function isAnnualAdjustmentFile(filePath: string): boolean {
 
 function isSalaryWorkbook(filePath: string): boolean {
   const name = basename(filePath)
+  if (name.startsWith('一体化_工资')) return false
   return (
     name.includes('工资表') &&
     !name.includes('税款计算') &&
