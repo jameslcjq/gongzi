@@ -885,7 +885,7 @@ export async function generateMonthlyPayrollReportView(
     writeWorkbook(voucherImportPath, [voucherSheet])
   }
   if (salaryImportPath && salary) {
-    await writeSalaryImportWorkbook(salaryImportPath, salary)
+    await writeSalaryImportWorkbook(salaryImportPath, salary, { includedFields: ['其他一'] })
   }
   if (payrollBackpayPath) {
     if (backpaySheet) {
