@@ -393,7 +393,7 @@ export async function buildIntegratedActiveWriteBackPlan(
     '在职工资',
     getActiveCompareFields(taxField),
     '在职工资 缺少证件号码字段',
-    () => '001'
+    (targetFieldName) => targetFieldName === '交通费' ? '002' : '001'
   )
 }
 
