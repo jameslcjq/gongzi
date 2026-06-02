@@ -674,7 +674,13 @@ async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
   }
 }
 
-function currentPayload(options: { confirmWriteBack?: boolean } = {}): WorkflowRunPayload | null {
+function currentPayload(
+  options: {
+    confirmWriteBack?: boolean
+    salaryImportFields?: string[]
+    salaryImportIdCards?: string[]
+  } = {}
+): WorkflowRunPayload | null {
   const period = selectedPeriod.value
   const processScope = effectiveProcessScope.value
   return {
@@ -685,6 +691,8 @@ function currentPayload(options: { confirmWriteBack?: boolean } = {}): WorkflowR
       year: period.year,
       month: period.month,
       confirmWriteBack: options.confirmWriteBack,
+      salaryImportFields: options.salaryImportFields,
+      salaryImportIdCards: options.salaryImportIdCards,
       processScope,
       dataSourceMode: effectiveDataSourceMode.value
     }
@@ -763,7 +771,7 @@ async function runPreprocess(): Promise<void> {
       await refreshSourceVersions()
       if (confirmedResult.ok && confirmedResult.warnings.length === 0) {
         ElMessage.success('回写复核通过，开始生成报表')
-        await runGenerate()
+        await runGenerate(confirmedResult.monthlyPayrollWriteBack)
       } else if (confirmedResult.ok) {
         ElMessage.warning('预处理存在提醒，已停止自动生成报表；请查看页面结果或系统通知')
       } else {
@@ -774,7 +782,7 @@ async function runPreprocess(): Promise<void> {
     if (next.ok) {
       ElMessage.success('月度工资报账预处理完成')
       if (next.warnings.length === 0) {
-        await runGenerate()
+        await runGenerate(next.monthlyPayrollWriteBack)
       } else {
         ElMessage.warning('预处理存在提醒，已停止自动生成报表；请查看页面结果或系统通知')
       }
@@ -788,7 +796,7 @@ async function runPreprocess(): Promise<void> {
   }
 }
 
-async function runGenerate(): Promise<void> {
+async function runGenerate(writeBack?: MonthlyPayrollWriteBackPreview): Promise<void> {
   if (!isSelectedMonthCurrent.value) {
     ElMessage.warning('工资报账只能处理当月业务，请切回当前月份')
     return
@@ -806,7 +814,10 @@ async function runGenerate(): Promise<void> {
   report.value = null
   selectedReportRunId.value = null
   try {
-    const payload = currentPayload()
+    const payload = currentPayload({
+      salaryImportFields: writeBack?.salaryImportFields,
+      salaryImportIdCards: writeBack?.salaryImportIdCards
+    })
     if (!payload) return
     const next = await window.salaryApi.runWorkflow('monthly-payroll.generate', payload)
     generateResult.value = next

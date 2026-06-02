@@ -52,6 +52,8 @@ export type MonthlyPayrollWorkflowInput = {
   year?: number
   month?: number
   confirmWriteBack?: boolean
+  salaryImportFields?: string[]
+  salaryImportIdCards?: string[]
   processScope?: MonthlyPayrollProcessScope
   dataSourceMode?: MonthlyPayrollDataSourceMode
 }
@@ -80,6 +82,8 @@ export type MonthlyPayrollWriteBackPreview = {
   personCount: number
   examples: string[]
   manualExamples: string[]
+  salaryImportFields: string[]
+  salaryImportIdCards: string[]
 }
 
 export type WorkflowDefinition = {

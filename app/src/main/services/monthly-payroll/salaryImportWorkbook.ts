@@ -4,7 +4,7 @@ import { all, getDatabase } from '../../db/connection'
 import { getWorksheetLocalColumns } from '../../db/schema'
 import { getWorksheetByName, tableNameOf } from '../worksheetTable'
 import type { SalarySummary } from './monthlyPayrollTypes'
-import { num, roundMoney, text } from './monthlyPayrollUtils'
+import { normalizeIdCard, num, roundMoney, text } from './monthlyPayrollUtils'
 
 type TemplateColumn = {
   header: string
@@ -19,9 +19,20 @@ const SALARY_IMPORT_FIELD_COLUMNS: Record<string, number[]> = {
   薪级工资: [14],
   岗位津贴: [15],
   生活补贴: [16],
+  绩效工资: [17],
+  工作性津贴: [18],
   '教（工）龄补贴': [19],
+  特岗性津补贴: [20],
+  交通费: [21],
+  公车补贴: [22],
   住房补贴: [23],
+  基础绩效奖: [24],
+  补发工资: [25],
+  补扣工资: [26],
   其他一: [27, 44],
+  其他二: [28],
+  其他三: [29],
+  当月个人所得税: [30],
   公积金: [31],
   养老保险缴费: [32],
   职业年金缴费: [33],
@@ -31,6 +42,7 @@ const SALARY_IMPORT_FIELD_COLUMNS: Record<string, number[]> = {
 
 export type SalaryImportWorkbookOptions = {
   includedFields?: string[]
+  includedIdCards?: string[]
 }
 
 export async function writeSalaryImportWorkbook(
@@ -42,10 +54,18 @@ export async function writeSalaryImportWorkbook(
 
   const template = await loadIntegratedActiveTemplate()
   const includedFields = options.includedFields ? new Set(options.includedFields) : undefined
+  const includedIdCards = options.includedIdCards
+    ? new Set(options.includedIdCards.map(normalizeIdCard).filter(Boolean))
+    : undefined
   const includedColumns = options.includedFields
     ? buildIncludedColumnIndexes(options.includedFields)
     : undefined
-  const rows = salary.activePeople.map((person, index) => {
+  const people = includedIdCards
+    ? salary.activePeople.filter((person) => includedIdCards.has(normalizeIdCard(person.idCard)))
+    : salary.activePeople
+  if (!people.length) return 0
+
+  const rows = people.map((person, index) => {
     const row = new Array<string | number>(template.headers.length).fill('')
     const assignField = (fieldName: string, columnIndex: number, value: string | number): void => {
       if (!includedFields || includedFields.has(fieldName)) {
@@ -65,11 +85,22 @@ export async function writeSalaryImportWorkbook(
     assignField('薪级工资', 14, num(person.values['薪级工资']))
     assignField('岗位津贴', 15, num(person.values['岗位津贴']))
     assignField('生活补贴', 16, num(person.values['生活补贴']))
+    assignField('绩效工资', 17, num(person.values['绩效工资']))
+    assignField('工作性津贴', 18, num(person.values['工作性津贴']))
     assignField('教（工）龄补贴', 19, num(person.values['教（工）龄补贴']))
+    assignField('特岗性津补贴', 20, num(person.values['特岗性津补贴']))
+    assignField('交通费', 21, num(person.values['交通费']))
+    assignField('公车补贴', 22, num(person.values['公车补贴']))
     assignField('住房补贴', 23, num(person.values['住房补贴']))
+    assignField('基础绩效奖', 24, num(person.values['基础绩效奖']))
+    assignField('补发工资', 25, num(person.values['补发工资']))
+    assignField('补扣工资', 26, num(person.values['当月个人所得税']) || num(person.values['补扣工资']))
     const splitOtherOne = roundMoney(num(person.values['乡镇补贴']) + num(person.values['边远补贴']))
     const otherOne = splitOtherOne || num(person.values['其他一'])
     assignField('其他一', 27, otherOne)
+    assignField('其他二', 28, num(person.values['其他二']))
+    assignField('其他三', 29, num(person.values['其他三']))
+    assignField('当月个人所得税', 30, num(person.values['当月个人所得税']))
     assignField('公积金', 31, num(person.values['公积金']))
     assignField('养老保险缴费', 32, num(person.values['养老保险缴费']))
     assignField('职业年金缴费', 33, num(person.values['职业年金缴费']))

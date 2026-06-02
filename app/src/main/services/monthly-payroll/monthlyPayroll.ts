@@ -179,6 +179,10 @@ function periodRangeEqualsMonth(range: PayrollPeriodRange, key: string): boolean
   return range.startMonth === key && range.endMonth === key
 }
 
+function normalizeList(values: string[] | undefined): string[] {
+  return Array.from(new Set((values ?? []).map((value) => text(value)).filter(Boolean)))
+}
+
 function formatPeriodRange(range: PayrollPeriodRange): string {
   const start = periodLabelFromKey(range.startMonth)
   const end = periodLabelFromKey(range.endMonth)
@@ -834,8 +838,15 @@ export async function generateMonthlyPayrollReportView(
   applyVoucherPageCounts(sheets, voucherPageCounts)
   const reportFingerprint = fingerprintReportSheets(sheets)
   const period = targetDate
+  const salaryImportFields = normalizeList(input.salaryImportFields)
+  const salaryImportIdCards = normalizeList(input.salaryImportIdCards)
   const shouldGenerateSalaryImport = Boolean(
-    salary && !useIntegratedDataSource && input.processScope !== 'social' && salary.activePeople.length > 0
+    salary &&
+      !useIntegratedDataSource &&
+      input.processScope !== 'social' &&
+      salary.activePeople.length > 0 &&
+      salaryImportFields.length > 0 &&
+      salaryImportIdCards.length > 0
   )
   const shouldWriteTaxSalaryWorkbook = Boolean(
     salary && !useIntegratedDataSource && tax && input.salaryWorkbookPath
@@ -848,7 +859,7 @@ export async function generateMonthlyPayrollReportView(
   )
   if (
     previousRun &&
-    (!shouldGenerateSalaryImport || previousRun.salaryImportPath) &&
+    !shouldGenerateSalaryImport &&
     (!shouldWriteTaxSalaryWorkbook ||
       Boolean(previousRun.sourceSalaryPath && previousRun.sourceSalaryPath !== input.salaryWorkbookPath))
   ) {
@@ -889,7 +900,10 @@ export async function generateMonthlyPayrollReportView(
     writeWorkbook(voucherImportPath, [voucherSheet])
   }
   if (salaryImportPath && salary) {
-    await writeSalaryImportWorkbook(salaryImportPath, salary, { includedFields: ['其他一'] })
+    await writeSalaryImportWorkbook(salaryImportPath, salary, {
+      includedFields: salaryImportFields,
+      includedIdCards: salaryImportIdCards
+    })
   }
   if (payrollBackpayPath) {
     if (backpaySheet) {

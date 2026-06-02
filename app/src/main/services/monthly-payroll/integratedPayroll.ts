@@ -561,6 +561,7 @@ export function buildMonthlyPayrollWriteBackPreview(
   plan: IntegratedWriteBackPlan,
   state: { requiresConfirmation: boolean; applied: boolean }
 ): MonthlyPayrollWriteBackPreview {
+  const salaryImportDiff = buildSalaryImportDiff(plan)
   return {
     requiresConfirmation: state.requiresConfirmation,
     applied: state.applied,
@@ -568,7 +569,9 @@ export function buildMonthlyPayrollWriteBackPreview(
     manualCount: plan.manual.length,
     personCount: new Set(plan.changes.map((item) => item.idCard)).size,
     examples: plan.changes.slice(0, 5).map(formatIntegratedWriteBackChange),
-    manualExamples: plan.manual.slice(0, 5).map(formatIntegratedManualDifference)
+    manualExamples: plan.manual.slice(0, 5).map(formatIntegratedManualDifference),
+    salaryImportFields: salaryImportDiff.fields,
+    salaryImportIdCards: salaryImportDiff.idCards
   }
 }
 
@@ -583,6 +586,46 @@ export function mergeAppliedWriteBackPreview(
     }),
     manualCount: remainingPlan.manual.length,
     manualExamples: remainingPlan.manual.slice(0, 5).map(formatIntegratedManualDifference)
+  }
+}
+
+const SALARY_IMPORT_FIELD_ORDER = [
+  '岗位工资',
+  '薪级工资',
+  '岗位津贴',
+  '生活补贴',
+  '绩效工资',
+  '工作性津贴',
+  '教（工）龄补贴',
+  '特岗性津补贴',
+  '交通费',
+  '公车补贴',
+  '住房补贴',
+  '基础绩效奖',
+  '补发工资',
+  '补扣工资',
+  '其他一',
+  '其他二',
+  '其他三',
+  '当月个人所得税',
+  '公积金',
+  '养老保险缴费',
+  '职业年金缴费',
+  '医疗保险',
+  '失业保险'
+]
+
+function buildSalaryImportDiff(plan: IntegratedWriteBackPlan): { fields: string[]; idCards: string[] } {
+  const fields = new Set<string>()
+  const idCards = new Set<string>()
+  for (const change of plan.changes) {
+    if (change.worksheetName !== '在职工资') continue
+    fields.add(change.fieldName)
+    idCards.add(change.idCard)
+  }
+  return {
+    fields: SALARY_IMPORT_FIELD_ORDER.filter((field) => fields.has(field)),
+    idCards: Array.from(idCards)
   }
 }
 
