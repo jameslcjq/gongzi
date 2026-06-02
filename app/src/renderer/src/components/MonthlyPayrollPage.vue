@@ -423,6 +423,7 @@ const isSelectedMonthCurrent = computed(() => selectedMonthLabel.value === curre
 const selectedMonthRuns = computed(() =>
   history.value.filter((row) => row.year === selectedPeriod.value.year && row.month === selectedPeriod.value.month)
 )
+const historyActionRowKeys = computed(() => selectedMonthRuns.value.map((row) => row.id))
 const selectedReportRun = computed(() =>
   selectedReportRunId.value
     ? selectedMonthRuns.value.find((row) => row.id === selectedReportRunId.value) ?? null
@@ -1591,7 +1592,98 @@ function isCustomStyledSheet(name: string): boolean {
         <strong><el-icon><Clock /></el-icon>历史报表：{{ selectedMonthDisplay }}</strong>
         <el-button text size="small" :icon="Refresh" @click="() => refreshHistory()">刷新</el-button>
       </div>
-      <el-table :data="selectedMonthRuns" v-loading="historyLoading" size="small" border stripe :max-height="320">
+      <el-table
+        :data="selectedMonthRuns"
+        v-loading="historyLoading"
+        size="small"
+        border
+        stripe
+        row-key="id"
+        :expand-row-keys="historyActionRowKeys"
+        :max-height="320"
+      >
+        <el-table-column type="expand" width="1">
+          <template #default="{ row }">
+            <div class="history-action-row">
+              <span class="history-action-label">操作</span>
+              <div class="history-actions">
+                <el-button
+                  v-if="row.voucherImportPath"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openHistoryFile(row.voucherImportPath)"
+                >凭证</el-button>
+                <el-button
+                  v-if="row.insuranceImportPath"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openHistoryFile(row.insuranceImportPath)"
+                >保险导入</el-button>
+                <el-button
+                  v-if="row.insuranceImportPath || row.voucherImportPath"
+                  size="small"
+                  text
+                  type="success"
+                  :loading="pushingInsuranceRunId === row.id"
+                  @click="pushInsuranceToIntegrated(row)"
+                >推送到一体化</el-button>
+                <el-button
+                  v-if="row.payrollBackpayPath"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openHistoryFile(row.payrollBackpayPath)"
+                >补发工资</el-button>
+                <el-button
+                  v-if="row.salaryImportPath"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openHistoryFile(row.salaryImportPath)"
+                >工资导入</el-button>
+                <el-button
+                  v-if="row.salaryImportPath || row.payrollBackpayPath"
+                  size="small"
+                  text
+                  type="success"
+                  :loading="pushingSalaryRunId === row.id"
+                  @click="pushSalaryImportsToIntegrated(row)"
+                >推送工资</el-button>
+                <el-button
+                  v-if="row.archiveDir"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openHistoryFile(row.archiveDir)"
+                >月结</el-button>
+                <el-button
+                  v-else
+                  size="small"
+                  text
+                  type="warning"
+                  :loading="archivingId === row.id"
+                  :disabled="!canArchiveHistoryRun(row)"
+                  @click="archiveHistoryRun(row)"
+                >月结</el-button>
+                <el-button
+                  size="small"
+                  text
+                  type="primary"
+                  @click="viewHistoryReport(row)"
+                >查看</el-button>
+                <el-button
+                  v-if="!row.archivedAt"
+                  size="small"
+                  text
+                  type="danger"
+                  @click="deleteHistoryRun(row)"
+                >删除</el-button>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="年月" width="110">
           <template #default="{ row }">{{ row.year }}-{{ String(row.month).padStart(2, '0') }}</template>
         </el-table-column>
@@ -1635,85 +1727,6 @@ function isCustomStyledSheet(name: string): boolean {
             <el-tag :type="dataSourceModeTagType(row.dataSourceMode)" effect="plain">
               {{ dataSourceModeText(row.dataSourceMode) }}
             </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="560" fixed="right" align="right">
-          <template #default="{ row }">
-            <div class="history-actions">
-              <el-button
-                v-if="row.voucherImportPath"
-                size="small"
-                text
-                type="primary"
-                @click="openHistoryFile(row.voucherImportPath)"
-              >凭证</el-button>
-              <el-button
-                v-if="row.insuranceImportPath"
-                size="small"
-                text
-                type="primary"
-                @click="openHistoryFile(row.insuranceImportPath)"
-              >保险导入</el-button>
-              <el-button
-                v-if="row.insuranceImportPath || row.voucherImportPath"
-                size="small"
-                text
-                type="success"
-                :loading="pushingInsuranceRunId === row.id"
-                @click="pushInsuranceToIntegrated(row)"
-              >推送到一体化</el-button>
-              <el-button
-                v-if="row.payrollBackpayPath"
-                size="small"
-                text
-                type="primary"
-                @click="openHistoryFile(row.payrollBackpayPath)"
-              >补发工资</el-button>
-              <el-button
-                v-if="row.salaryImportPath"
-                size="small"
-                text
-                type="primary"
-                @click="openHistoryFile(row.salaryImportPath)"
-              >工资导入</el-button>
-              <el-button
-                v-if="row.salaryImportPath || row.payrollBackpayPath"
-                size="small"
-                text
-                type="success"
-                :loading="pushingSalaryRunId === row.id"
-                @click="pushSalaryImportsToIntegrated(row)"
-              >推送工资</el-button>
-              <el-button
-                v-if="row.archiveDir"
-                size="small"
-                text
-                type="primary"
-                @click="openHistoryFile(row.archiveDir)"
-              >月结</el-button>
-              <el-button
-                v-else
-                size="small"
-                text
-                type="warning"
-                :loading="archivingId === row.id"
-                :disabled="!canArchiveHistoryRun(row)"
-                @click="archiveHistoryRun(row)"
-              >月结</el-button>
-              <el-button
-                size="small"
-                text
-                type="primary"
-                @click="viewHistoryReport(row)"
-              >查看</el-button>
-              <el-button
-                v-if="!row.archivedAt"
-                size="small"
-                text
-                type="danger"
-                @click="deleteHistoryRun(row)"
-              >删除</el-button>
-            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -2355,12 +2368,36 @@ function isCustomStyledSheet(name: string): boolean {
   font-size: 14px;
 }
 
+.history-panel :deep(.el-table__expand-column .cell) {
+  display: none;
+}
+
+.history-panel :deep(.el-table__expanded-cell) {
+  padding: 6px 10px 8px;
+  background: #fbfcff;
+}
+
+.history-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.history-action-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .history-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 8px;
-  white-space: nowrap;
 }
 
 .history-actions .el-button {
