@@ -23,6 +23,12 @@ cd app
 npm run build
 ```
 
+## 维护
+
+长期维护、打包发布、功能说明、代码注释和脱敏回归数据要求见 `docs/maintenance-guide.md`。
+
+当前功能说明见 `docs/feature-guide.md`，脱敏回归样例见 `tests/fixtures/`。
+
 ## 上传前注意
 
 仓库已配置 `.gitignore`，会排除依赖、构建产物、日志、本地数据库、工资归档和 Excel 等业务数据文件。上传 GitHub 前请确认不要提交真实人员、工资、社保、个税等敏感数据。

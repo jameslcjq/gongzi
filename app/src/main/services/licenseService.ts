@@ -95,6 +95,7 @@ export interface LicenseMachineRequest extends LicenseDeviceInfo {
 const PRODUCT_KEY = 'payroll'
 const PRODUCT_NAME = '工资系统'
 const DEFAULT_LICENSE_API_BASE = 'https://jyj.yunbg.vip/api/license'
+// 在线授权短时不可用时允许使用最近一次有效结果，避免临时网络故障挡住当天业务。
 const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
 const OFFLINE_LICENSE_FILE = 'offline_license.lic'
 const OFFLINE_LICENSE_FORMAT = 'yunbg.offline-license'
@@ -147,6 +148,7 @@ function encodeConfigText(value: string): string {
   } catch {
     // Fall back to base64 below.
   }
+  // base64 只是兼容 safeStorage 不可用的环境，不具备加密强度；不要在这里保存高敏明文。
   return PLAIN_PREFIX + Buffer.from(value, 'utf-8').toString('base64')
 }
 

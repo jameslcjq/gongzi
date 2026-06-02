@@ -1,6 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import * as XLSX from 'xlsx'
-import type { CellValue, PayrollPerson, SalarySummary, SocialSecuritySummary, TaxPerson, TaxSummary } from './monthlyPayrollTypes'
+import type {
+  CellValue,
+  PayrollPeriodRange,
+  PayrollPerson,
+  SalarySummary,
+  SocialSecuritySummary,
+  TaxPerson,
+  TaxSummary
+} from './monthlyPayrollTypes'
 import {
   isValidIdCard,
   normalizeHeader,
@@ -76,18 +84,39 @@ export async function parseSocialSecurityWorkbook(filePath: string): Promise<Soc
   if (itemIndexes.some((index) => index < 0) || amountIndex < 0) {
     throw new Error('社保文件缺少可识别的征收项目或金额列')
   }
+  const periodStartIndex = findHeaderIndex(headers, [
+    '费款所属期起',
+    '费款所属期开始',
+    '费款所属期起始',
+    '所属期起',
+    '所属期开始',
+    '所属期起始'
+  ])
+  const periodEndIndex = findHeaderIndex(headers, [
+    '费款所属期止',
+    '费款所属期终',
+    '费款所属期结束',
+    '所属期止',
+    '所属期结束'
+  ])
+  const periodIndex = findHeaderIndex(headers, ['费款所属期', '所属期'])
   const byItem = new Map<string, number>()
+  const periods = new Map<string, PayrollPeriodRange>()
   let rowCount = 0
 
   for (let index = headerIndex + 1; index < rows.length; index += 1) {
     const row = rows[index]
     const item = itemIndexes.map((itemIndex) => text(row[itemIndex])).filter(Boolean).join(' ')
     if (!item) continue
+    addPeriodRange(periods, {
+      startValue: periodStartIndex >= 0 ? row[periodStartIndex] : periodIndex >= 0 ? row[periodIndex] : undefined,
+      endValue: periodEndIndex >= 0 ? row[periodEndIndex] : periodIndex >= 0 ? row[periodIndex] : undefined
+    })
     byItem.set(item, roundMoney((byItem.get(item) ?? 0) + num(row[amountIndex])))
     rowCount += 1
   }
 
-  return { byItem: Object.fromEntries(byItem), rowCount }
+  return { byItem: Object.fromEntries(byItem), rowCount, periods: Array.from(periods.values()) }
 }
 
 export async function parseTaxWorkbook(filePath: string): Promise<TaxSummary> {
@@ -103,11 +132,21 @@ export async function parseTaxWorkbook(filePath: string): Promise<TaxSummary> {
   const nameIndex = headers.indexOf(normalizeHeader('姓名'))
   const idIndex = headers.indexOf(normalizeHeader('证件号码'))
   const amountIndex = findTaxAmountColumn(headers)
+  const periodStartIndex = findHeaderIndex(headers, ['税款所属期起', '税款所属期开始', '税款所属期起始', '所得期间起'])
+  const periodEndIndex = findHeaderIndex(headers, ['税款所属期止', '税款所属期终', '税款所属期结束', '所得期间止'])
+  const periodIndex = findHeaderIndex(headers, ['税款所属期', '所得期间'])
   const taxRows: TaxPerson[] = []
   const missingIdCards: TaxPerson[] = []
+  const periods = new Map<string, PayrollPeriodRange>()
 
   for (let index = headerIndex + 1; index < rows.length; index += 1) {
     const row = rows[index]
+    if (text(row[nameIndex]) || text(row[idIndex])) {
+      addPeriodRange(periods, {
+        startValue: periodStartIndex >= 0 ? row[periodStartIndex] : periodIndex >= 0 ? row[periodIndex] : undefined,
+        endValue: periodEndIndex >= 0 ? row[periodEndIndex] : periodIndex >= 0 ? row[periodIndex] : undefined
+      })
+    }
     const taxAmount = num(row[amountIndex])
     if (taxAmount === 0) continue
     const item = {
@@ -123,7 +162,8 @@ export async function parseTaxWorkbook(filePath: string): Promise<TaxSummary> {
   return {
     totalTax: roundMoney(taxRows.reduce((sum, row) => sum + row.taxAmount, 0)),
     rows: taxRows,
-    missingIdCards
+    missingIdCards,
+    periods: Array.from(periods.values())
   }
 }
 
@@ -219,6 +259,50 @@ function findTaxAmountColumn(headers: string[]): number {
   if (matched >= 0) return matched
 
   throw new Error('个税文件缺少“应补(退)税额”列')
+}
+
+function addPeriodRange(
+  ranges: Map<string, PayrollPeriodRange>,
+  values: { startValue: CellValue; endValue: CellValue }
+): void {
+  const startMonth = parsePeriodMonth(values.startValue)
+  const endMonth = parsePeriodMonth(values.endValue)
+  const start = startMonth ?? endMonth
+  const end = endMonth ?? startMonth
+  if (!start || !end) return
+  const key = `${start}|${end}`
+  const current = ranges.get(key)
+  if (current) {
+    current.rowCount += 1
+  } else {
+    ranges.set(key, { startMonth: start, endMonth: end, rowCount: 1 })
+  }
+}
+
+function parsePeriodMonth(value: CellValue): string | undefined {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return formatMonthKey(value.getFullYear(), value.getMonth() + 1)
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value)
+    if (parsed) return formatMonthKey(parsed.y, parsed.m)
+  }
+  const raw = text(value)
+  if (!raw) return undefined
+  const chinese = raw.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/)
+  if (chinese) return formatMonthKey(Number(chinese[1]), Number(chinese[2]))
+  const separated = raw.match(/(\d{4})[-/.](\d{1,2})(?:[-/.]\d{1,2})?/)
+  if (separated) return formatMonthKey(Number(separated[1]), Number(separated[2]))
+  const compact = raw.replace(/\D/g, '').match(/^(\d{4})(\d{2})(?:\d{2})?$/)
+  if (compact) return formatMonthKey(Number(compact[1]), Number(compact[2]))
+  return undefined
+}
+
+function formatMonthKey(year: number, month: number): string | undefined {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || year < 1900 || month < 1 || month > 12) {
+    return undefined
+  }
+  return `${year}-${String(month).padStart(2, '0')}`
 }
 
 function findSocialSecurityHeaderRow(rows: CellValue[][]): number {

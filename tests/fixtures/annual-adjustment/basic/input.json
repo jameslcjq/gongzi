@@ -1,0 +1,70 @@
+{
+  "caseName": "annual-adjustment-basic",
+  "createdAt": "2026-06-01",
+  "privacy": "synthetic-only",
+  "salaryWorkbook": {
+    "unitName": "测试学校",
+    "rows": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "housing": 600
+      },
+      {
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "housing": 640
+      }
+    ]
+  },
+  "housingAccountWorkbook": {
+    "rows": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "account": "TEST-HOUSING-001",
+        "base": 600
+      },
+      {
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "account": "TEST-HOUSING-002",
+        "base": 640
+      }
+    ]
+  },
+  "insuranceDetails": [
+    {
+      "sourceFile": "脱敏社保明细-养老.xlsx",
+      "rowNumber": 2,
+      "name": "教师A001",
+      "idCard": "32000019900101001X",
+      "rate": "8%",
+      "amount": 480
+    },
+    {
+      "sourceFile": "脱敏社保明细-年金.xlsx",
+      "rowNumber": 2,
+      "name": "教师A001",
+      "idCard": "32000019900101001X",
+      "rate": "4%",
+      "amount": 240
+    },
+    {
+      "sourceFile": "脱敏社保明细-医保.xlsx",
+      "rowNumber": 2,
+      "name": "教师A001",
+      "idCard": "32000019900101001X",
+      "rate": "2%",
+      "amount": 120
+    },
+    {
+      "sourceFile": "脱敏社保明细-失业.xlsx",
+      "rowNumber": 2,
+      "name": "教师A001",
+      "idCard": "32000019900101001X",
+      "rate": "0.5%",
+      "amount": 30
+    }
+  ]
+}

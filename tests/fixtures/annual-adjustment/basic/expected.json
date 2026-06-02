@@ -1,0 +1,48 @@
+{
+  "caseName": "annual-adjustment-basic",
+  "expected": {
+    "unitName": "测试学校",
+    "salaryPeople": 2,
+    "housingAccountRows": 2,
+    "insuranceRows": 4,
+    "matchedInsuranceRows": 4,
+    "blockedInsuranceRows": 0,
+    "rateFieldMapping": {
+      "8%": "养老保险缴费",
+      "4%": "职业年金缴费",
+      "2%": "医疗保险",
+      "0.5%": "失业保险"
+    },
+    "integratedChanges": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "fieldName": "养老保险缴费",
+        "sourceValue": 480
+      },
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "fieldName": "职业年金缴费",
+        "sourceValue": 240
+      },
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "fieldName": "医疗保险",
+        "sourceValue": 120
+      },
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "fieldName": "失业保险",
+        "sourceValue": 30
+      }
+    ]
+  },
+  "manualChecks": [
+    "社保比例必须映射到正确的一体化字段。",
+    "证件号匹配不到的人应进入缺失或人工判断列表。",
+    "写回在职工资前必须有用户确认。"
+  ]
+}

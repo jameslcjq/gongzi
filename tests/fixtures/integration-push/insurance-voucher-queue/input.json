@@ -1,0 +1,47 @@
+{
+  "caseName": "integration-push-insurance-voucher-queue",
+  "createdAt": "2026-06-01",
+  "privacy": "synthetic-only",
+  "unitSettings": {
+    "unitFullName": "测试学校",
+    "unitImportCode": "TEST001"
+  },
+  "monthlyPayrollRun": {
+    "id": 101,
+    "year": 2026,
+    "month": 6,
+    "unitFullName": "测试学校",
+    "insurancePushStatus": "not-pushed",
+    "salaryPushStatus": "not-pushed",
+    "isOutdated": false
+  },
+  "steps": [
+    {
+      "kind": "insurance",
+      "pushTarget": "insurance",
+      "records": [
+        {
+          "agency_code": "TEST001",
+          "agency_code_name": "测试学校",
+          "dep_bgt_eco_code": "30108",
+          "dep_bgt_eco_code_name": "机关事业单位基本养老保险缴费",
+          "use_des": "养老保险（单位）",
+          "pay_sum_amt": "1984.00",
+          "payee_acct_name": "测试社保中心",
+          "payee_acct_bank_name": "测试银行",
+          "payee_acct_no": "000000000000000001",
+          "operate_user": "测试经办",
+          "audit_user": "测试审核",
+          "hold1": "",
+          "is_gov_pur_pay": "不是政府采购"
+        }
+      ]
+    },
+    {
+      "kind": "voucher",
+      "pushTarget": "insurance",
+      "fileName": "工资报账_凭证_脱敏样例.xlsx",
+      "fileSize": 8192
+    }
+  ]
+}

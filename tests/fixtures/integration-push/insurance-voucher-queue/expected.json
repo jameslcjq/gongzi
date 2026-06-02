@@ -1,0 +1,33 @@
+{
+  "caseName": "integration-push-insurance-voucher-queue",
+  "expected": {
+    "preflight": {
+      "needsSalary": false,
+      "needsInsurance": true,
+      "needsVoucher": true,
+      "unitFullName": "测试学校",
+      "unitImportCode": "TEST001",
+      "insuranceUnits": [
+        {
+          "code": "TEST001",
+          "name": "测试学校"
+        }
+      ]
+    },
+    "stepOrder": [
+      "insurance",
+      "voucher"
+    ],
+    "statusFlow": [
+      "queued",
+      "success"
+    ],
+    "failureBehavior": "If insurance fails, voucher must not run and run status should become failed."
+  },
+  "manualChecks": [
+    "推送前应先校验一体化当前单位。",
+    "保险步骤应在凭证步骤之前执行。",
+    "任一步失败时应停止剩余队列。",
+    "同一 runId 和 pushTarget 只更新一次批量状态。"
+  ]
+}

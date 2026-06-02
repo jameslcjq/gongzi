@@ -45,6 +45,7 @@ const monthCloseAdjustmentFieldNames = ['补发工资', '补扣工资'] as const
 export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput): Promise<void> {
   const database = await getDatabase()
   const outdatedAt = new Date().toISOString()
+  // 同月重新生成不是覆盖旧记录，而是标记旧结果过期，便于追溯并提醒已推送结果需要重推。
   const oldRows = await all<Record<string, unknown>>(
     database,
     `SELECT * FROM monthly_payroll_runs
@@ -197,6 +198,7 @@ export async function archiveMonthlyPayrollRun(id: number): Promise<MonthlyPayro
   )
   const finalRun = finalRows[0] ? mapRunRow(finalRows[0]) : requestedRun
   if (!finalRun.sourceSocialPath || !finalRun.insuranceImportPath) {
+    // 社保每月必办；只有工资阶段结果时不允许月结，避免把半成品锁成最终档案。
     throw new Error(`${finalRun.year}年${finalRun.month}月社保文件未补齐，当前只是工资阶段结果，不能月结。`)
   }
   const archiveDir = monthlyPayrollArchiveDir(finalRun)
@@ -1153,6 +1155,7 @@ function uniqueArchivePath(targetDir: string, fileName: string): string {
 
 const FINGERPRINT_SKIP_SHEETS = new Set(['退休工资'])
 const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
+// 与 monthlyPayroll.ts 保持一致：保险凭证固定附件页数用于历史快照重建。
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 
 function dateStamp(): string {

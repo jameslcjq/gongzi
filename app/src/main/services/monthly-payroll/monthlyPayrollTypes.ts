@@ -18,12 +18,20 @@ export type PayrollPerson = {
 export type SocialSecuritySummary = {
   byItem: Record<string, number>
   rowCount: number
+  periods: PayrollPeriodRange[]
 }
 
 export type TaxSummary = {
   totalTax: number
   rows: TaxPerson[]
   missingIdCards: TaxPerson[]
+  periods: PayrollPeriodRange[]
+}
+
+export type PayrollPeriodRange = {
+  startMonth: string
+  endMonth: string
+  rowCount: number
 }
 
 export type TaxPerson = {

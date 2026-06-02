@@ -67,6 +67,7 @@ const VOUCHER_COLUMNS = [
   '部门支出经济分类（账务）名称'
 ]
 
+// 保险凭证附件数按当前业务要求固定为 7，不跟工资表打印页数联动。
 const INSURANCE_VOUCHER_ATTACHMENT_COUNT = 7
 
 function lastDayOfPayrollMonth(today: Date): Date {
@@ -80,6 +81,7 @@ export function buildVoucherSheet(
   const { unit, today, active, socialSecurity, activeTax } = input
   const date = lastDayOfPayrollMonth(today)
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  // 工资凭证无社保时仍要保留基础附件数；最终报销凭证页数会在 monthlyPayroll.ts 按实际打印页覆盖。
   const salaryAttachmentCount = options.includeSalaryVoucher ? 14 : 5
 
   const insurancePersonalPension = socialSecurity ? sumSocialByCanonicalName(socialSecurity, '养老保险个人') : 0
@@ -208,6 +210,7 @@ function voucherRow(e: VoucherEntry, dateStr: string): Array<string | number> {
 }
 
 export function departmentEconomicSubjectForSocialItem(item: string): { code: string; name: string } {
+  // 社保项目名称来自不同系统，先归一化再映射部门经济分类，避免医保/医疗/大额等别名漏配。
   const normalized = canonicalInsuranceItemName(item).replace(/\s+/g, '')
   const isPersonal = normalized.includes('个人')
   if (isPersonal) return { code: '30101', name: '基本工资' }

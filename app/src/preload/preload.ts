@@ -41,6 +41,7 @@ import type {
   MonthlyPayrollRun,
   MonthlyPayrollPushStatus,
   MonthlyPayrollSourceVersion,
+  MonthlyPayrollSourcePeriodInspection,
   MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollPrintSettings,
   MonthlyPayrollSettings,
@@ -137,6 +138,10 @@ const salaryApi = {
     payload?: WorkflowRunPayload
   ): Promise<MonthlyPayrollReportResult> =>
     ipcRenderer.invoke('monthly-payroll:generate-report-view', payload),
+  inspectMonthlyPayrollSourcePeriods: (
+    payload?: WorkflowRunPayload
+  ): Promise<MonthlyPayrollSourcePeriodInspection> =>
+    ipcRenderer.invoke('monthly-payroll:inspect-source-periods', payload),
   openIntegrationExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke('integration:open-external', url),
   execInAllPortalFrames: (

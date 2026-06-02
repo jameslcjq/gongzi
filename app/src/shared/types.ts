@@ -56,6 +56,16 @@ export type MonthlyPayrollWorkflowInput = {
   dataSourceMode?: MonthlyPayrollDataSourceMode
 }
 
+export type MonthlyPayrollSourcePeriodSummary = {
+  periods: string[]
+  message: string
+}
+
+export type MonthlyPayrollSourcePeriodInspection = {
+  socialSecurity?: MonthlyPayrollSourcePeriodSummary
+  tax?: MonthlyPayrollSourcePeriodSummary
+}
+
 export type MonthlyPayrollTaxField = '补扣工资' | '当月个人所得税'
 
 export type MonthlyPayrollSettings = {

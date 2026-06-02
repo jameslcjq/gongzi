@@ -38,6 +38,7 @@ import {
   deleteMonthlyPayrollRun,
   generateMonthlyPayrollReportView,
   getMonthlyPayrollRunReport,
+  inspectMonthlyPayrollSourcePeriods,
   listMonthlyPayrollRuns,
   updateMonthlyPayrollPushStatus
 } from '../services/monthly-payroll/monthlyPayroll'
@@ -190,6 +191,7 @@ import type {
 } from '../../shared/types'
 
 const LICENSE_FREE_CHANNELS = new Set([
+  // 授权门禁页仍需要读取基础状态、单位设置和备份列表；业务写入类 IPC 继续走授权拦截。
   'app:get-version',
   'app:get-summary',
   'app:list-workflows',
@@ -374,6 +376,13 @@ export function registerAppIpc(): void {
     'monthly-payroll:generate-report-view',
     (_event, payload?: WorkflowRunPayload): Promise<MonthlyPayrollReportResult> => {
       return generateMonthlyPayrollReportView(payload?.monthlyPayroll)
+    }
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:inspect-source-periods',
+    (_event, payload?: WorkflowRunPayload) => {
+      return inspectMonthlyPayrollSourcePeriods(payload?.monthlyPayroll)
     }
   )
 

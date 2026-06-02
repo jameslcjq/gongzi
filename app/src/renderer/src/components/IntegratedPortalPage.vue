@@ -284,6 +284,7 @@ async function markStepsStatus(steps: PushStep[], status: MonthlyPayrollPushStat
 }
 
 async function runPushPreflight(wv: PortalWebview, steps: PushStep[]): Promise<boolean> {
+  // 真正注入前先在一体化页面核对单位和目标模块，防止把文件推到错误单位或错误页面。
   const needsSalary = steps.some((step) => step.kind === 'salary-system-import')
   const needsInsurance = steps.some((step) => step.kind === 'insurance')
   const needsVoucher = steps.some((step) => step.kind === 'voucher')
@@ -330,6 +331,7 @@ async function runPushPreflight(wv: PortalWebview, steps: PushStep[]): Promise<b
 }
 
 async function processPushQueue(): Promise<void> {
+  // 推送必须串行：一体化页面保存、弹窗和进度条都依赖当前页面状态，失败后停止后续步骤。
   if (processingPushQueue.value) return
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true

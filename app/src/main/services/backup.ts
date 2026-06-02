@@ -37,6 +37,7 @@ export async function createBackup(): Promise<BackupSummary> {
   }
 
   const database = await getDatabase()
+  // SQLite 使用 WAL 时，新数据可能还在 -wal 文件中；复制主库前先 checkpoint，备份才完整。
   await exec(database, 'PRAGMA wal_checkpoint(TRUNCATE);')
 
   const folder = getBackupFolder()
@@ -80,6 +81,7 @@ export async function restoreBackup(fileName: string): Promise<BackupSummary> {
   copyFileSync(sourcePath, target)
   const stat = statSync(target)
 
+  // 当前进程已经打开旧数据库连接，恢复后必须重启才能保证后续读写落到新库。
   setTimeout(() => {
     app.relaunch()
     app.exit(0)

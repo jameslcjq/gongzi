@@ -1,0 +1,136 @@
+{
+  "caseName": "monthly-payroll-basic-integrated",
+  "createdAt": "2026-06-01",
+  "privacy": "synthetic-only",
+  "period": {
+    "year": 2026,
+    "month": 6,
+    "note": "The app only processes the current month. Replace this period with the current test month when exercising the live UI."
+  },
+  "unitSettings": {
+    "unitFullName": "测试学校",
+    "unitImportCode": "TEST001",
+    "schoolLevel": "2050202-小学教育",
+    "functionCode": "2050202",
+    "retiredFunctionCode": "2080502",
+    "budgetActiveCode": "BUDGET-ACTIVE-TEST",
+    "budgetRetiredCode": "BUDGET-RETIRED-TEST",
+    "socialPayeeName": "测试社保中心",
+    "socialPayeeBank": "测试银行",
+    "socialPayeeAccount": "000000000000000001"
+  },
+  "settings": {
+    "dataSourceMode": "integrated",
+    "taxField": "补扣工资",
+    "processScope": "salary-social"
+  },
+  "worksheets": {
+    "在职工资": [
+      {
+        "personCode": "P0001",
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "basicSalary": 3000,
+        "teachingAgeAllowance": 50,
+        "basePerformance": 1100,
+        "ruralAllowance": 200,
+        "housingAllowance": 300,
+        "trafficAllowance": 100,
+        "backpay": 0,
+        "pension": 480,
+        "annuity": 240,
+        "medical": 120,
+        "unemployment": 30,
+        "housingFund": 600,
+        "tax": 50,
+        "payable": 4750,
+        "actualPay": 3230
+      },
+      {
+        "personCode": "P0002",
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "basicSalary": 3200,
+        "teachingAgeAllowance": 0,
+        "basePerformance": 1200,
+        "ruralAllowance": 250,
+        "housingAllowance": 320,
+        "trafficAllowance": 100,
+        "backpay": 500,
+        "pension": 512,
+        "annuity": 256,
+        "medical": 128,
+        "unemployment": 32,
+        "housingFund": 640,
+        "tax": 0,
+        "payable": 5570,
+        "actualPay": 4002
+      }
+    ],
+    "其他工资": [
+      {
+        "personCode": "S0001",
+        "name": "遗补A001",
+        "idCard": "32000020000101003X",
+        "survivorAllowance": 800,
+        "actualPay": 800
+      }
+    ],
+    "退休工资": [
+      {
+        "personCode": "R0001",
+        "name": "退休A001",
+        "idCard": "32000019550101004X",
+        "retiredHousing": 600,
+        "actualPay": 600
+      }
+    ]
+  },
+  "socialSecurity": {
+    "rowCount": 9,
+    "periods": [
+      {
+        "startMonth": "2026-06",
+        "endMonth": "2026-06",
+        "note": "current month, required"
+      },
+      {
+        "startMonth": "2026-05",
+        "endMonth": "2026-05",
+        "note": "prior month back payment, allowed"
+      }
+    ],
+    "byItem": {
+      "养老保险个人": 992,
+      "养老保险单位": 1984,
+      "职业年金个人": 496,
+      "职业年金单位": 496,
+      "医保个人": 248,
+      "医保单位": 744,
+      "失业保险个人": 62,
+      "失业保险单位": 62,
+      "工伤保险": 30
+    }
+  },
+  "tax": {
+    "periods": [
+      {
+        "startMonth": "2026-05",
+        "endMonth": "2026-05",
+        "note": "June payroll declares May personal income tax"
+      }
+    ],
+    "rows": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "taxAmount": 50
+      },
+      {
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "taxAmount": 0
+      }
+    ]
+  }
+}

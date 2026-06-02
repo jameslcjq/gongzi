@@ -1,0 +1,65 @@
+{
+  "caseName": "performance-payroll-two-period-change",
+  "createdAt": "2026-06-01",
+  "privacy": "synthetic-only",
+  "firstPeriod": {
+    "year": 2026,
+    "month": 5,
+    "people": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "jobSalary": 3000,
+        "salaryLevel": 1200,
+        "postAllowance": 1100,
+        "livingAllowance": 300
+      },
+      {
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "jobSalary": 3200,
+        "salaryLevel": 1300,
+        "postAllowance": 1200,
+        "livingAllowance": 320
+      },
+      {
+        "name": "调出A001",
+        "idCard": "32000019880303003X",
+        "jobSalary": 2800,
+        "salaryLevel": 1100,
+        "postAllowance": 1000,
+        "livingAllowance": 280
+      }
+    ]
+  },
+  "secondPeriod": {
+    "year": 2026,
+    "month": 6,
+    "people": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "jobSalary": 3100,
+        "salaryLevel": 1200,
+        "postAllowance": 1100,
+        "livingAllowance": 300
+      },
+      {
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "jobSalary": 3200,
+        "salaryLevel": 1350,
+        "postAllowance": 1200,
+        "livingAllowance": 320
+      },
+      {
+        "name": "新进A001",
+        "idCard": "32000019990404004X",
+        "jobSalary": 2600,
+        "salaryLevel": 900,
+        "postAllowance": 900,
+        "livingAllowance": 260
+      }
+    ]
+  }
+}

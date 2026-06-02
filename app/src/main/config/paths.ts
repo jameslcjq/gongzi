@@ -4,6 +4,7 @@ import { dirname, join, normalize } from 'node:path'
 
 export const appDisplayName = '老九的工资系统'
 export const laojiuRoot = 'D:\\laojiu'
+// 业务数据与安装目录在开发版/正式版分开，避免调试时污染正式工资库。
 export const isDevelopmentDataMode = !app.isPackaged
 export const dataRoot = process.env.PAYROLL_DATA_ROOT ||
   join(laojiuRoot, isDevelopmentDataMode ? 'gzdata-dev' : 'gzdata')

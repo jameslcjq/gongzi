@@ -1,0 +1,43 @@
+{
+  "caseName": "performance-payroll-two-period-change",
+  "expected": {
+    "matchedCount": 2,
+    "changedCount": 2,
+    "firstMissingCount": 1,
+    "secondMissingCount": 1,
+    "changes": [
+      {
+        "name": "教师A001",
+        "idCard": "32000019900101001X",
+        "reason": "晋级/岗位工资变化",
+        "jobSalaryDelta": 100,
+        "salaryLevelDelta": 0
+      },
+      {
+        "name": "教师A002",
+        "idCard": "32000019920202002X",
+        "reason": "薪级变化",
+        "jobSalaryDelta": 0,
+        "salaryLevelDelta": 50
+      }
+    ],
+    "leftOnly": [
+      {
+        "name": "调出A001",
+        "idCard": "32000019880303003X"
+      }
+    ],
+    "rightOnly": [
+      {
+        "name": "新进A001",
+        "idCard": "32000019990404004X"
+      }
+    ]
+  },
+  "manualChecks": [
+    "教师A001 和 教师A002 应按证件号码匹配。",
+    "调出A001 只能出现在前一期间缺失列表。",
+    "新进A001 只能出现在后一期间新增列表。",
+    "变化备注应保持业务用语，不要改成纯技术描述。"
+  ]
+}

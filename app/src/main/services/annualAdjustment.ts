@@ -96,6 +96,7 @@ type SocialInsuranceBaseRow = {
 }
 
 const INSURANCE_RATE_FIELDS: Record<string, string> = {
+  // 社保明细文件用缴费比例表达项目，写回在职工资时必须转成一体化字段名。
   '8%': '养老保险缴费',
   '4%': '职业年金缴费',
   '2%': '医疗保险',

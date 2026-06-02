@@ -5,6 +5,7 @@ import { failRule, okRule } from '../ruleResult'
 import type {
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
+  MonthlyPayrollSourcePeriodInspection,
   MonthlyPayrollVoucherPageCounts,
   MonthlyPayrollWorkflowInput,
   RuleResult,
@@ -71,6 +72,7 @@ import type {
   IntegratedActiveAggregates,
   IntegratedSimpleAggregates,
   PersonalInsuranceTotals,
+  PayrollPeriodRange,
   RetiredHousingPerson,
   RetiredSummary,
   SalarySummary,
@@ -103,6 +105,7 @@ type MonthlyPayrollBusinessSummary = {
   retiredHousingActualPay: number
 }
 
+// 业务口径：有工资表 Excel 时走兼容模式，用它校准本地工资数据；没有工资表时以本地工资表为权威来源。
 function normalizeMonthlyPayrollInput(
   input?: MonthlyPayrollWorkflowInput
 ): MonthlyPayrollWorkflowInput {
@@ -121,6 +124,7 @@ function normalizeMonthlyPayrollInput(
 
 const workflowName = '月度工资报账预处理'
 const generateWorkflowName = '月度工资报账汇总生成'
+// 财政凭证附件要求：保险凭证固定 7 页；工资凭证页数另按工资表、遗补、退休房补动态统计。
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
 
@@ -141,12 +145,130 @@ function currentPayrollPeriod(): { year: number; month: number } {
 function assertCurrentPayrollPeriod(
   input: MonthlyPayrollWorkflowInput | undefined
 ): { year: number; month: number } {
+  // 工资报账只允许当月重新生成，历史月份只能查看归档，防止覆盖已报账结果。
   const target = resolvePayrollPeriod(input)
   const current = currentPayrollPeriod()
   if (target.year !== current.year || target.month !== current.month) {
     throw new Error(`工资报账只能处理当月业务，请切回${current.year}年${current.month}月。`)
   }
   return target
+}
+
+function previousPayrollPeriod(period: { year: number; month: number }): { year: number; month: number } {
+  return period.month > 1
+    ? { year: period.year, month: period.month - 1 }
+    : { year: period.year - 1, month: 12 }
+}
+
+function periodKey(period: { year: number; month: number }): string {
+  return `${period.year}-${String(period.month).padStart(2, '0')}`
+}
+
+function periodLabelFromKey(key: string): string {
+  const [year, month] = key.split('-')
+  return `${Number(year)}年${Number(month)}月`
+}
+
+function periodRangeCovers(range: PayrollPeriodRange, key: string): boolean {
+  const start = range.startMonth <= range.endMonth ? range.startMonth : range.endMonth
+  const end = range.startMonth <= range.endMonth ? range.endMonth : range.startMonth
+  return start <= key && key <= end
+}
+
+function periodRangeEqualsMonth(range: PayrollPeriodRange, key: string): boolean {
+  return range.startMonth === key && range.endMonth === key
+}
+
+function formatPeriodRange(range: PayrollPeriodRange): string {
+  const start = periodLabelFromKey(range.startMonth)
+  const end = periodLabelFromKey(range.endMonth)
+  return range.startMonth === range.endMonth ? start : `${start}至${end}`
+}
+
+function formatPeriodRanges(ranges: PayrollPeriodRange[]): string[] {
+  return ranges
+    .slice()
+    .sort((left, right) =>
+      left.startMonth.localeCompare(right.startMonth) || left.endMonth.localeCompare(right.endMonth)
+    )
+    .map(formatPeriodRange)
+}
+
+function buildSocialSecurityPeriodSummary(
+  targetDate: { year: number; month: number },
+  socialSecurity: SocialSecuritySummary
+): MonthlyPayrollSourcePeriodInspection['socialSecurity'] {
+  const targetKey = periodKey(targetDate)
+  const targetLabel = periodLabelFromKey(targetKey)
+  const extraPeriods = formatPeriodRanges(
+    socialSecurity.periods.filter((range) => !periodRangeCovers(range, targetKey))
+  )
+  return {
+    periods: formatPeriodRanges(socialSecurity.periods),
+    message: extraPeriods.length
+      ? `已检测到社保所属期：包含${targetLabel}，另含补缴/调整所属期 ${extraPeriods.join('、')}`
+      : `已检测到社保所属期：包含${targetLabel}`
+  }
+}
+
+function buildTaxPeriodSummary(
+  targetDate: { year: number; month: number },
+  tax: TaxSummary
+): MonthlyPayrollSourcePeriodInspection['tax'] {
+  const expectedKey = periodKey(previousPayrollPeriod(targetDate))
+  return {
+    periods: formatPeriodRanges(tax.periods),
+    message: `已检测到个税所属期：${formatPeriodRanges(tax.periods).join('、')}（本月应申报${periodLabelFromKey(expectedKey)}个税）`
+  }
+}
+
+function validateMonthlyPayrollSourcePeriods(
+  targetDate: { year: number; month: number },
+  socialSecurity: SocialSecuritySummary | undefined,
+  tax: TaxSummary | undefined
+): void {
+  const targetKey = periodKey(targetDate)
+  const targetLabel = periodLabelFromKey(targetKey)
+
+  if (socialSecurity) {
+    if (socialSecurity.periods.length === 0) {
+      throw new Error('社保文件未识别到“费款所属期起/止”，无法确认是否包含本月，请更换为含所属期列的社保未申报汇总。')
+    }
+    if (!socialSecurity.periods.some((range) => periodRangeCovers(range, targetKey))) {
+      throw new Error(`社保文件必须包含${targetLabel}。当前检测到：${formatPeriodRanges(socialSecurity.periods).join('、')}，请更换文件。`)
+    }
+  }
+
+  if (tax) {
+    const expectedKey = periodKey(previousPayrollPeriod(targetDate))
+    const expectedLabel = periodLabelFromKey(expectedKey)
+    if (tax.periods.length === 0) {
+      throw new Error('个税文件未识别到“税款所属期起/止”，无法确认是否为上月个税，请更换为含所属期列的个税计算表。')
+    }
+    if (!tax.periods.every((range) => periodRangeEqualsMonth(range, expectedKey))) {
+      throw new Error(`个税文件税款所属期应为${expectedLabel}（${targetLabel}申报上月个税）。当前检测到：${formatPeriodRanges(tax.periods).join('、')}，请更换文件。`)
+    }
+  }
+}
+
+export async function inspectMonthlyPayrollSourcePeriods(
+  input?: MonthlyPayrollWorkflowInput
+): Promise<MonthlyPayrollSourcePeriodInspection> {
+  input = normalizeMonthlyPayrollInput(input)
+  const targetDate = assertCurrentPayrollPeriod(input)
+  const [socialSecurity, tax] = await Promise.all([
+    input.socialSecurityWorkbookPath
+      ? parseSocialSecurityWorkbook(input.socialSecurityWorkbookPath)
+      : Promise.resolve<SocialSecuritySummary | undefined>(undefined),
+    input.taxWorkbookPath
+      ? parseTaxWorkbook(input.taxWorkbookPath)
+      : Promise.resolve<TaxSummary | undefined>(undefined)
+  ])
+  validateMonthlyPayrollSourcePeriods(targetDate, socialSecurity, tax)
+  return {
+    socialSecurity: socialSecurity ? buildSocialSecurityPeriodSummary(targetDate, socialSecurity) : undefined,
+    tax: tax ? buildTaxPeriodSummary(targetDate, tax) : undefined
+  }
 }
 
 function buildTaxByIdCardFromSummary(tax: TaxSummary | undefined): Record<string, number> {
@@ -164,6 +286,7 @@ function applyTaxToSalarySummary(
   taxByIdCard: Record<string, number>,
   options: { clearTaxWhenMissing?: boolean } = {}
 ): SalarySummary {
+  // 个税表是本月扣税来源；未提供个税表时可按业务口径把本月扣税清零重新算实发。
   if (Object.keys(taxByIdCard).length === 0 && !options.clearTaxWhenMissing) return salary
 
   let oldTaxTotal = 0
@@ -318,6 +441,7 @@ export async function preprocessMonthlyPayroll(
         ? parseTaxWorkbook(input.taxWorkbookPath)
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
+    validateMonthlyPayrollSourcePeriods(targetDate, socialSecurity, tax)
     const taxByIdCard = buildTaxByIdCardFromSummary(tax)
     const monthlyPayrollSettings = await readMonthlyPayrollSettings()
     const taxField = monthlyPayrollSettings.taxField
@@ -624,6 +748,7 @@ export async function generateMonthlyPayrollReports(
         ? parseTaxWorkbook(input.taxWorkbookPath)
         : Promise.resolve<TaxSummary | undefined>(undefined)
     ])
+    validateMonthlyPayrollSourcePeriods(targetDate, socialSecurity, tax)
     const salary = rawSalary
       ? applyTaxToSalarySummary(rawSalary, buildTaxByIdCardFromSummary(tax), { clearTaxWhenMissing: !tax })
       : undefined
@@ -720,6 +845,7 @@ export async function generateMonthlyPayrollReportView(
       ? parseTaxWorkbook(input.taxWorkbookPath)
       : Promise.resolve<TaxSummary | undefined>(undefined)
   ])
+  validateMonthlyPayrollSourcePeriods(targetDate, socialSecurity, tax)
   const monthlyPayrollSettings = await readMonthlyPayrollSettings()
   const taxField = monthlyPayrollSettings.taxField
   const dataSourceMode = normalizeMonthlyPayrollDataSourceMode(input.dataSourceMode)
@@ -1423,6 +1549,7 @@ async function buildVoucherPageCounts(
   input: MonthlyPayrollWorkflowInput,
   sheets: MonthlyPayrollReportSheet[]
 ): Promise<MonthlyPayrollVoucherPageCounts> {
+  // 报销凭证要打印附件页数：工资附件跟实际打印页数走，保险附件按固定规则走。
   const salaryPrintSummary = await getGeneratedSalaryPrintSummary(input)
   const salaryWorkbookPages =
     salaryPrintSummary?.items.find((item) => item.label === '工资表')?.pages ?? 0

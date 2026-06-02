@@ -17,6 +17,7 @@ import type {
   MonthlyPayrollPrintSettings,
   MonthlyPayrollRun,
   MonthlyPayrollSalaryPrintPageSummary,
+  MonthlyPayrollSourcePeriodInspection,
   MonthlyPayrollSourceKind,
   MonthlyPayrollSourceVersion,
   MonthlyPayrollWriteBackPreview,
@@ -63,6 +64,7 @@ const payrollSettingsSaving = ref(false)
 const printing = ref(false)
 const voucherPrintTotalPages = ref<number | null>(null)
 const voucherPrintTotalPagesLoading = ref(false)
+// 与后端凭证规则一致：保险固定 7 页，报销凭证里的“附件页数”在导出表第 15 列。
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 const VOUCHER_ATTACHMENT_PAGES_INDEX = 14
 
@@ -166,6 +168,7 @@ async function pushInsuranceToIntegrated(row: MonthlyPayrollRun): Promise<void> 
   pushingInsuranceRunId.value = row.id
   try {
     const label = `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
+    // 保险和凭证共用一次跳转：先把任务排进队列，再交给一体化页面按顺序执行。
     const steps: PushStep[] = []
     const stepHints: string[] = []
 
@@ -594,12 +597,24 @@ const fileRows = computed(() => [
 ])
 
 async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
+  // 预处理前把“本次按什么来源、处理哪些文件”说清楚，避免用户误把阶段结果当最终结果。
   const hasSalary = Boolean(salarySourcePath.value)
   const hasSocial = Boolean(socialSourcePath.value)
   const hasTax = Boolean(taxSourcePath.value)
   const includesSalary = true
   const includesSocial = hasSocial
   const includesTax = hasTax
+  let periodInspection: MonthlyPayrollSourcePeriodInspection | null = null
+  if (hasSocial || hasTax) {
+    const payload = currentPayload()
+    if (!payload) return false
+    try {
+      periodInspection = await window.salaryApi.inspectMonthlyPayrollSourcePeriods(payload)
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '社保或个税所属期校验失败')
+      return false
+    }
+  }
   const scope = [
     includesSalary ? '工资' : '',
     includesSocial ? '社保' : '',
@@ -618,12 +633,14 @@ async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
     },
     {
       item: '社保',
-      detected: hasSocial ? '已检测到社保未申报汇总' : '未检测到社保文件',
+      detected: hasSocial
+        ? periodInspection?.socialSecurity?.message ?? '已检测到社保未申报汇总'
+        : '未检测到社保文件',
       action: includesSocial ? '生成社保报账' : '先生成工资阶段结果；社保补齐后需重新生成，暂不可月结'
     },
     {
       item: '个税',
-      detected: hasTax ? '已检测到个税文件' : '未检测到个税文件',
+      detected: hasTax ? periodInspection?.tax?.message ?? '已检测到个税文件' : '未检测到个税文件',
       action: includesTax ? '生成个税扣款' : '本次不报个税'
     }
   ]
@@ -675,6 +692,7 @@ function currentPayload(options: { confirmWriteBack?: boolean } = {}): WorkflowR
 async function confirmMonthlyPayrollWriteBack(
   preview: MonthlyPayrollWriteBackPreview
 ): Promise<boolean> {
+  // 工资表金额写回会改变本地工资数据，必须由用户确认后再复核生成。
   const examples = preview.examples.length
     ? `\n\n示例：\n${preview.examples.map((item) => `- ${item}`).join('\n')}`
     : ''
