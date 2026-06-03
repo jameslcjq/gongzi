@@ -117,7 +117,7 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     if (waitText && textExistsIn(root, waitText)) return true
     var clicked = clickTextInWin(root, text)
     if (!clicked) return false
-    var deadline = Date.now() + (timeoutMs || 8000)
+    var deadline = Date.now() + (timeoutMs || 60000)
     while (Date.now() < deadline) {
       if (!waitText || textExistsIn(root, waitText)) return true
       await sleep(500)
@@ -183,16 +183,20 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     if (!pageReady(root)) {
       status('🧭 自动导航：集中支付 → 支付管理 → 直接支付外部数据 ...')
       // 已在某个一体化页面，未必有左侧菜单 —— 先尝试点。失败提示用户。
-      if (!textExistsIn(root, '集中支付')) {
-        throw new Error('当前页面找不到"集中支付"菜单。请确认已登录一体化系统，且在能看到左侧菜单树的页面（如首页/工资模块）')
+      if (!textExistsIn(root, '集中支付') && textExistsIn(root, '预算执行')) {
+        status('🧭 自动打开预算执行模块 ...')
+        await clickAndWait(root, '预算执行', '集中支付', 60000)
       }
-      await clickAndWait(root, '集中支付', '支付管理', 8000)
+      if (!textExistsIn(root, '集中支付')) {
+        throw new Error('当前页面找不到"集中支付"菜单。请确认已登录一体化系统，并先打开"预算执行"模块')
+      }
+      await clickAndWait(root, '集中支付', '支付管理', 60000)
       await sleep(400)
-      await clickAndWait(root, '支付管理', '直接支付外部数据', 8000)
+      await clickAndWait(root, '支付管理', '直接支付外部数据', 60000)
       await sleep(400)
       clickTextInWin(root, '直接支付外部数据')
-      // 等 templateslist iframe 加载（包括跨域 iframe 的 src 属性扫描），最多 30 秒
-      var deadline = Date.now() + 30000
+      // 等 templateslist iframe 加载（包括跨域 iframe 的 src 属性扫描），最多 60 秒
+      var deadline = Date.now() + 60000
       while (Date.now() < deadline) {
         if (pageReady(root)) break
         await sleep(500)

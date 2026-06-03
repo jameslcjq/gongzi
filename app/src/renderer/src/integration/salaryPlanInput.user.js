@@ -19,6 +19,7 @@
   const STATUS_ID = 'salary-plan-input-status'
   const DRAFT_KEY = '__salary_plan_input_draft_v1__'
   const DEFAULT_SUMMARY = '2026年第三季度人员经费'
+  const DEFAULT_PREFILL = window.__SALARY_PLAN_INPUT_PREFILL || { ok: false, rows: [] }
 
   const ITEMS = [
     {
@@ -301,6 +302,17 @@
     })
   }
 
+  function findButtonHost(text) {
+    const btn = findActionButton(text)
+    return btn && btn.closest ? btn.closest('a,button') || btn : btn
+  }
+
+  function findInsertAfterHost() {
+    const more = document.querySelector('.btn-more-content') || findButtonHost('更多')
+    if (more) return more
+    return findButtonHost('批量录入')
+  }
+
   function injectListButton() {
     if (!SHOW_PAGE_BUTTON) {
       const existing = document.getElementById(BTN_ID)
@@ -308,7 +320,15 @@
       return
     }
     if (!hasListGrid()) return
-    if (document.getElementById(BTN_ID)) return
+
+    const insertAfter = findInsertAfterHost()
+    const existing = document.getElementById(BTN_ID)
+    if (existing) {
+      if (insertAfter && insertAfter.parentNode) {
+        insertAfter.parentNode.insertBefore(existing, insertAfter.nextSibling)
+      }
+      return
+    }
 
     const btn = document.createElement('a')
     btn.id = BTN_ID
@@ -328,12 +348,10 @@
       'text-decoration:none',
       'vertical-align:middle'
     ].join(';')
-    btn.addEventListener('click', openModal)
+    btn.addEventListener('click', () => openModal(DEFAULT_PREFILL))
 
-    const batchBtn = findActionButton('批量录入')
-    const anchor = batchBtn && batchBtn.closest ? batchBtn.closest('a') : batchBtn
-    if (anchor && anchor.parentNode) {
-      anchor.parentNode.insertBefore(btn, anchor.nextSibling)
+    if (insertAfter && insertAfter.parentNode) {
+      insertAfter.parentNode.insertBefore(btn, insertAfter.nextSibling)
     } else {
       document.body.appendChild(btn)
     }
@@ -845,7 +863,7 @@
     if (!hasListGrid()) {
       return { ok: false, message: '当前页面不是一般用款计划录入列表页' }
     }
-    openModal(prefill)
+    openModal(prefill || DEFAULT_PREFILL)
     return { ok: true, message: 'opened' }
   }
 

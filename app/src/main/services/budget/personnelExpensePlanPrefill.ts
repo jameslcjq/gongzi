@@ -49,7 +49,8 @@ type HeaderDetection = {
 }
 
 export async function readPersonnelExpensePlanPrefill(
-  folderPath: string
+  folderPath: string,
+  options: { archive?: boolean } = {}
 ): Promise<PersonnelExpensePlanPrefillResult> {
   const files = listRootExcelFiles(folderPath)
   const candidates = files
@@ -71,15 +72,18 @@ export async function readPersonnelExpensePlanPrefill(
 
   try {
     const rows = readRows(picked.filePath, picked.detection)
-    const archivedPath = archivePersonnelExpensePlanWorkbook(folderPath, picked.filePath)
+    const shouldArchive = options.archive ?? true
+    const archivedPath = shouldArchive
+      ? archivePersonnelExpensePlanWorkbook(folderPath, picked.filePath)
+      : undefined
     return {
       ok: true,
       filePath: archivedPath || picked.filePath,
       fileName: basename(picked.filePath),
       rows,
       message: rows.length
-        ? `读取 ${rows.length} 个单位，源文件已归档`
-        : '人员经费核对表中没有读到单位数据，源文件已归档'
+        ? `读取 ${rows.length} 个单位${shouldArchive ? '，源文件已归档' : ''}`
+        : `人员经费核对表中没有读到单位数据${shouldArchive ? '，源文件已归档' : ''}`
     }
   } catch (error) {
     return {

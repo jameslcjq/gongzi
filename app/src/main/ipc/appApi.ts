@@ -290,9 +290,12 @@ export function registerAppIpc(): void {
 
   ipcMain.handle(
     'personnel-expense-plan:prefill',
-    async (): Promise<PersonnelExpensePlanPrefillResult> => {
+    async (
+      _event,
+      options?: { archive?: boolean }
+    ): Promise<PersonnelExpensePlanPrefillResult> => {
       const status = await getImportWatcherStatus()
-      return readPersonnelExpensePlanPrefill(status.folderPath)
+      return readPersonnelExpensePlanPrefill(status.folderPath, options)
     }
   )
 

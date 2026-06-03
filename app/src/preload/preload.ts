@@ -125,8 +125,8 @@ const salaryApi = {
     ipcRenderer.invoke('import-watcher:open-folder'),
   clearImportWatcherLogs: (): Promise<ImportWatcherStatus> =>
     ipcRenderer.invoke('import-watcher:clear-logs'),
-  getPersonnelExpensePlanPrefill: (): Promise<PersonnelExpensePlanPrefillResult> =>
-    ipcRenderer.invoke('personnel-expense-plan:prefill'),
+  getPersonnelExpensePlanPrefill: (options?: { archive?: boolean }): Promise<PersonnelExpensePlanPrefillResult> =>
+    ipcRenderer.invoke('personnel-expense-plan:prefill', options),
   getSalaryQuotaMatchLocalSummary: (): Promise<SalaryQuotaMatchLocalSummary> =>
     ipcRenderer.invoke('salary-quota-match:local-summary'),
   readLocalFileBase64: (filePath: string): Promise<LocalFileBase64> =>

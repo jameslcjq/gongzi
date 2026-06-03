@@ -1121,7 +1121,7 @@ export function buildSalaryQuotaMatchScript(
       btn.className = 'easyui-linkbutton action-btn btn_level_2 l-btn l-btn-small l-btn-plain'
       btn.style.cssText = [
         'display:inline-block',
-        'margin-left:6px',
+        'margin-right:6px',
         'padding:0 10px',
         'height:28px',
         'line-height:28px',
@@ -1139,7 +1139,7 @@ export function buildSalaryQuotaMatchScript(
         start()
       }
       var host = anchor.closest ? (anchor.closest('a') || anchor) : anchor
-      if (host && host.parentNode) host.parentNode.insertBefore(btn, host.nextSibling)
+      if (host && host.parentNode) host.parentNode.insertBefore(btn, host)
       else doc.body.appendChild(btn)
     }
   }
@@ -1156,32 +1156,6 @@ export function buildSalaryQuotaMatchScript(
 
   if (AUTO_START) return start()
   return { ok: true, message: 'installed' }
-})()
-`
-}
-
-export function buildStartSalaryQuotaMatchScript(): string {
-  return `
-;(function startSalaryQuotaMatchFromToolbar() {
-  function findController(win) {
-    try {
-      if (win.__salaryQuotaMatch && typeof win.__salaryQuotaMatch.start === 'function') return win
-    } catch (error) {}
-    try {
-      for (var i = 0; i < win.frames.length; i++) {
-        var found = findController(win.frames[i])
-        if (found) return found
-      }
-    } catch (error) {}
-    return null
-  }
-
-  var root = window.top || window
-  var target = findController(root) || findController(window)
-  if (!target || !target.__salaryQuotaMatch) {
-    return { ok: false, code: 'not-installed', message: '额度匹配脚本尚未注入' }
-  }
-  return target.__salaryQuotaMatch.start()
 })()
 `
 }

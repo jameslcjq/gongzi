@@ -114,7 +114,7 @@ export function buildPushVoucherScript(
     if (waitText && textExistsIn(root, waitText)) return true
     var clicked = clickTextInWin(root, text)
     if (!clicked) return false
-    var deadline = Date.now() + (timeoutMs || 8000)
+    var deadline = Date.now() + (timeoutMs || 60000)
     while (Date.now() < deadline) {
       if (!waitText || textExistsIn(root, waitText)) return true
       await sleep(500)
@@ -159,15 +159,18 @@ export function buildPushVoucherScript(
 
     // 如果不在 gld-web 页面，尝试点菜单 凭证管理 → 凭证录入
     if (!isOnVoucherPage(root)) {
-      status('🧭 自动导航：凭证管理 → 凭证录入 ...')
-      if (!textExistsIn(root, '凭证管理')) {
-        throw new Error('当前页面找不到"凭证管理"菜单。请先登录一体化并停在能看到左侧菜单的页面')
+      status('🧭 自动导航：中科单位核算 → 凭证管理 → 凭证录入 ...')
+      if (!textExistsIn(root, '凭证管理') && textExistsIn(root, '中科单位核算')) {
+        await clickAndWait(root, '中科单位核算', '凭证管理', 60000)
       }
-      await clickAndWait(root, '凭证管理', '凭证录入', 8000)
+      if (!textExistsIn(root, '凭证管理')) {
+        throw new Error('当前页面找不到"凭证管理"菜单。请确认已登录一体化系统，并先打开"中科单位核算"模块')
+      }
+      await clickAndWait(root, '凭证管理', '凭证录入', 60000)
       await sleep(400)
       clickTextInWin(root, '凭证录入')
       // 等 gld-web frame 出现
-      var deadline = Date.now() + 30000
+      var deadline = Date.now() + 60000
       while (Date.now() < deadline) {
         if (isOnVoucherPage(root)) break
         await sleep(500)

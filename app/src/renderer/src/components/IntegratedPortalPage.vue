@@ -5,7 +5,6 @@ import {
   Close,
   Download,
   Link,
-  Money,
   Plus,
   Refresh
 } from '@element-plus/icons-vue'
@@ -14,18 +13,9 @@ import {
   buildSalaryExportScript,
   buildSalaryExportFeedbackScript
 } from '../integration/salaryExportScript'
-import {
-  buildOpenSalaryPlanInputScript,
-  buildSalaryPlanInputScript
-} from '../integration/salaryPlanInputScript'
-import {
-  buildAutoVoucherEntryScript,
-  buildStartAutoVoucherEntryScript
-} from '../integration/autoVoucherEntryScript'
-import {
-  buildSalaryQuotaMatchScript,
-  buildStartSalaryQuotaMatchScript
-} from '../integration/salaryQuotaMatchScript'
+import { buildSalaryPlanInputScript } from '../integration/salaryPlanInputScript'
+import { buildAutoVoucherEntryScript } from '../integration/autoVoucherEntryScript'
+import { buildSalaryQuotaMatchScript } from '../integration/salaryQuotaMatchScript'
 import { buildSalarySystemImportScript } from '../integration/salarySystemImportScript'
 // 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 预览确认后入库
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
@@ -36,11 +26,14 @@ import {
   type IntegrationPushPreflightResult,
   type IntegrationPushPreflightUnit
 } from '../integration/integrationPushPreflightScript'
+import {
+  buildOpenIntegrationModuleScript,
+  type IntegrationModuleNavigationResult,
+  type IntegrationModuleTarget
+} from '../integration/integrationModuleNavigationScript'
 import type { BudgetImportResult, MonthlyPayrollPushStatus } from '@shared/types'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
-const salaryGiveOutUrl =
-  'http://172.24.147.202/salary-pro-web/grp/salaryNanJ/html/audit/salaryGiveOut/salSalaryAuditSCZF.html?menuid=c2745ee50aba4be1a31742d37274990d&moduleid=c2745ee50aba4be1a31742d37274990d&myMenuid=2020120628499'
 
 type SalaryExportFile = {
   filename: string
@@ -60,11 +53,6 @@ type SalaryExportScriptResult =
       failed: SalaryExportFail[]
     }
   | { ok: false; error: string }
-
-type SalaryPlanInputOpenResult = {
-  ok: boolean
-  message?: string
-}
 
 type PortalWebview = HTMLElement & {
   executeJavaScript: (code: string) => Promise<unknown>
@@ -109,7 +97,6 @@ const tabs = ref<Tab[]>([
 ])
 const activeTabId = ref<string>(tabs.value[0].id)
 const salaryExporting = ref(false)
-const autoVoucherEntryRunning = ref(false)
 // 预算 xls 改成被动模式：不再有 toolbar 按钮、不模拟点击、不自动跳转。
 // 用户在内网手动点系统的导出按钮 → main 进程 will-download 按文件名 "人员信息"
 // 判定为预算文件 → 落入 预算导出/ 子目录 → 立即调 budgetExcelImport 入库。
@@ -259,6 +246,24 @@ async function markPushStatus(step: PushStep, status: MonthlyPayrollPushStatus):
   }
 }
 
+function moduleTargetForStep(step: PushStep): IntegrationModuleTarget | null {
+  if (step.kind === 'voucher') return 'accounting'
+  if (step.kind === 'insurance' || step.kind === 'salary-system-import') return 'budget'
+  return null
+}
+
+async function ensureModuleForStep(wv: PortalWebview, step: PushStep): Promise<void> {
+  const target = moduleTargetForStep(step)
+  if (!target) return
+  const result = (await wv.executeJavaScript(
+    buildOpenIntegrationModuleScript(target)
+  )) as IntegrationModuleNavigationResult | undefined
+  if (!result?.ok) {
+    throw new Error(result?.message || '未能打开一体化目标模块')
+  }
+  if (result.changed) ElMessage.info(result.message)
+}
+
 function collectInsuranceUnits(steps: PushStep[]): IntegrationPushPreflightUnit[] {
   const map = new Map<string, IntegrationPushPreflightUnit>()
   for (const step of steps) {
@@ -343,6 +348,18 @@ async function processPushQueue(): Promise<void> {
       return
     }
     const queuedSteps = pendingPushQueue.value.slice()
+    try {
+      if (queuedSteps[0]) await ensureModuleForStep(wv, queuedSteps[0])
+    } catch (error) {
+      await markStepsStatus(queuedSteps, 'failed')
+      pendingPushQueue.value = []
+      await ElMessageBox.alert(
+        error instanceof Error ? error.message : String(error),
+        '打开一体化模块失败',
+        { type: 'error', confirmButtonText: '知道了' }
+      )
+      return
+    }
     if (!(await runPushPreflight(wv, queuedSteps))) {
       await markStepsStatus(queuedSteps, 'failed')
       pendingPushQueue.value = []
@@ -352,6 +369,7 @@ async function processPushQueue(): Promise<void> {
       const step = pendingPushQueue.value.shift() as PushStep
       try {
         await markPushStatus(step, 'queued')
+        await ensureModuleForStep(wv, step)
         await runOneStep(wv, step)
         await markPushStatus(step, 'success')
       } catch (error) {
@@ -566,112 +584,6 @@ async function openExternal(): Promise<void> {
   }
 }
 
-async function openSalaryPlanInput(): Promise<void> {
-  const wv = activeWebview()
-  if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
-    return
-  }
-
-  await installPortalAutomationScripts(activeTabId.value)
-
-  let prefill
-  try {
-    prefill = await window.salaryApi.getPersonnelExpensePlanPrefill()
-  } catch (error) {
-    console.warn('读取人员经费核对表失败', error)
-    prefill = {
-      ok: false,
-      rows: [],
-      message: error instanceof Error ? error.message : String(error)
-    }
-  }
-
-  try {
-    const result = (await wv.executeJavaScript(
-      buildOpenSalaryPlanInputScript(prefill)
-    )) as SalaryPlanInputOpenResult
-    if (!result?.ok) {
-      ElMessage.warning(result?.message || '请先进入“一般用款计划录入”的待录入列表页')
-    }
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '人员经费录入弹窗打开失败')
-  }
-}
-
-async function startAutoVoucherEntry(): Promise<void> {
-  const wv = activeWebview()
-  if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
-    return
-  }
-  if (autoVoucherEntryRunning.value) return
-  autoVoucherEntryRunning.value = true
-
-  try {
-    await installPortalAutomationScripts(activeTabId.value)
-    const result = (await wv.executeJavaScript(buildStartAutoVoucherEntryScript())) as
-      | { ok: true; savedCount?: number; skippedCount?: number }
-      | { ok: false; message?: string; savedCount?: number; skippedCount?: number }
-      | undefined
-
-    if (result?.ok) {
-      ElMessage.success(
-        `自动录入完成：保存 ${result.savedCount || 0} 次，跳过 ${result.skippedCount || 0} 条`
-      )
-    } else {
-      ElMessage.warning(result?.message || '请先进入“直接支付外部数据”的列表页')
-    }
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '自动录入脚本执行失败')
-  } finally {
-    autoVoucherEntryRunning.value = false
-  }
-}
-
-async function startSalaryQuotaMatch(): Promise<void> {
-  const wv = activeWebview()
-  if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
-    return
-  }
-
-  await installPortalAutomationScripts(activeTabId.value)
-
-  try {
-    const localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
-    const quotaScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
-    try {
-      const webContentsId = wv.getWebContentsId()
-      await window.salaryApi.execInAllPortalFrames(webContentsId, quotaScript)
-    } catch (error) {
-      console.warn('额度匹配本地汇总跨 frame 更新失败，回退到顶层注入', error)
-    }
-    await wv.executeJavaScript(quotaScript)
-
-    const result = (await wv.executeJavaScript(buildStartSalaryQuotaMatchScript())) as {
-      ok?: boolean
-      code?: string
-      message?: string
-      matchedCount?: number
-    }
-    if (result?.ok) {
-      ElMessage.success(`额度匹配完成${result.matchedCount ? `：${result.matchedCount} 项` : ''}`)
-      return
-    }
-
-    if (result?.code === 'not-page') {
-      openNewTab(salaryGiveOutUrl)
-      ElMessage.info('已打开工资发放页面；页面加载后选中工资批次，再点“额度匹配”')
-      return
-    }
-
-    ElMessage.warning(result?.message || '请先进入“工资发放/生成支付”的额度匹配页面')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '额度匹配脚本执行失败')
-  }
-}
-
 type SalarySystemImportResult =
   | { ok: true; response?: unknown; agency?: { agency_name?: string }; batchId?: string }
   | { ok: false; message?: string }
@@ -683,11 +595,27 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
   const wv = webviewMap.get(tabId)
   if (!wv) return
 
+  let salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false })
+  try {
+    const localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
+    salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
+  } catch (error) {
+    console.warn('额度匹配本地汇总读取失败，使用默认脚本配置', error)
+  }
+
+  let salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true })
+  try {
+    const prefill = await window.salaryApi.getPersonnelExpensePlanPrefill({ archive: false })
+    salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true, prefill })
+  } catch (error) {
+    console.warn('人员经费核对表读取失败，使用空预填配置', error)
+  }
+
   const scripts = [
     { name: '凭证按钮', code: buildVoucherMergeScript({ autoStart: false }) },
     { name: '自动录入', code: buildAutoVoucherEntryScript({ autoStart: false }) },
-    { name: '额度匹配', code: buildSalaryQuotaMatchScript({ autoStart: false }) },
-    { name: '人员经费录入', code: buildSalaryPlanInputScript({ showPageButton: false }) }
+    { name: '额度匹配', code: salaryQuotaMatchScript },
+    { name: '人员经费录入', code: salaryPlanInputScript }
   ]
 
   let webContentsId: number
@@ -852,16 +780,6 @@ void nextTick(() => {
       <span class="portal-url" :title="activeTab?.url">{{ activeTab?.url }}</span>
       <div class="portal-actions">
         <el-button :icon="Refresh" @click="reload">刷新</el-button>
-        <el-button :icon="Money" type="warning" @click="startSalaryQuotaMatch">
-          额度匹配
-        </el-button>
-        <el-button type="primary" @click="openSalaryPlanInput">人员经费录入</el-button>
-        <el-button
-          type="success"
-          :loading="autoVoucherEntryRunning"
-          @click="startAutoVoucherEntry"
-          >自动录入</el-button
-        >
         <el-button
           :icon="Download"
           :loading="salaryExporting"

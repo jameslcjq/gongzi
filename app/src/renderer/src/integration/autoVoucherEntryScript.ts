@@ -852,38 +852,3 @@ export function buildAutoVoucherEntryScript(
 })()
 `
 }
-
-export function buildStartAutoVoucherEntryScript(): string {
-  return `
-;(function startAutoVoucherEntryFromToolbar() {
-  function findController(win) {
-    try {
-      if (
-        win.__autoVoucherEntry &&
-        typeof win.__autoVoucherEntry.canRun === 'function' &&
-        win.__autoVoucherEntry.canRun()
-      ) {
-        return win
-      }
-    } catch (error) {}
-    try {
-      for (var i = 0; i < win.frames.length; i++) {
-        var found = findController(win.frames[i])
-        if (found) return found
-      }
-    } catch (error) {}
-    return null
-  }
-
-  var root = window.top || window
-  var target = findController(root) || findController(window)
-  if (!target || !target.__autoVoucherEntry) {
-    return {
-      ok: false,
-      message: '请先进入“直接支付外部数据”的列表页，再点击自动录入。'
-    }
-  }
-  return target.__autoVoucherEntry.startBatchProcess(0)
-})()
-`
-}
