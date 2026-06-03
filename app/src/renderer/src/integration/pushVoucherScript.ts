@@ -123,9 +123,14 @@ export function buildPushVoucherScript(
   }
 
   async function clickAnyAndWait(root, texts, waitText, timeoutMs) {
-    for (var i = 0; i < texts.length; i++) {
-      if (!textExistsIn(root, texts[i])) continue
-      if (await clickAndWait(root, texts[i], waitText, timeoutMs)) return texts[i]
+    var deadline = Date.now() + (timeoutMs || 60000)
+    while (Date.now() < deadline) {
+      if (waitText && textExistsIn(root, waitText)) return waitText
+      for (var i = 0; i < texts.length; i++) {
+        if (!textExistsIn(root, texts[i])) continue
+        if (await clickAndWait(root, texts[i], waitText, timeoutMs)) return texts[i]
+      }
+      await sleep(500)
     }
     return ''
   }

@@ -260,7 +260,6 @@ async function ensureModuleForStep(wv: PortalWebview, step: PushStep): Promise<v
   )) as IntegrationModuleNavigationResult | undefined
   if (!result?.ok) {
     console.warn('一体化模块切换未完成，继续交由页面脚本自动导航', result?.message)
-    if (result?.message) ElMessage.warning(result.message)
     return
   }
   if (result.changed) ElMessage.info(result.message)

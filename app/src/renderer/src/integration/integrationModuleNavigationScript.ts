@@ -68,6 +68,17 @@ export function buildOpenIntegrationModuleScript(target: IntegrationModuleTarget
     return ''
   }
 
+  async function waitForEntryOrReady(root, timeoutMs) {
+    var deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (anyReadyTextExists(root)) return { ready: true, entryText: '' }
+      var entryText = findEntryText(root)
+      if (entryText) return { ready: false, entryText: entryText }
+      await sleep(500)
+    }
+    return { ready: false, entryText: '' }
+  }
+
   function clickableTarget(el) {
     try {
       return el.closest('a,button,li,[role="button"],.menu-item,.app-item,.module-item,.portal-menu-item') || el
@@ -132,7 +143,16 @@ export function buildOpenIntegrationModuleScript(target: IntegrationModuleTarget
       }
     }
 
-    var entryText = findEntryText(root)
+    var entryState = await waitForEntryOrReady(root, 60000)
+    if (entryState.ready) {
+      return {
+        ok: true,
+        target: TARGET,
+        message: '已在' + MODULE.name + '模块'
+      }
+    }
+
+    var entryText = entryState.entryText
     if (!entryText) {
       return {
         ok: false,
