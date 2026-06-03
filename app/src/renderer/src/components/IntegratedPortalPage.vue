@@ -647,6 +647,21 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
     salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
   } catch (error) {
     console.warn('额度匹配本地汇总读取失败，使用默认脚本配置', error)
+    salaryQuotaMatchScript = buildSalaryQuotaMatchScript({
+      autoStart: false,
+      localSummary: {
+        ok: false,
+        activeOtherOneTotal: 0,
+        activeBasicPerformanceTotal: 0,
+        activeHousingTotal: 0,
+        activeAllowanceTotal: 0,
+        retiredHousingTotal: 0,
+        retiredBackpayTotal: 0,
+        retiredActualPayTotal: 0,
+        otherActualPayTotal: 0,
+        message: error instanceof Error ? error.message : String(error)
+      }
+    })
   }
 
   let salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true })

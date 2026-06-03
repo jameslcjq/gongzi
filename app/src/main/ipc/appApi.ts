@@ -202,6 +202,7 @@ const LICENSE_FREE_CHANNELS = new Set([
   'import-watcher:clear-logs',
   'integration:save-recording',
   'portal-recorder:save',
+  'salary-quota-match:local-summary',
   'unit-settings:get',
   'unit-settings:lock-state',
   'unit-settings:set',

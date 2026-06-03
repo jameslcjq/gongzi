@@ -20,7 +20,8 @@ export function buildSalaryQuotaMatchScript(
     retiredHousingTotal: 0,
     retiredBackpayTotal: 0,
     retiredActualPayTotal: 0,
-    otherActualPayTotal: 0
+    otherActualPayTotal: 0,
+    message: '宿主程序未传入本地工资汇总'
   }
 
   return `
