@@ -259,7 +259,9 @@ async function ensureModuleForStep(wv: PortalWebview, step: PushStep): Promise<v
     buildOpenIntegrationModuleScript(target)
   )) as IntegrationModuleNavigationResult | undefined
   if (!result?.ok) {
-    throw new Error(result?.message || '未能打开一体化目标模块')
+    console.warn('一体化模块切换未完成，继续交由页面脚本自动导航', result?.message)
+    if (result?.message) ElMessage.warning(result.message)
+    return
   }
   if (result.changed) ElMessage.info(result.message)
 }
@@ -348,18 +350,7 @@ async function processPushQueue(): Promise<void> {
       return
     }
     const queuedSteps = pendingPushQueue.value.slice()
-    try {
-      if (queuedSteps[0]) await ensureModuleForStep(wv, queuedSteps[0])
-    } catch (error) {
-      await markStepsStatus(queuedSteps, 'failed')
-      pendingPushQueue.value = []
-      await ElMessageBox.alert(
-        error instanceof Error ? error.message : String(error),
-        '打开一体化模块失败',
-        { type: 'error', confirmButtonText: '知道了' }
-      )
-      return
-    }
+    if (queuedSteps[0]) await ensureModuleForStep(wv, queuedSteps[0])
     if (!(await runPushPreflight(wv, queuedSteps))) {
       await markStepsStatus(queuedSteps, 'failed')
       pendingPushQueue.value = []

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         人员经费用款计划录入 (油猴测试版)
 // @namespace    https://www.hujiuxi.top/
-// @version      0.2
+// @version      0.3
 // @description  在一体化“一般用款计划录入”页面注入人员经费录入按钮，校验可用余额后自动勾选、批量录入、填写金额和摘要。
 // @author       老九
 // @match        http://172.24.147.202/*
@@ -12,7 +12,7 @@
 (function () {
   'use strict'
 
-  const VERSION = '0.2'
+  const VERSION = '0.3'
   const SHOW_PAGE_BUTTON = window.__SALARY_PLAN_INPUT_SHOW_PAGE_BUTTON !== false
   const BTN_ID = 'salary-plan-input-btn'
   const MODAL_ID = 'salary-plan-input-modal'
@@ -244,11 +244,24 @@
   }
 
   function hasListGrid() {
-    if (!document.getElementById('grid')) return false
     if (document.getElementById('batchInputGrid')) return false
+    const hasGridShell =
+      !!document.getElementById('grid') ||
+      !!document.querySelector('#grid ~ .datagrid, .datagrid-view2 tr.datagrid-row')
+    if (!hasGridShell) return false
     const rows = getGridRows('grid')
-    if (!rows.length) return false
-    return rows.some(({ row }) => 'cur_amt' in row && 'dep_bgt_eco_code_name' in row)
+    if (rows.some(({ row }) => 'cur_amt' in row && 'dep_bgt_eco_code_name' in row)) return true
+
+    const pageText = normalizeText(document.body ? document.body.innerText || document.body.textContent || '' : '')
+    const hasListAction =
+      pageText.includes('批量录入') ||
+      pageText.includes('更多') ||
+      !!document.querySelector('.btn-more-content')
+    const hasPlanText =
+      pageText.includes('一般用款计划录入') ||
+      (pageText.includes('用款计划') && pageText.includes('集中支付')) ||
+      (pageText.includes('可用金额') && pageText.includes('部门预算经济分类'))
+    return hasListAction && hasPlanText
   }
 
   function hasBatchGrid() {
@@ -308,7 +321,8 @@
   }
 
   function findInsertAfterHost() {
-    const more = document.querySelector('.btn-more-content') || findButtonHost('更多')
+    const moreContent = document.querySelector('.btn-more-content')
+    const more = moreContent && moreContent.closest ? moreContent.closest('a,button') || moreContent : findButtonHost('更多')
     if (more) return more
     return findButtonHost('批量录入')
   }

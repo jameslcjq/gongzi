@@ -9,16 +9,16 @@ export type IntegrationModuleNavigationResult = {
 
 const MODULES: Record<
   IntegrationModuleTarget,
-  { name: string; entryText: string; readyTexts: string[] }
+  { name: string; entryTexts: string[]; readyTexts: string[] }
 > = {
   budget: {
     name: '预算执行',
-    entryText: '预算执行',
+    entryTexts: ['预算执行'],
     readyTexts: ['集中支付', '一般用款计划录入', '直接支付外部数据']
   },
   accounting: {
     name: '中科单位核算',
-    entryText: '中科单位核算',
+    entryTexts: ['中科单位核算', '单位核算', '会计核算'],
     readyTexts: ['凭证管理', '凭证录入']
   }
 }
@@ -59,6 +59,13 @@ export function buildOpenIntegrationModuleScript(target: IntegrationModuleTarget
       if (textExistsIn(root, MODULE.readyTexts[i])) return true
     }
     return false
+  }
+
+  function findEntryText(root) {
+    for (var i = 0; i < MODULE.entryTexts.length; i++) {
+      if (textExistsIn(root, MODULE.entryTexts[i])) return MODULE.entryTexts[i]
+    }
+    return ''
   }
 
   function clickableTarget(el) {
@@ -125,19 +132,20 @@ export function buildOpenIntegrationModuleScript(target: IntegrationModuleTarget
       }
     }
 
-    if (!textExistsIn(root, MODULE.entryText)) {
+    var entryText = findEntryText(root)
+    if (!entryText) {
       return {
         ok: false,
         target: TARGET,
-        message: '当前页面找不到“' + MODULE.entryText + '”入口。请确认已登录一体化，并停在能看到模块入口的页面。'
+        message: '当前页面找不到“' + MODULE.entryTexts.join(' / ') + '”入口。请确认已登录一体化，并停在能看到模块入口的页面。'
       }
     }
 
-    if (!clickTextInWin(root, MODULE.entryText)) {
+    if (!clickTextInWin(root, entryText)) {
       return {
         ok: false,
         target: TARGET,
-        message: '未能点击“' + MODULE.entryText + '”入口'
+        message: '未能点击“' + entryText + '”入口'
       }
     }
 
@@ -153,7 +161,7 @@ export function buildOpenIntegrationModuleScript(target: IntegrationModuleTarget
     return {
       ok: false,
       target: TARGET,
-      message: '已点击“' + MODULE.entryText + '”，但没有等到' + MODULE.readyTexts.join(' / ') + '菜单'
+      message: '已点击“' + entryText + '”，但没有等到' + MODULE.readyTexts.join(' / ') + '菜单'
     }
   } catch (error) {
     return {

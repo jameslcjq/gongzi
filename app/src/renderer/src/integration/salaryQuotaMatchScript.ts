@@ -24,7 +24,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260529-salary-quota-match-home-guard'
+  var VERSION = '20260603-salary-quota-match-local-fallback'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -770,12 +770,56 @@ export function buildSalaryQuotaMatchScript(
     }
   }
 
+  function buildCareerBasicSalaryWholeAllocations(itemName, itemRow, amount, rows) {
+    var basicQuota = pick30301With30107Fallback(
+      rows,
+      amount,
+      {
+        primaryRequire: ['30301'],
+        primaryPrefer: ['30301', '基本工资'],
+        primaryAvoid: ['30107', '绩效工资', '30302', '退休费', '30305', '生活补助'],
+        primaryReject: ['乡镇', '基础性绩效'],
+        primaryLabel: '30301 基本工资',
+        fallbackRequire: ['30107'],
+        fallbackPrefer: ['30107', '绩效工资'],
+        fallbackAvoid: ['30302', '退休费', '30305', '生活补助'],
+        fallbackLabel: '30107 绩效工资'
+      }
+    )
+    if (basicQuota) {
+      return {
+        ok: true,
+        allocations: [{ row: basicQuota.row, amount: amount, label: basicQuota.label }]
+      }
+    }
+
+    var careerSalaryQuota = pickCareerSalary30302Quota(rows, amount)
+    if (careerSalaryQuota) {
+      return {
+        ok: true,
+        allocations: [{ row: careerSalaryQuota, amount: amount, label: '30302 事业人员工资' }]
+      }
+    }
+
+    return {
+      ok: false,
+      reason:
+        '整项匹配也失败：30301 基本工资/30107 绩效工资/30302 事业人员工资余额不足、未找到或余额读取失败。金额：' +
+        formatAmount(amount)
+    }
+  }
+
   function buildCareerBasicSalaryAllocations(itemName, itemRow, amount, rows) {
     var localSummary = getLocalSummary()
     if (!localSummary || !localSummary.ok) {
+      var wholePlan = buildCareerBasicSalaryWholeAllocations(itemName, itemRow, amount, rows)
+      if (wholePlan.ok) return wholePlan
       return {
         ok: false,
-        reason: '本地工资数据读取失败，无法拆分“事业/基本工资实发”：' + ((localSummary && localSummary.message) || '')
+        reason:
+          '本地工资数据读取失败，无法拆分“事业/基本工资实发”；' +
+          wholePlan.reason +
+          ((localSummary && localSummary.message) ? '。本地读取提示：' + localSummary.message : '')
       }
     }
 

@@ -122,6 +122,14 @@ export function buildPushVoucherScript(
     return true
   }
 
+  async function clickAnyAndWait(root, texts, waitText, timeoutMs) {
+    for (var i = 0; i < texts.length; i++) {
+      if (!textExistsIn(root, texts[i])) continue
+      if (await clickAndWait(root, texts[i], waitText, timeoutMs)) return texts[i]
+    }
+    return ''
+  }
+
   // 在 gld-web 域名下，凭证录入 / 凭证管理上下文里发请求最稳
   function findGldWindow(win) {
     try {
@@ -160,11 +168,11 @@ export function buildPushVoucherScript(
     // 如果不在 gld-web 页面，尝试点菜单 凭证管理 → 凭证录入
     if (!isOnVoucherPage(root)) {
       status('🧭 自动导航：中科单位核算 → 凭证管理 → 凭证录入 ...')
-      if (!textExistsIn(root, '凭证管理') && textExistsIn(root, '中科单位核算')) {
-        await clickAndWait(root, '中科单位核算', '凭证管理', 60000)
+      if (!textExistsIn(root, '凭证管理')) {
+        await clickAnyAndWait(root, ['中科单位核算', '单位核算', '会计核算'], '凭证管理', 60000)
       }
       if (!textExistsIn(root, '凭证管理')) {
-        throw new Error('当前页面找不到"凭证管理"菜单。请确认已登录一体化系统，并先打开"中科单位核算"模块')
+        throw new Error('当前页面找不到"凭证管理"菜单。请确认已登录一体化系统，并先打开核算模块。')
       }
       await clickAndWait(root, '凭证管理', '凭证录入', 60000)
       await sleep(400)
