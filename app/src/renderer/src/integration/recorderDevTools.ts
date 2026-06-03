@@ -12,11 +12,22 @@ type RecordingEvent = {
   t: number
   frameUrl: string
   kind: 'fetch' | 'xhr' | 'click' | 'navigation'
+  screenshotPath?: string
+  screenshotFileName?: string
+  screenshotError?: string
+  screenshotCapturedAt?: string
   [key: string]: unknown
 }
 
 type PortalFrameDrainValue = {
   events?: unknown
+}
+
+type ScreenshotMeta = {
+  kind: string
+  path: string
+  fileName: string
+  capturedAt: string
 }
 
 type RecorderApi = {
@@ -34,6 +45,15 @@ type RecorderApi = {
     json: string,
     defaultFileName?: string
   ) => Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }>
+  capturePortalRecordingScreenshot: (
+    webContentsId: number,
+    options: { sessionId: string; sequence: number; kind?: string }
+  ) => Promise<{
+    ok: true
+    path: string
+    fileName: string
+    folder: string
+  } | { ok: false; reason: string }>
 }
 
 export function mountPortalRecorderDevTools(options: {
@@ -45,6 +65,14 @@ export function mountPortalRecorderDevTools(options: {
   let recordingStart = 0
   let events: RecordingEvent[] = []
   let pollTimer: number | null = null
+  let draining = false
+  let sessionId = ''
+  let screenshotSeq = 0
+  let screenshotCount = 0
+  let screenshotFolder = ''
+  let initialScreenshot: ScreenshotMeta | undefined
+  let finalScreenshot: ScreenshotMeta | undefined
+  let screenshotFailures: Array<{ sequence: number; kind: string; reason: string }> = []
 
   const startBtn = createButton('开始录制')
   startBtn.style.borderColor = '#dc2626'
@@ -63,7 +91,7 @@ export function mountPortalRecorderDevTools(options: {
   function updateButtons(): void {
     startBtn.style.display = recording ? 'none' : ''
     stopBtn.style.display = recording ? '' : 'none'
-    stopBtn.textContent = `停止录制（${events.length} 条）`
+    stopBtn.textContent = `停止录制（${events.length} 条 / ${screenshotCount} 图）`
   }
 
   async function startRecording(): Promise<void> {
@@ -86,23 +114,40 @@ export function mountPortalRecorderDevTools(options: {
     recording = true
     events = []
     recordingStart = Date.now()
+    sessionId = `一体化录制-${formatLocalTimestamp(new Date())}`
+    screenshotSeq = 0
+    screenshotCount = 0
+    screenshotFolder = ''
+    initialScreenshot = undefined
+    finalScreenshot = undefined
+    screenshotFailures = []
+    updateButtons()
+    initialScreenshot = await captureScreenshot(webContentsId, 'start')
     updateButtons()
 
     const drainCode = buildRecorderDrainScript()
     const installCode = buildRecorderInstallScript()
     pollTimer = window.setInterval(async () => {
-      if (!recording) return
+      if (!recording || draining) return
       const current = options.activeWebview()
       if (!current) return
       const currentWebContentsId = current.getWebContentsId()
+      draining = true
       try {
-        await options.api.execInAllPortalFrames(currentWebContentsId, installCode)
-      } catch {}
-      try {
-        const res = await options.api.drainAllPortalFrames(currentWebContentsId, drainCode)
-        if (res.ok) appendEvents(res.results)
-      } catch {}
-      updateButtons()
+        try {
+          await options.api.execInAllPortalFrames(currentWebContentsId, installCode)
+        } catch {}
+        try {
+          const res = await options.api.drainAllPortalFrames(currentWebContentsId, drainCode)
+          if (res.ok) {
+            const added = appendEvents(res.results)
+            await captureScreenshotsForEvents(currentWebContentsId, added)
+          }
+        } catch {}
+      } finally {
+        draining = false
+        updateButtons()
+      }
     }, 1500)
   }
 
@@ -119,13 +164,17 @@ export function mountPortalRecorderDevTools(options: {
       try {
         const webContentsId = webview.getWebContentsId()
         const res = await options.api.drainAllPortalFrames(webContentsId, buildRecorderDrainScript())
-        if (res.ok) appendEvents(res.results)
+        if (res.ok) {
+          const added = appendEvents(res.results)
+          await captureScreenshotsForEvents(webContentsId, added)
+        }
+        finalScreenshot = await captureScreenshot(webContentsId, 'stop')
         await options.api.execInAllPortalFrames(webContentsId, buildRecorderStopScript())
       } catch {}
     }
 
     updateButtons()
-    if (!events.length) {
+    if (!events.length && screenshotCount === 0) {
       window.alert('录制已停止，但没有捕获到事件')
       return
     }
@@ -142,19 +191,93 @@ export function mountPortalRecorderDevTools(options: {
         },
         {} as Record<string, number>
       ),
+      screenshots: {
+        count: screenshotCount,
+        folder: screenshotFolder || undefined,
+        initial: initialScreenshot,
+        final: finalScreenshot,
+        failures: screenshotFailures
+      },
       events
     }
-    const save = await options.api.savePortalRecording(JSON.stringify(summary, null, 2))
-    if (save.ok) window.alert(`录制已保存：${save.path}（${summary.totalEvents} 条事件）`)
-    else if (!save.canceled) window.alert('保存失败：' + (save.reason || '未知错误'))
+    const save = await options.api.savePortalRecording(
+      JSON.stringify(summary, null, 2),
+      `${sessionId || '一体化录制'}.json`
+    )
+    if (save.ok) {
+      window.alert(`录制已保存：${save.path}（${summary.totalEvents} 条事件，${screenshotCount} 张截图）`)
+    } else if (!save.canceled) {
+      window.alert('保存失败：' + (save.reason || '未知错误'))
+    }
   }
 
-  function appendEvents(results: Array<{ value?: unknown }>): void {
+  function appendEvents(results: Array<{ value?: unknown }>): RecordingEvent[] {
+    const added: RecordingEvent[] = []
     for (const result of results) {
       const value = result.value as PortalFrameDrainValue | undefined
       const nextEvents = value && Array.isArray(value.events) ? value.events : []
-      if (nextEvents.length) events.push(...(nextEvents as RecordingEvent[]))
+      if (nextEvents.length) {
+        const normalized = nextEvents as RecordingEvent[]
+        events.push(...normalized)
+        added.push(...normalized)
+      }
     }
+    return added
+  }
+
+  async function captureScreenshotsForEvents(
+    webContentsId: number,
+    nextEvents: RecordingEvent[]
+  ): Promise<void> {
+    for (const event of nextEvents) {
+      if (!shouldCaptureEventScreenshot(event)) continue
+      const shot = await captureScreenshot(webContentsId, event.kind)
+      if (shot) {
+        event.screenshotPath = shot.path
+        event.screenshotFileName = shot.fileName
+        event.screenshotCapturedAt = shot.capturedAt
+      } else {
+        const failure = screenshotFailures[screenshotFailures.length - 1]
+        if (failure) event.screenshotError = failure.reason
+      }
+    }
+  }
+
+  async function captureScreenshot(
+    webContentsId: number,
+    kind: string
+  ): Promise<ScreenshotMeta | undefined> {
+    const sequence = ++screenshotSeq
+    try {
+      const res = await options.api.capturePortalRecordingScreenshot(webContentsId, {
+        sessionId: sessionId || '一体化录制',
+        sequence,
+        kind
+      })
+      if (!res.ok) {
+        screenshotFailures.push({ sequence, kind, reason: res.reason || '未知错误' })
+        return undefined
+      }
+      screenshotCount += 1
+      screenshotFolder = res.folder
+      return {
+        kind,
+        path: res.path,
+        fileName: res.fileName,
+        capturedAt: new Date().toISOString()
+      }
+    } catch (error) {
+      screenshotFailures.push({
+        sequence,
+        kind,
+        reason: error instanceof Error ? error.message : String(error)
+      })
+      return undefined
+    }
+  }
+
+  function shouldCaptureEventScreenshot(event: RecordingEvent): boolean {
+    return event.kind === 'click' || event.kind === 'navigation'
   }
 
   return () => {
@@ -178,4 +301,13 @@ function createButton(text: string): HTMLButtonElement {
     'cursor:pointer'
   ].join(';')
   return button
+}
+
+function formatLocalTimestamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join('') + '-' + [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join('')
 }

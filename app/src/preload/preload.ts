@@ -166,6 +166,19 @@ const salaryApi = {
     defaultFileName?: string
   ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> =>
     ipcRenderer.invoke('integration:save-recording', { json, defaultFileName }),
+  capturePortalRecordingScreenshot: (
+    webContentsId: number,
+    options: { sessionId: string; sequence: number; kind?: string }
+  ): Promise<{
+    ok: true
+    path: string
+    fileName: string
+    folder: string
+  } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('integration:capture-recording-screenshot', {
+      webContentsId,
+      ...options
+    }),
   savePortalDomRecord: (
     payload: unknown
   ): Promise<{ ok: true; filePath: string } | { ok: false; reason: string }> =>

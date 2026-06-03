@@ -228,6 +228,10 @@ function createLicensedIpcMain(): Pick<IpcMain, 'handle'> {
   }
 }
 
+function sanitizeRecordingPathSegment(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 80) || 'recording'
+}
+
 export function registerAppIpc(): void {
   const ipcMain = createLicensedIpcMain()
 
@@ -450,6 +454,51 @@ export function registerAppIpc(): void {
         }
         writeFileSync(res.filePath, payload.json, 'utf-8')
         return { ok: true, path: res.filePath }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:capture-recording-screenshot',
+    async (
+      _event,
+      payload: {
+        webContentsId: number
+        sessionId: string
+        sequence: number
+        kind?: string
+      }
+    ): Promise<{
+      ok: true
+      path: string
+      fileName: string
+      folder: string
+    } | { ok: false; reason: string }> => {
+      try {
+        const { webContents } = await import('electron')
+        const { mkdir, writeFile } = await import('node:fs/promises')
+        const { join } = await import('node:path')
+        const wc = webContents.fromId(payload.webContentsId)
+        if (!wc || wc.isDestroyed()) return { ok: false, reason: '找不到 webContents' }
+
+        const status = await getImportWatcherStatus()
+        const sessionId = sanitizeRecordingPathSegment(payload.sessionId || '一体化录制')
+        const kind = sanitizeRecordingPathSegment(payload.kind || 'step')
+        const folder = join(status.folderPath, '一体化页面采集', `${sessionId}-screenshots`)
+        await mkdir(folder, { recursive: true })
+
+        const sequence = Number.isFinite(payload.sequence) && payload.sequence > 0
+          ? Math.floor(payload.sequence)
+          : 1
+        const fileName = `${String(sequence).padStart(4, '0')}-${kind}.png`
+        const filePath = join(folder, fileName)
+        const image = await wc.capturePage()
+        if (image.isEmpty()) return { ok: false, reason: '截图为空' }
+
+        await writeFile(filePath, image.toPNG())
+        return { ok: true, path: filePath, fileName, folder }
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : String(error) }
       }
