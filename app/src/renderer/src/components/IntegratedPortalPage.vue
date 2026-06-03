@@ -454,18 +454,16 @@ function formatBudgetImportSummary(result: BudgetImportResult, committed: boolea
 }
 
 onMounted(() => {
-  if (import.meta.env.DEV) {
-    void nextTick(async () => {
-      const actions = document.querySelector<HTMLElement>('.portal-actions')
-      if (!actions) return
-      const mod = await import('../integration/recorderDevTools')
-      stopRecorderDevTools = mod.mountPortalRecorderDevTools({
-        target: actions,
-        activeWebview,
-        api: window.salaryApi
-      })
+  void nextTick(async () => {
+    const actions = document.querySelector<HTMLElement>('.portal-actions')
+    if (!actions) return
+    const mod = await import('../integration/recorderDevTools')
+    stopRecorderDevTools = mod.mountPortalRecorderDevTools({
+      target: actions,
+      activeWebview,
+      api: window.salaryApi
     })
-  }
+  })
   if (pendingPushQueue.value.length > 0) {
     void nextTick(() => {
       window.setTimeout(() => void processPushQueue(), 800)
