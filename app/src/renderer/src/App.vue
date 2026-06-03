@@ -141,6 +141,7 @@ const licenseKey = ref('')
 const licenseLoading = ref(false)
 const appVersion = ref('dev')
 const activeModuleKey = ref(modules[0].key)
+const hasVisitedPayrollModule = ref(activeModuleKey.value === 'payroll')
 const selectedWorksheetId = ref('')
 const worksheetRecords = ref<WorksheetRecordsResult | null>(null)
 const recordsLoading = ref(false)
@@ -249,6 +250,9 @@ function noticeKindText(log: ExcelImportLog): string {
 }
 
 watch(activeModuleKey, () => {
+  if (activeModuleKey.value === 'payroll') {
+    hasVisitedPayrollModule.value = true
+  }
   const tables = tablesInModule.value
   if (tables.length > 0) {
     selectedWorksheetId.value = tables[0].worksheetId
@@ -264,6 +268,14 @@ const defaultViewByWorksheet: Record<string, string> = {
 
 // 使用标志位防止级联触发 loadRecords 多次
 let suppressRecordLoad = false
+let recordsLoadingTimer: ReturnType<typeof setTimeout> | undefined
+let recordsLoadSeq = 0
+
+function clearRecordsLoadingTimer() {
+  if (!recordsLoadingTimer) return
+  clearTimeout(recordsLoadingTimer)
+  recordsLoadingTimer = undefined
+}
 
 watch(selectedWorksheetId, () => {
   suppressRecordLoad = true
@@ -296,6 +308,9 @@ watch(activeView, () => {
 
 watch(isLicenseValid, (valid) => {
   if (!valid) {
+    recordsLoadSeq += 1
+    clearRecordsLoadingTimer()
+    recordsLoading.value = false
     worksheetRecords.value = null
     return
   }
@@ -319,26 +334,45 @@ async function loadSummary() {
 const sortState = ref<{ column: string; order: 'asc' | 'desc' } | null>(null)
 
 async function loadRecords() {
-  if (!isLicenseValid.value) return
-  if (!selectedWorksheetId.value) return
-  recordsLoading.value = true
-  try {
-    worksheetRecords.value = await window.salaryApi.listWorksheetRecords(
-      selectedWorksheetId.value,
-      {
-        limit: pageSize.value,
-        offset: (page.value - 1) * pageSize.value,
-        search: search.value,
-        view: activeView.value,
-        sortColumn: sortState.value?.column,
-        sortOrder: sortState.value?.order
-      }
-    )
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '读取记录失败')
-    worksheetRecords.value = null
-  } finally {
+  if (!isLicenseValid.value || !selectedWorksheetId.value) {
+    clearRecordsLoadingTimer()
     recordsLoading.value = false
+    return
+  }
+
+  const requestSeq = ++recordsLoadSeq
+  const worksheetId = selectedWorksheetId.value
+  const options = {
+    limit: pageSize.value,
+    offset: (page.value - 1) * pageSize.value,
+    search: search.value,
+    view: activeView.value,
+    sortColumn: sortState.value?.column,
+    sortOrder: sortState.value?.order
+  }
+
+  clearRecordsLoadingTimer()
+  recordsLoadingTimer = setTimeout(() => {
+    if (recordsLoadSeq === requestSeq) {
+      recordsLoading.value = true
+    }
+  }, 150)
+
+  try {
+    const nextRecords = await window.salaryApi.listWorksheetRecords(worksheetId, options)
+    if (recordsLoadSeq === requestSeq) {
+      worksheetRecords.value = nextRecords
+    }
+  } catch (err) {
+    if (recordsLoadSeq === requestSeq) {
+      ElMessage.error(err instanceof Error ? err.message : '读取记录失败')
+      worksheetRecords.value = null
+    }
+  } finally {
+    if (recordsLoadSeq === requestSeq) {
+      clearRecordsLoadingTimer()
+      recordsLoading.value = false
+    }
   }
 }
 
@@ -1246,6 +1280,7 @@ onMounted(() => {
 onUnmounted(() => {
   setSwitchToIntegration(null)
   if (importWatcherTimer) clearInterval(importWatcherTimer)
+  clearRecordsLoadingTimer()
 })
 </script>
 
@@ -1412,8 +1447,8 @@ onUnmounted(() => {
 
       <IntegratedPortalPage v-else-if="activeModuleKey === 'integration'" />
 
-      <template v-else-if="activeModuleKey === 'payroll'">
-        <aside class="md-sidebar">
+      <template v-if="hasVisitedPayrollModule">
+        <aside v-show="activeModuleKey === 'payroll'" class="md-sidebar">
           <div class="md-sidebar-list">
             <div
               class="md-sidebar-item"
@@ -1441,18 +1476,18 @@ onUnmounted(() => {
             </div>
           </div>
         </aside>
-        <main class="md-content">
+        <main v-show="activeModuleKey === 'payroll'" class="md-content">
           <MonthlyPayrollPage
-            v-if="payrollSubTab === 'monthly'"
+            v-show="payrollSubTab === 'monthly'"
             :import-watcher="importWatcher"
             :loading="importWatcherLoading"
             :refresh-key="monthlyPayrollRefreshKey"
             @refresh="refreshImportWatcher"
             @workflow-notice="pushWorkflowNotice"
           />
-          <PerformancePayrollPage v-else-if="payrollSubTab === 'performance'" />
+          <PerformancePayrollPage v-if="payrollSubTab === 'performance'" />
           <AnnualAdjustmentPage
-            v-else
+            v-if="payrollSubTab === 'annualAdjustment'"
             :import-watcher="importWatcher"
             :loading="importWatcherLoading"
             @refresh="refreshImportWatcher"

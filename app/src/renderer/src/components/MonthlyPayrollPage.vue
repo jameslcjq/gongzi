@@ -1,3 +1,18 @@
+<script lang="ts">
+import type {
+  MonthlyPayrollPrintSettings as CachedMonthlyPayrollPrintSettings,
+  PrinterSummary as CachedPrinterSummary
+} from '@shared/types'
+
+type CachedMonthlyPayrollPrintOptions = {
+  printers: CachedPrinterSummary[]
+  settings: CachedMonthlyPayrollPrintSettings
+}
+
+let cachedMonthlyPayrollPrintOptions: CachedMonthlyPayrollPrintOptions | null = null
+let pendingMonthlyPayrollPrintOptions: Promise<CachedMonthlyPayrollPrintOptions> | null = null
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -84,11 +99,7 @@ watch(
   }
 )
 
-async function loadPrintOptions() {
-  const [nextPrinters, settings] = await Promise.all([
-    window.salaryApi.listPrinters(),
-    window.salaryApi.getMonthlyPayrollPrintSettings()
-  ])
+function applyPrintOptions(nextPrinters: PrinterSummary[], settings: MonthlyPayrollPrintSettings) {
   printers.value = nextPrinters
   printSettings.value = {
     reportPrinterName: settings.reportPrinterName || nextPrinters.find((item: PrinterSummary) => item.isDefault)?.name || '',
@@ -98,10 +109,43 @@ async function loadPrintOptions() {
   }
 }
 
+async function loadPrintOptions() {
+  if (cachedMonthlyPayrollPrintOptions) {
+    applyPrintOptions(
+      cachedMonthlyPayrollPrintOptions.printers,
+      cachedMonthlyPayrollPrintOptions.settings
+    )
+    return
+  }
+
+  pendingMonthlyPayrollPrintOptions ??= Promise.all([
+    window.salaryApi.listPrinters(),
+    window.salaryApi.getMonthlyPayrollPrintSettings()
+  ]).then(([nextPrinters, settings]) => ({
+    printers: nextPrinters,
+    settings
+  }))
+
+  try {
+    cachedMonthlyPayrollPrintOptions = await pendingMonthlyPayrollPrintOptions
+    applyPrintOptions(
+      cachedMonthlyPayrollPrintOptions.printers,
+      cachedMonthlyPayrollPrintOptions.settings
+    )
+  } finally {
+    pendingMonthlyPayrollPrintOptions = null
+  }
+}
+
 async function savePrintSettings() {
-  printSettings.value = await window.salaryApi.setMonthlyPayrollPrintSettings({
+  const settings = await window.salaryApi.setMonthlyPayrollPrintSettings({
     ...printSettings.value
   })
+  cachedMonthlyPayrollPrintOptions = {
+    printers: cachedMonthlyPayrollPrintOptions?.printers ?? printers.value,
+    settings
+  }
+  applyPrintOptions(cachedMonthlyPayrollPrintOptions.printers, settings)
 }
 
 async function loadMonthlyPayrollSettings(): Promise<void> {
