@@ -142,6 +142,7 @@ const licenseLoading = ref(false)
 const appVersion = ref('dev')
 const activeModuleKey = ref(modules[0].key)
 const hasVisitedPayrollModule = ref(activeModuleKey.value === 'payroll')
+const hasVisitedIntegrationModule = ref(activeModuleKey.value === 'integration')
 const selectedWorksheetId = ref('')
 const worksheetRecords = ref<WorksheetRecordsResult | null>(null)
 const recordsLoading = ref(false)
@@ -252,6 +253,9 @@ function noticeKindText(log: ExcelImportLog): string {
 watch(activeModuleKey, () => {
   if (activeModuleKey.value === 'payroll') {
     hasVisitedPayrollModule.value = true
+  }
+  if (activeModuleKey.value === 'integration') {
+    hasVisitedIntegrationModule.value = true
   }
   const tables = tablesInModule.value
   if (tables.length > 0) {
@@ -1445,7 +1449,10 @@ onUnmounted(() => {
         <PivotPage v-else :summary="summary" source-worksheet-id="local-hr-info" />
       </div>
 
-      <IntegratedPortalPage v-else-if="activeModuleKey === 'integration'" />
+      <IntegratedPortalPage
+        v-if="hasVisitedIntegrationModule"
+        v-show="activeModuleKey === 'integration'"
+      />
 
       <template v-if="hasVisitedPayrollModule">
         <aside v-show="activeModuleKey === 'payroll'" class="md-sidebar">

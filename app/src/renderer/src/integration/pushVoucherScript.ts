@@ -189,8 +189,7 @@ export function buildPushVoucherScript(
         await sleep(500)
       }
       if (!isOnVoucherPage(root)) {
-        status('⚠ 没看到 gld-web 加载，盲试上传...', 'warn')
-        await sleep(800)
+        throw new Error('已进入核算模块，但没有等到“凭证录入”页面加载完成，请稍后重试或手动打开“凭证录入”后再推送。')
       } else {
         await sleep(1500)
       }
@@ -206,7 +205,10 @@ export function buildPushVoucherScript(
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     })
 
-    var execWin = findGldWindow(root) || window
+    var execWin = findGldWindow(root)
+    if (!execWin) {
+      throw new Error('当前未处于“凭证录入”页面，已停止上传，避免把文件发到错误模块。')
+    }
     var fetchFn = (execWin && execWin.fetch) ? execWin.fetch.bind(execWin) : fetch
     var FormDataCtor = (execWin && execWin.FormData) ? execWin.FormData : FormData
     var FileCtor = (execWin && execWin.File) ? execWin.File : File
@@ -231,8 +233,17 @@ export function buildPushVoucherScript(
       body: formData
     })
     if (!res.ok) throw new Error('gl_import_file_json HTTP ' + res.status)
+    var text = ''
+    try { text = await res.text() } catch (e) { text = '' }
     var json
-    try { json = await res.json() } catch (e) { json = null }
+    try { json = text ? JSON.parse(text) : null } catch (e) { json = null }
+
+    if (!json && /^\\s*</.test(text || '')) {
+      throw new Error('凭证导入接口返回了页面内容，不是导入结果。请确认已停在“凭证录入”页面后重试。')
+    }
+    if (!json) {
+      throw new Error('凭证导入接口没有返回可识别的导入结果。')
+    }
 
     if (json && json.status_code && String(json.status_code) !== '200' && String(json.status_code) !== '0000') {
       throw new Error('凭证导入失败：' + (json.reason || json.message || JSON.stringify(json)))
