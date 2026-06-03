@@ -200,6 +200,8 @@ const LICENSE_FREE_CHANNELS = new Set([
   'import-watcher:choose-folder',
   'import-watcher:open-folder',
   'import-watcher:clear-logs',
+  'integration:save-recording',
+  'portal-recorder:save',
   'unit-settings:get',
   'unit-settings:lock-state',
   'unit-settings:set',
@@ -304,7 +306,7 @@ export function registerAppIpc(): void {
     async (): Promise<SalaryQuotaMatchLocalSummary> => {
       try {
         const [active, retired, other] = await Promise.all([
-          loadIntegratedActiveAggregates(),
+          loadIntegratedActiveAggregates({ batchCode: '001' }),
           loadIntegratedSimpleAggregates('退休工资'),
           loadIntegratedSimpleAggregates('其他工资')
         ])
@@ -312,7 +314,10 @@ export function registerAppIpc(): void {
           ok: true,
           activeOtherOneTotal: active.其他一,
           activeBasicPerformanceTotal: active.基础性绩效,
+          activeHousingTotal: active.住房补贴,
+          activeAllowanceTotal: active.教龄津贴,
           retiredHousingTotal: retired.住房补贴,
+          retiredBackpayTotal: retired.补发工资,
           retiredActualPayTotal: retired.实发合计,
           otherActualPayTotal: other.实发合计
         }
@@ -321,7 +326,10 @@ export function registerAppIpc(): void {
           ok: false,
           activeOtherOneTotal: 0,
           activeBasicPerformanceTotal: 0,
+          activeHousingTotal: 0,
+          activeAllowanceTotal: 0,
           retiredHousingTotal: 0,
+          retiredBackpayTotal: 0,
           retiredActualPayTotal: 0,
           otherActualPayTotal: 0,
           message: error instanceof Error ? error.message : String(error)
@@ -393,6 +401,60 @@ export function registerAppIpc(): void {
   ipcMain.handle('integration:open-external', async (_event, url: string): Promise<void> => {
     await shell.openExternal(url)
   })
+
+  ipcMain.handle(
+    'portal-recorder:save',
+    async (_event, payload: unknown): Promise<{ ok: true; filePath: string } | { ok: false; reason: string }> => {
+      try {
+        const { mkdir, writeFile } = await import('node:fs/promises')
+        const { join } = await import('node:path')
+        const status = await getImportWatcherStatus()
+        const folder = join(status.folderPath, '一体化页面采集')
+        await mkdir(folder, { recursive: true })
+
+        const now = new Date()
+        const pad = (value: number): string => String(value).padStart(2, '0')
+        const timestamp = [
+          now.getFullYear(),
+          pad(now.getMonth() + 1),
+          pad(now.getDate())
+        ].join('') + '-' + [pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds())].join('')
+        const filePath = join(folder, `一体化页面采集-${timestamp}.json`)
+        await writeFile(filePath, JSON.stringify(payload, null, 2) + '\n', 'utf-8')
+        return { ok: true, filePath }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:save-recording',
+    async (
+      _event,
+      payload: { json: string; defaultFileName?: string }
+    ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> => {
+      try {
+        const { dialog } = await import('electron')
+        const { writeFileSync } = await import('node:fs')
+        const def =
+          payload.defaultFileName ||
+          `一体化录制_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`
+        const res = await dialog.showSaveDialog({
+          title: '保存录制文件',
+          defaultPath: def,
+          filters: [{ name: 'JSON', extensions: ['json'] }]
+        })
+        if (res.canceled || !res.filePath) {
+          return { ok: false, reason: '用户取消', canceled: true }
+        }
+        writeFileSync(res.filePath, payload.json, 'utf-8')
+        return { ok: true, path: res.filePath }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
 
   ipcMain.handle(
     'integration:drain-all-frames',

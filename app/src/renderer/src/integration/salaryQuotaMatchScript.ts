@@ -15,7 +15,10 @@ export function buildSalaryQuotaMatchScript(
     ok: false,
     activeOtherOneTotal: 0,
     activeBasicPerformanceTotal: 0,
+    activeHousingTotal: 0,
+    activeAllowanceTotal: 0,
     retiredHousingTotal: 0,
+    retiredBackpayTotal: 0,
     retiredActualPayTotal: 0,
     otherActualPayTotal: 0
   }
@@ -24,10 +27,11 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260603-salary-quota-match-local-fallback'
+  var VERSION = '20260604-salary-quota-match-batch001-strict'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
+  var PERSONNEL_EXPENSE_CODES = ['30101', '30102', '30103', '30106', '30107', '30108', '30109', '30110', '30111', '30112', '30113']
 
   try {
     ;(window.top || window).__salaryQuotaMatchLocalSummary = LOCAL_SUMMARY
@@ -112,6 +116,22 @@ export function buildSalaryQuotaMatchScript(
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     })
+  }
+
+  function moneyEquals(a, b) {
+    return Math.abs(roundMoney(a) - roundMoney(b)) <= 0.01
+  }
+
+  function amountMismatchReason(label, localAmount, pageAmount) {
+    return (
+      label +
+      '金额不一致，已停止自动匹配。网页金额：' +
+      formatAmount(pageAmount) +
+      '，本地明细合计：' +
+      formatAmount(localAmount) +
+      '，差额：' +
+      formatAmount(roundMoney(pageAmount - localAmount))
+    )
   }
 
   function getLocalSummary() {
@@ -260,6 +280,25 @@ export function buildSalaryQuotaMatchScript(
     return null
   }
 
+  function visibleButtonTexts(doc) {
+    if (!doc) return ''
+    var nodes = doc.querySelectorAll('a,button,input[type="button"],input[type="submit"],.l-btn,.l-btn-text,span.l-btn-text')
+    var seen = []
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i]
+      var host = node.classList && node.classList.contains('l-btn-text') ? (node.closest('.l-btn') || node) : node
+      if (!isVisible(host)) continue
+      var value = node.tagName === 'INPUT'
+        ? node.value || node.getAttribute('value') || ''
+        : node.innerText || node.textContent || node.title || ''
+      var text = compactText(value)
+      if (!text || seen.indexOf(text) >= 0) continue
+      seen.push(text)
+      if (seen.length >= 12) break
+    }
+    return seen.join('、')
+  }
+
   function isSalaryPaymentPage(doc) {
     if (!doc) return false
     try {
@@ -283,6 +322,61 @@ export function buildSalaryQuotaMatchScript(
   function findSalaryActionAnchor(doc) {
     if (!isSalaryPaymentPage(doc)) return null
     return findExactButton(doc, '额度匹配') || findExactButton(doc, '生成支付')
+  }
+
+  function getCurrentSalaryBatch(doc) {
+    var state = { value: '', text: '' }
+    if (!doc) return state
+    var valueInput = doc.querySelector('input[name="salbatch_id"].textbox-value') || doc.querySelector('input#salbatch_id')
+    if (valueInput && valueInput.value != null) state.value = compactText(valueInput.value)
+    var combo = valueInput && valueInput.closest ? valueInput.closest('.textbox.combo') : null
+    if (!combo) {
+      var idInput = doc.querySelector('input#salbatch_id')
+      combo = idInput && idInput.closest ? idInput.closest('.textbox.combo') : null
+      if (!state.value && idInput && idInput.value != null) state.value = compactText(idInput.value)
+    }
+    if (combo) {
+      var textInputs = Array.prototype.slice.call(combo.querySelectorAll('input.textbox-text,input[type="text"]'))
+      for (var i = 0; i < textInputs.length; i++) {
+        var input = textInputs[i]
+        if (input.classList && input.classList.contains('textbox-value')) continue
+        var value = compactText(input.value || input.getAttribute('value') || '')
+        if (value) {
+          state.text = value
+          break
+        }
+      }
+    }
+    if (!state.text) {
+      var inputs = Array.prototype.slice.call(doc.querySelectorAll('input.textbox-text,input[type="text"]'))
+      for (var j = 0; j < inputs.length; j++) {
+        var candidate = compactText(inputs[j].value || inputs[j].getAttribute('value') || '')
+        if (/\\[\\d{3}\\].*工资/.test(candidate)) {
+          state.text = candidate
+          break
+        }
+      }
+    }
+    return state
+  }
+
+  function ensureSalaryBatch001(doc) {
+    var batch = getCurrentSalaryBatch(doc)
+    var displayText = normalizeText(batch.text || '')
+    var valueText = normalizeText(batch.value || '')
+    if (displayText) {
+      if (displayText.indexOf('[001]工资') >= 0 || displayText.indexOf('001工资') >= 0) return true
+    } else if (valueText === '1') {
+      return true
+    }
+    if (!batch.text && !batch.value) {
+      throw new Error('无法读取工资批次。请先手动选择 [001]工资 并点击查询后，再执行自动额度匹配。')
+    }
+    throw new Error(
+      '当前工资批次不是 [001]工资，已停止自动匹配。当前批次：' +
+        (batch.text || batch.value) +
+        '。请先手动选择 [001]工资 并点击查询。'
+    )
   }
 
   function findButtonAcross(text, preferredDoc) {
@@ -521,6 +615,53 @@ export function buildSalaryQuotaMatchScript(
     return null
   }
 
+  function pickPersonnelExpenseFallback(rows, amount, options) {
+    options = options || {}
+    var best = null
+    var bestScore = Number.NEGATIVE_INFINITY
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i]
+      var text = normalizeText(quotaText(row))
+      var matchedCode = ''
+      for (var c = 0; c < PERSONNEL_EXPENSE_CODES.length; c++) {
+        if (text.indexOf(PERSONNEL_EXPENSE_CODES[c]) >= 0) {
+          matchedCode = PERSONNEL_EXPENSE_CODES[c]
+          break
+        }
+      }
+      if (!matchedCode) continue
+      if (options.reject) {
+        var rejected = false
+        for (var r = 0; r < options.reject.length; r++) {
+          if (text.indexOf(normalizeText(options.reject[r])) >= 0) {
+            rejected = true
+            break
+          }
+        }
+        if (rejected) continue
+      }
+      if (quotaAvailable(row) < amount) continue
+      var score = 100
+      if (options.prefer) {
+        for (var p = 0; p < options.prefer.length; p++) {
+          if (text.indexOf(normalizeText(options.prefer[p])) >= 0) score += 5
+        }
+      }
+      if (options.avoid) {
+        for (var a = 0; a < options.avoid.length; a++) {
+          if (text.indexOf(normalizeText(options.avoid[a])) >= 0) score -= 3
+        }
+      }
+      var orderIndex = PERSONNEL_EXPENSE_CODES.indexOf(matchedCode)
+      if (orderIndex >= 0) score += PERSONNEL_EXPENSE_CODES.length - orderIndex
+      if (score > bestScore) {
+        best = { row: row, label: matchedCode + ' 人员经费兜底' }
+        bestScore = score
+      }
+    }
+    return best
+  }
+
   function pickCareerSalary30302Quota(rows, amount) {
     var best = null
     var bestScore = Number.NEGATIVE_INFINITY
@@ -584,21 +725,20 @@ export function buildSalaryQuotaMatchScript(
       }
     }
 
+    var retiredBackpay = roundMoney(localSummary.retiredBackpayTotal)
     var otherActual = roundMoney(localSummary.otherActualPayTotal)
+    if (retiredBackpay < 0) retiredBackpay = 0
     if (otherActual < 0) otherActual = 0
-    if (otherActual > amount + 0.01) {
+    var expectedAmount = roundMoney(retiredBackpay + otherActual)
+    if (!moneyEquals(expectedAmount, amount)) {
       return {
         ok: false,
-        reason:
-          '其他工资实发合计大于当前“退休费实发”金额，停止匹配。当前：' +
-          formatAmount(amount) +
-          '，其他工资实发：' +
-          formatAmount(otherActual)
+        reason: amountMismatchReason('事业退休/退休费实发', expectedAmount, amount)
       }
     }
 
-    var otherAmount = otherActual > 0 ? Math.min(otherActual, amount) : 0
-    var retiredFeeAmount = roundMoney(amount - otherAmount)
+    var otherAmount = otherActual
+    var retiredFeeAmount = retiredBackpay
     var allocations = []
 
     if (retiredFeeAmount > 0) {
@@ -626,29 +766,23 @@ export function buildSalaryQuotaMatchScript(
         ['30305', '生活补助', '生活补贴'],
         ['30302', '退休费']
       )
-      var basicQuota = null
+      var fallbackQuota = null
       if (!livingQuota) {
-        basicQuota = pick30301With30107Fallback(
+        fallbackQuota = pickPersonnelExpenseFallback(
           rows,
           otherAmount,
           {
-            primaryRequire: ['30301'],
-            primaryPrefer: ['30301', '基本工资'],
-            primaryAvoid: ['30302', '退休费', '30305', '生活补助', '生活补贴'],
-            primaryLabel: '30301 基本工资',
-            fallbackRequire: ['30107'],
-            fallbackPrefer: ['30107', '绩效工资'],
-            fallbackAvoid: ['30302', '退休费', '30305', '生活补助', '生活补贴'],
-            fallbackLabel: '30107 绩效工资'
+            prefer: ['30101', '30107', '30102'],
+            reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
           }
         )
       }
-      var otherQuota = livingQuota ? { row: livingQuota, label: '30305 生活补助' } : basicQuota
+      var otherQuota = livingQuota ? { row: livingQuota, label: '30305 生活补助' } : fallbackQuota
       if (!otherQuota) {
         return {
           ok: false,
           reason:
-            '其他工资实发合计无法匹配：30305 余额不足/未找到/余额读取失败，30301/30107 兜底也不足或不可用。金额：' +
+            '其他工资实发合计无法匹配：30305 余额不足/未找到/余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
             formatAmount(otherAmount)
         }
       }
@@ -663,6 +797,17 @@ export function buildSalaryQuotaMatchScript(
   }
 
   function buildRetiredHousingAllocations(itemName, itemRow, amount, rows) {
+    var localSummary = getLocalSummary()
+    if (!localSummary || !localSummary.ok) {
+      return {
+        ok: false,
+        reason: '本地工资数据读取失败，无法校验“事业退休/住房补贴”：' + ((localSummary && localSummary.message) || '')
+      }
+    }
+    var localAmount = roundMoney(localSummary.retiredHousingTotal)
+    if (!moneyEquals(localAmount, amount)) {
+      return { ok: false, reason: amountMismatchReason('事业退休/住房补贴', localAmount, amount) }
+    }
     var retiredQuota = pickQuotaByRequirement(
       rows,
       amount,
@@ -683,32 +828,37 @@ export function buildSalaryQuotaMatchScript(
   }
 
   function buildCareerHousingAllocations(itemName, itemRow, amount, rows) {
+    var localSummary = getLocalSummary()
+    if (!localSummary || !localSummary.ok) {
+      return {
+        ok: false,
+        reason: '本地工资数据读取失败，无法校验“事业/住房补贴”：' + ((localSummary && localSummary.message) || '')
+      }
+    }
+    var localAmount = roundMoney(localSummary.activeHousingTotal)
+    if (!moneyEquals(localAmount, amount)) {
+      return { ok: false, reason: amountMismatchReason('事业/住房补贴', localAmount, amount) }
+    }
     var housingQuota = pickQuotaByRequirement(
       rows,
       amount,
-      ['30302', '事业人员提租补贴'],
-      ['30302', '事业人员提租补贴', '住房补贴', '提租'],
-      ['退休费', '30305', '生活补助', '生活补贴', '30102', '津贴补贴']
+      ['30102', '事业人员提租补贴'],
+      ['30102', '事业人员提租补贴', '住房补贴', '提租'],
+      ['退休费', '30305', '生活补助', '生活补贴']
     )
     if (housingQuota) {
       return {
         ok: true,
-        allocations: [{ row: housingQuota, amount: amount, label: '30302 事业人员提租补贴' }]
+        allocations: [{ row: housingQuota, amount: amount, label: '30102 事业人员提租补贴' }]
       }
     }
 
-    var basicQuota = pick30301With30107Fallback(
+    var basicQuota = pickPersonnelExpenseFallback(
       rows,
       amount,
       {
-        primaryRequire: ['30301'],
-        primaryPrefer: ['30301', '基本工资'],
-        primaryAvoid: ['30302', '退休费', '30305', '生活补助', '生活补贴', '30102', '津贴补贴'],
-        primaryLabel: '30301 基本工资',
-        fallbackRequire: ['30107'],
-        fallbackPrefer: ['30107', '绩效工资'],
-        fallbackAvoid: ['30302', '退休费', '30305', '生活补助', '生活补贴', '30102', '津贴补贴'],
-        fallbackLabel: '30107 绩效工资'
+        prefer: ['30102', '30101', '30107'],
+        reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
       }
     )
     if (basicQuota) {
@@ -721,38 +871,43 @@ export function buildSalaryQuotaMatchScript(
     return {
       ok: false,
       reason:
-        '事业住房补贴无法匹配：30302 事业人员提租补贴余额不足/未找到/余额读取失败，30301/30107 兜底也不足或不可用。金额：' +
+        '事业住房补贴无法匹配：30102 事业人员提租补贴余额不足/未找到/余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
         formatAmount(amount)
     }
   }
 
   function buildCareerAllowanceAllocations(itemName, itemRow, amount, rows) {
+    var localSummary = getLocalSummary()
+    if (!localSummary || !localSummary.ok) {
+      return {
+        ok: false,
+        reason: '本地工资数据读取失败，无法校验“事业/津贴补贴实发”：' + ((localSummary && localSummary.message) || '')
+      }
+    }
+    var localAmount = roundMoney(localSummary.activeAllowanceTotal)
+    if (!moneyEquals(localAmount, amount)) {
+      return { ok: false, reason: amountMismatchReason('事业/津贴补贴实发', localAmount, amount) }
+    }
     var allowanceQuota = pickQuotaByRequirement(
       rows,
       amount,
-      ['30302', '事业人员工资'],
-      ['30302', '事业人员工资', '津贴补贴'],
-      ['事业人员提租补贴', '退休费', '30305', '生活补助', '生活补贴', '30102']
+      ['30102', '事业人员工资'],
+      ['30102', '事业人员工资', '津贴补贴'],
+      ['事业人员提租补贴', '退休费', '30305', '生活补助', '生活补贴']
     )
     if (allowanceQuota) {
       return {
         ok: true,
-        allocations: [{ row: allowanceQuota, amount: amount, label: '30302 事业人员工资' }]
+        allocations: [{ row: allowanceQuota, amount: amount, label: '30102 事业人员工资' }]
       }
     }
 
-    var basicQuota = pick30301With30107Fallback(
+    var basicQuota = pickPersonnelExpenseFallback(
       rows,
       amount,
       {
-        primaryRequire: ['30301'],
-        primaryPrefer: ['30301', '基本工资'],
-        primaryAvoid: ['30302', '退休费', '事业人员提租补贴', '30305', '生活补助', '生活补贴', '30102'],
-        primaryLabel: '30301 基本工资',
-        fallbackRequire: ['30107'],
-        fallbackPrefer: ['30107', '绩效工资'],
-        fallbackAvoid: ['30302', '退休费', '事业人员提租补贴', '30305', '生活补助', '生活补贴', '30102'],
-        fallbackLabel: '30107 绩效工资'
+        prefer: ['30102', '30101', '30107'],
+        reject: ['事业人员提租补贴', '退休费', '30305', '生活补助', '生活补贴']
       }
     )
     if (basicQuota) {
@@ -765,7 +920,7 @@ export function buildSalaryQuotaMatchScript(
     return {
       ok: false,
       reason:
-        '事业津贴补贴无法匹配：30302 事业人员工资余额不足/未找到/余额读取失败，30301/30107 兜底也不足或不可用。金额：' +
+        '事业津贴补贴无法匹配：30102 事业人员工资余额不足/未找到/余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
         formatAmount(amount)
     }
   }
@@ -812,67 +967,51 @@ export function buildSalaryQuotaMatchScript(
   function buildCareerBasicSalaryAllocations(itemName, itemRow, amount, rows) {
     var localSummary = getLocalSummary()
     if (!localSummary || !localSummary.ok) {
-      var wholePlan = buildCareerBasicSalaryWholeAllocations(itemName, itemRow, amount, rows)
-      if (wholePlan.ok) return wholePlan
       return {
         ok: false,
         reason:
-          '本地工资数据读取失败，无法拆分“事业/基本工资实发”；' +
-          wholePlan.reason +
+          '本地工资数据读取失败，无法拆分“事业/基本工资实发”，已停止自动匹配' +
           ((localSummary && localSummary.message) ? '。本地读取提示：' + localSummary.message : '')
       }
     }
 
-    var townshipAmount = roundMoney(localSummary.activeOtherOneTotal)
+    var otherOneAmount = roundMoney(localSummary.activeOtherOneTotal)
     var performanceAmount = roundMoney(localSummary.activeBasicPerformanceTotal)
-    if (townshipAmount < 0) townshipAmount = 0
+    if (otherOneAmount < 0) otherOneAmount = 0
     if (performanceAmount < 0) performanceAmount = 0
-    var splitKnown = roundMoney(townshipAmount + performanceAmount)
-    if (splitKnown > amount + 0.01) {
+    var remainingAmount = roundMoney(amount - performanceAmount - otherOneAmount)
+    if (remainingAmount < -0.01) {
       return {
         ok: false,
         reason:
           '事业基本工资拆分金额大于当前“基本工资实发”，停止匹配。当前：' +
           formatAmount(amount) +
+          '，岗位津贴+生活补贴：' +
+          formatAmount(performanceAmount) +
           '，其他一：' +
-          formatAmount(townshipAmount) +
-          '，基础性绩效：' +
-          formatAmount(performanceAmount)
+          formatAmount(otherOneAmount)
+      }
+    }
+    if (remainingAmount < 0) remainingAmount = 0
+    var splitTotal = roundMoney(performanceAmount + otherOneAmount + remainingAmount)
+    if (!moneyEquals(splitTotal, amount)) {
+      return {
+        ok: false,
+        reason:
+          '事业基本工资拆分合计不等于网页“基本工资实发”未匹配金额，已停止自动匹配。网页金额：' +
+          formatAmount(amount) +
+          '，岗位津贴+生活补贴：' +
+          formatAmount(performanceAmount) +
+          '，其他一：' +
+          formatAmount(otherOneAmount) +
+          '，剩余：' +
+          formatAmount(remainingAmount) +
+          '，拆分合计：' +
+          formatAmount(splitTotal)
       }
     }
 
-    var remainingAmount = roundMoney(amount - townshipAmount - performanceAmount)
     var allocations = []
-
-    if (townshipAmount > 0) {
-      var township30302Quota = pickCareerSalary30302Quota(rows, townshipAmount)
-      var townshipQuota = township30302Quota
-        ? { row: township30302Quota, label: '30302 事业人员工资' }
-        : pick30301With30107Fallback(
-            rows,
-            townshipAmount,
-            {
-              primaryRequire: ['30301'],
-              primaryPrefer: ['30301', '基本工资'],
-              primaryAvoid: ['30302', '退休费', '30305', '生活补助', '生活补贴'],
-              primaryReject: ['基础性绩效'],
-              primaryLabel: '30301 基本工资',
-              fallbackRequire: ['30107'],
-              fallbackPrefer: ['30107', '绩效工资'],
-              fallbackAvoid: ['30302', '退休费', '30305', '生活补助', '生活补贴'],
-              fallbackLabel: '30107 绩效工资'
-            }
-          )
-      if (!townshipQuota) {
-        return {
-          ok: false,
-          reason:
-            '事业基本工资中的其他一无法匹配：30302 事业人员工资余额不足/未找到/余额读取失败，30301/30107 兜底也不足或不可用。金额：' +
-            formatAmount(townshipAmount)
-        }
-      }
-      allocations.push({ row: townshipQuota.row, amount: townshipAmount, label: townshipQuota.label })
-    }
 
     if (performanceAmount > 0) {
       var performanceQuota = pickQuotaByRequirement(
@@ -884,14 +1023,45 @@ export function buildSalaryQuotaMatchScript(
         ['乡镇']
       )
       if (!performanceQuota) {
+        var performanceFallback = pickPersonnelExpenseFallback(
+          rows,
+          performanceAmount,
+          {
+            prefer: ['30107', '30101', '30102'],
+            reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
+          }
+        )
+        performanceQuota = performanceFallback && performanceFallback.row
+      }
+      if (!performanceQuota) {
         return {
           ok: false,
           reason:
-            '事业基本工资中的基础性绩效无法匹配：30107 绩效工资余额不足、未找到或余额读取失败。金额：' +
+            '事业基本工资中的岗位津贴+生活补贴无法匹配：30107 绩效工资余额不足、未找到或余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
             formatAmount(performanceAmount)
         }
       }
-      allocations.push({ row: performanceQuota, amount: performanceAmount, label: '30107 绩效工资' })
+      allocations.push({ row: performanceQuota, amount: performanceAmount, label: '30107 绩效工资（岗位津贴+生活补贴）' })
+    }
+
+    if (otherOneAmount > 0) {
+      var otherOneQuota = pickPersonnelExpenseFallback(
+        rows,
+        otherOneAmount,
+        {
+          prefer: ['30101', '30107', '30102'],
+          reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
+        }
+      )
+      if (!otherOneQuota) {
+        return {
+          ok: false,
+          reason:
+            '事业基本工资中的其他一无法匹配：人员经费兜底范围余额不足、未找到或余额读取失败。金额：' +
+            formatAmount(otherOneAmount)
+        }
+      }
+      allocations.push({ row: otherOneQuota.row, amount: otherOneAmount, label: otherOneQuota.label + '（其他一）' })
     }
 
     if (remainingAmount > 0) {
@@ -911,10 +1081,21 @@ export function buildSalaryQuotaMatchScript(
         }
       )
       if (!basicQuota) {
+        var remainingFallback = pickPersonnelExpenseFallback(
+          rows,
+          remainingAmount,
+          {
+            prefer: ['30101', '30107', '30102'],
+            reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
+          }
+        )
+        if (remainingFallback) basicQuota = remainingFallback
+      }
+      if (!basicQuota) {
         return {
           ok: false,
           reason:
-            '事业基本工资剩余金额无法匹配：30301 基本工资余额不足/未找到/余额读取失败，30107 兜底也不足或不可用。金额：' +
+            '事业基本工资剩余金额无法匹配：30301 基本工资余额不足/未找到/余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
             formatAmount(remainingAmount)
         }
       }
@@ -988,6 +1169,102 @@ export function buildSalaryQuotaMatchScript(
     return []
   }
 
+  function getJq(doc) {
+    try {
+      return (doc.defaultView && (doc.defaultView.jQuery || doc.defaultView.$)) || window.jQuery || window.$ || null
+    } catch (error) {
+      return null
+    }
+  }
+
+  function findDatagridEditor(row, field) {
+    var doc = row && row.ownerDocument
+    var jq = doc ? getJq(doc) : null
+    if (!doc || !jq) return null
+    var index = rowIndex(row, 0)
+    var candidates = Array.prototype.slice.call(doc.querySelectorAll('table[id],div[id]'))
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i]
+      try {
+        if (!jq(el).data('datagrid')) continue
+        var fields = []
+        try {
+          fields = fields.concat(jq(el).datagrid('getColumnFields') || [])
+          fields = fields.concat(jq(el).datagrid('getColumnFields', true) || [])
+        } catch (error) {}
+        if (fields.length && fields.indexOf(field) < 0) continue
+        var rows = jq(el).datagrid('getRows') || []
+        if (!rows[index]) continue
+        var editor = jq(el).datagrid('getEditor', { index: index, field: field })
+        if (!editor) {
+          try {
+            jq(el).datagrid('selectRow', index)
+            jq(el).datagrid('beginEdit', index)
+            editor = jq(el).datagrid('getEditor', { index: index, field: field })
+          } catch (error) {}
+        }
+        if (editor && editor.target) {
+          return { grid: el, editor: editor, index: index, rows: rows, jq: jq }
+        }
+      } catch (error) {}
+    }
+    return null
+  }
+
+  function setEditorValue(editorInfo, value) {
+    var jq = editorInfo && editorInfo.jq
+    var target = editorInfo && editorInfo.editor && editorInfo.editor.target
+    if (!jq || !target) return false
+    var textValue = String(value)
+    var ok = false
+    try {
+      jq(target).numberbox('setValue', textValue)
+      ok = true
+    } catch (error) {}
+    try {
+      jq(target).textbox('setValue', textValue)
+      ok = true
+    } catch (error) {}
+    try {
+      jq(target).val(textValue).trigger('input').trigger('change')
+      ok = true
+    } catch (error) {}
+    try {
+      var wrapper = jq(target).closest('.textbox')
+      wrapper.find('input.textbox-text,input.textbox-value,input[type="text"],input[type="hidden"]').each(function () {
+        this.value = textValue
+        this.dispatchEvent(new Event('input', { bubbles: true }))
+        this.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      ok = true
+    } catch (error) {}
+    try {
+      if (editorInfo.rows && editorInfo.rows[editorInfo.index]) {
+        editorInfo.rows[editorInfo.index][CONFIG.quotaAmountField] = value
+      }
+    } catch (error) {}
+    return ok
+  }
+
+  function currentEditorValue(editorInfo) {
+    var jq = editorInfo && editorInfo.jq
+    var target = editorInfo && editorInfo.editor && editorInfo.editor.target
+    if (!jq || !target) return ''
+    try {
+      var numberValue = jq(target).numberbox('getValue')
+      if (numberValue !== undefined && numberValue !== null && numberValue !== '') return String(numberValue)
+    } catch (error) {}
+    try {
+      var textboxValue = jq(target).textbox('getValue')
+      if (textboxValue !== undefined && textboxValue !== null && textboxValue !== '') return String(textboxValue)
+    } catch (error) {}
+    try {
+      var val = jq(target).val()
+      if (val !== undefined && val !== null && val !== '') return String(val)
+    } catch (error) {}
+    return ''
+  }
+
   async function enterAmount(row, amount) {
     var cell = getCell(row, CONFIG.quotaAmountField)
     if (!cell) return false
@@ -997,10 +1274,28 @@ export function buildSalaryQuotaMatchScript(
     } catch (error) {}
     await sleep(250)
     var doc = row.ownerDocument
+    var editorInfo = findDatagridEditor(row, CONFIG.quotaAmountField)
+    if (editorInfo && setEditorValue(editorInfo, amount)) {
+      await sleep(150)
+      var actual = parseAmount(currentEditorValue(editorInfo))
+      if (Math.abs(actual - amount) <= 0.01) return true
+      status(
+        '已尝试写入额度编辑器，但读回金额不一致。目标：' +
+          formatAmount(amount) +
+          '，读回：' +
+          (currentEditorValue(editorInfo) || '空'),
+        'warn'
+      )
+    }
+
     var inputs = Array.prototype.slice.call(
-      doc.querySelectorAll('input.textbox-text, input[type="text"], textarea')
+      cell.querySelectorAll('input.textbox-text, input[type="text"], textarea')
+    ).concat(
+      Array.prototype.slice.call(doc.querySelectorAll('.datagrid-editable input.textbox-text, .datagrid-editable input[type="text"], .datagrid-editable textarea'))
+    ).concat(
+      Array.prototype.slice.call(doc.querySelectorAll('input.textbox-text, input[type="text"], textarea'))
     ).filter(isVisible)
-    var input = inputs[inputs.length - 1] || doc.activeElement
+    var input = inputs[0] || doc.activeElement
     if (!input || !('value' in input)) return false
     input.focus()
     input.value = String(amount)
@@ -1013,6 +1308,7 @@ export function buildSalaryQuotaMatchScript(
     try {
       input.blur()
     } catch (error) {}
+    await sleep(150)
     return true
   }
 
@@ -1026,7 +1322,11 @@ export function buildSalaryQuotaMatchScript(
 
   async function clickSave(doc) {
     var btn = findButton(doc, '保存') || findButtonAcross('保存', doc)
-    if (!btn) return false
+    if (!btn) {
+      status('保存前没有找到“保存”按钮。当前可见按钮：' + (visibleButtonTexts(doc) || '未读取到'), 'err')
+      return false
+    }
+    status('已找到“保存”按钮，正在保存...')
     clickElement(btn)
     var start = Date.now()
     while (Date.now() - start < CONFIG.saveWaitTime) {
@@ -1061,6 +1361,7 @@ export function buildSalaryQuotaMatchScript(
     try {
       var page = await waitForSalaryPage()
       if (!page) return { ok: false, code: 'not-page', message: '请先进入“工资发放/生成支付”的额度匹配页面' }
+      ensureSalaryBatch001(page)
 
       var createBtn = findButton(page, '额度匹配')
       if (createBtn) {
@@ -1097,8 +1398,11 @@ export function buildSalaryQuotaMatchScript(
         status('处理：' + itemName + '\\n金额：' + formatAmount(amount))
         clickElement(row)
         await sleep(CONFIG.rowSettleWait)
-        await clickModify(itemPage.doc)
+        if (!(await clickModify(itemPage.doc))) {
+          throw new Error('没有找到“修改”按钮：' + itemName + '。当前可见按钮：' + (visibleButtonTexts(itemPage.doc) || '未读取到'))
+        }
         var quotas = await waitForQuotaRows(itemPage.doc)
+        status('处理：' + itemName + '\\n工资项金额：' + formatAmount(amount) + '\\n读取到额度行：' + quotas.length + ' 行')
         var plan = buildAllocations(itemName, row, amount, quotas)
         if (!plan.ok) {
           skipped.push(itemName + ' ' + formatAmount(amount) + '：' + plan.reason)
@@ -1106,6 +1410,14 @@ export function buildSalaryQuotaMatchScript(
           break
         }
         plan.allocations = mergeAllocations(plan.allocations)
+        status(
+          '准备填写额度：' +
+            itemName +
+            '\\n' +
+            plan.allocations.map(function (item) {
+              return item.label + '：' + formatAmount(item.amount)
+            }).join('\\n')
+        )
         for (var a = 0; a < plan.allocations.length; a++) {
           var allocation = plan.allocations[a]
           clickElement(allocation.row)

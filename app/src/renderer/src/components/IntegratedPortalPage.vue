@@ -13,7 +13,10 @@ import {
   buildSalaryExportScript,
   buildSalaryExportFeedbackScript
 } from '../integration/salaryExportScript'
-import { buildSalaryPlanInputScript } from '../integration/salaryPlanInputScript'
+import {
+  buildOpenSalaryPlanInputScript,
+  buildSalaryPlanInputScript
+} from '../integration/salaryPlanInputScript'
 import { buildAutoVoucherEntryScript } from '../integration/autoVoucherEntryScript'
 import { buildSalaryQuotaMatchScript } from '../integration/salaryQuotaMatchScript'
 import { buildSalarySystemImportScript } from '../integration/salarySystemImportScript'
@@ -53,6 +56,11 @@ type SalaryExportScriptResult =
       failed: SalaryExportFail[]
     }
   | { ok: false; error: string }
+
+type SalaryPlanInputOpenResult = {
+  ok: boolean
+  message?: string
+}
 
 type PortalWebview = HTMLElement & {
   executeJavaScript: (code: string) => Promise<unknown>
@@ -162,6 +170,7 @@ function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
 // 主进程通过 IPC 通知"webview 内有弹窗请求"
 let stopOpenTabListener: (() => void) | null = null
 let stopDownloadDoneListener: (() => void) | null = null
+let stopRecorderDevTools: (() => void) | null = null
 // 保险/凭证推送队列：MonthlyPayrollPage 把多步任务塞进 pendingPushQueue，
 // 这里串行处理，每步在 active webview 上跑对应注入脚本
 const processingPushQueue = ref(false)
@@ -445,6 +454,18 @@ function formatBudgetImportSummary(result: BudgetImportResult, committed: boolea
 }
 
 onMounted(() => {
+  if (import.meta.env.DEV) {
+    void nextTick(async () => {
+      const actions = document.querySelector<HTMLElement>('.portal-actions')
+      if (!actions) return
+      const mod = await import('../integration/recorderDevTools')
+      stopRecorderDevTools = mod.mountPortalRecorderDevTools({
+        target: actions,
+        activeWebview,
+        api: window.salaryApi
+      })
+    })
+  }
   if (pendingPushQueue.value.length > 0) {
     void nextTick(() => {
       window.setTimeout(() => void processPushQueue(), 800)
@@ -500,6 +521,10 @@ onBeforeUnmount(() => {
   if (stopDownloadDoneListener) {
     stopDownloadDoneListener()
     stopDownloadDoneListener = null
+  }
+  if (stopRecorderDevTools) {
+    stopRecorderDevTools()
+    stopRecorderDevTools = null
   }
 })
 
@@ -571,6 +596,39 @@ async function openExternal(): Promise<void> {
     await window.salaryApi.openIntegrationExternal(url)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '外部浏览器打开失败')
+  }
+}
+
+async function openSalaryPlanInput(): Promise<void> {
+  const wv = activeWebview()
+  if (!wv) {
+    ElMessage.warning('一体化页面尚未就绪')
+    return
+  }
+
+  await installPortalAutomationScripts(activeTabId.value)
+
+  let prefill
+  try {
+    prefill = await window.salaryApi.getPersonnelExpensePlanPrefill()
+  } catch (error) {
+    console.warn('读取人员经费核对表失败', error)
+    prefill = {
+      ok: false,
+      rows: [],
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  try {
+    const result = (await wv.executeJavaScript(
+      buildOpenSalaryPlanInputScript(prefill)
+    )) as SalaryPlanInputOpenResult
+    if (!result?.ok) {
+      ElMessage.warning(result?.message || '请先进入“一般用款计划录入”的待录入列表页')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '人员经费录入弹窗打开失败')
   }
 }
 
@@ -770,6 +828,7 @@ void nextTick(() => {
       <span class="portal-url" :title="activeTab?.url">{{ activeTab?.url }}</span>
       <div class="portal-actions">
         <el-button :icon="Refresh" @click="reload">刷新</el-button>
+        <el-button type="primary" @click="openSalaryPlanInput">人员经费录入</el-button>
         <el-button
           :icon="Download"
           :loading="salaryExporting"

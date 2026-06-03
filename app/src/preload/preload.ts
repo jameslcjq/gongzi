@@ -161,6 +161,15 @@ const salaryApi = {
     | { ok: true; results: Array<{ frameUrl: string; value: unknown }> }
     | { ok: false; reason: string }
   > => ipcRenderer.invoke('integration:drain-all-frames', { webContentsId, code }),
+  savePortalRecording: (
+    json: string,
+    defaultFileName?: string
+  ): Promise<{ ok: true; path: string } | { ok: false; reason: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('integration:save-recording', { json, defaultFileName }),
+  savePortalDomRecord: (
+    payload: unknown
+  ): Promise<{ ok: true; filePath: string } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('portal-recorder:save', payload),
   onWebviewDownloadDone: (
     handler: (payload: {
       ok: boolean

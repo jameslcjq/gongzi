@@ -729,7 +729,10 @@ function batchCodeOf(row: Record<string, unknown>, batchColumn: string | undefin
   return batchColumn ? text(row[batchColumn]) : ''
 }
 
-export async function loadIntegratedRows(worksheetName: string): Promise<IntegratedRow[]> {
+export async function loadIntegratedRows(
+  worksheetName: string,
+  options: { batchCode?: string } = {}
+): Promise<IntegratedRow[]> {
   const worksheet = getWorksheetByName(worksheetName)
   const columns = getWorksheetLocalColumns(worksheet)
   const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
@@ -738,7 +741,10 @@ export async function loadIntegratedRows(worksheetName: string): Promise<Integra
   if (!idColumn) throw new Error(`${worksheetName} 缺少证件号码字段`)
 
   const database = await getDatabase()
-  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
+  let rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
+  if (options.batchCode && batchColumn) {
+    rows = rows.filter((row) => text(row[batchColumn]) === options.batchCode)
+  }
   const latestByIdBatch = new Map<string, Record<string, unknown>>()
   for (const row of rows) {
     const idCard = normalizeIdCard(row[idColumn])

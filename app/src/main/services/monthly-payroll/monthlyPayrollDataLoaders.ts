@@ -129,7 +129,9 @@ export async function loadIntegratedActiveHousingFund(): Promise<number> {
   }
 }
 
-export async function loadIntegratedActiveAggregates(): Promise<IntegratedActiveAggregates> {
+export async function loadIntegratedActiveAggregates(
+  options: { batchCode?: string } = {}
+): Promise<IntegratedActiveAggregates> {
   const empty: IntegratedActiveAggregates = {
     count: 0,
     基本工资: 0,
@@ -155,7 +157,7 @@ export async function loadIntegratedActiveAggregates(): Promise<IntegratedActive
     五险一金合计: 0
   }
   try {
-    const rows = await loadIntegratedRows('在职工资')
+    const rows = await loadIntegratedRows('在职工资', options)
     const { taxField } = await readMonthlyPayrollSettings()
     const sumField = (name: string): number =>
       rows.reduce((sum, row) => sum + num(row.values[name]), 0)

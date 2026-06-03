@@ -260,7 +260,10 @@ export type SalaryQuotaMatchLocalSummary = {
   ok: boolean
   activeOtherOneTotal: number
   activeBasicPerformanceTotal: number
+  activeHousingTotal: number
+  activeAllowanceTotal: number
   retiredHousingTotal: number
+  retiredBackpayTotal: number
   retiredActualPayTotal: number
   otherActualPayTotal: number
   message?: string
