@@ -420,17 +420,20 @@ async function processPushQueue(): Promise<void> {
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true
   try {
+    const wv = await waitForActiveWebview(45000)
+    if (!wv) {
+      ElMessage.error('一体化 webview 尚未就绪，推送任务已停止，请重新触发')
+      pendingPushQueue.value = []
+      return
+    }
     const queuedSteps = pendingPushQueue.value.slice()
     ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
     while (pendingPushQueue.value.length > 0) {
       const step = pendingPushQueue.value.shift() as PushStep
       try {
-        const wv = await webviewForPushStep(step)
-        if (!wv) throw new Error('一体化 webview 尚未就绪')
         await markPushStatus(step, 'queued')
-        if (!(await runPushPreflight(wv, [step]))) {
-          throw new Error('推送前检测未通过')
-        }
+        const target = moduleTargetForStep(step)
+        if (target) await ensureModuleTarget(wv, target)
         await runOneStep(wv, step)
         await markPushStatus(step, 'success')
       } catch (error) {
@@ -517,16 +520,18 @@ function formatBudgetImportSummary(result: BudgetImportResult, committed: boolea
 }
 
 onMounted(() => {
-  void nextTick(async () => {
-    const actions = document.querySelector<HTMLElement>('.portal-actions')
-    if (!actions) return
-    const mod = await import('../integration/recorderDevTools')
-    stopRecorderDevTools = mod.mountPortalRecorderDevTools({
-      target: actions,
-      activeWebview,
-      api: window.salaryApi
+  if (import.meta.env.DEV) {
+    void nextTick(async () => {
+      const actions = document.querySelector<HTMLElement>('.portal-actions')
+      if (!actions) return
+      const mod = await import('../integration/recorderDevTools')
+      stopRecorderDevTools = mod.mountPortalRecorderDevTools({
+        target: actions,
+        activeWebview,
+        api: window.salaryApi
+      })
     })
-  })
+  }
   if (pendingPushQueue.value.length > 0) {
     void nextTick(() => {
       window.setTimeout(() => void processPushQueue(), 800)
