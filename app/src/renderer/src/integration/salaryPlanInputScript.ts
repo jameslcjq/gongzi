@@ -4,6 +4,7 @@ import type { PersonnelExpensePlanPrefillResult } from '@shared/types'
 type SalaryPlanInputScriptOptions = {
   showPageButton?: boolean
   prefill?: PersonnelExpensePlanPrefillResult
+  unit?: { name: string; code: string }
 }
 
 export function buildSalaryPlanInputScript(
@@ -11,9 +12,11 @@ export function buildSalaryPlanInputScript(
 ): string {
   const showPageButton = options.showPageButton ?? true
   const prefillJson = JSON.stringify(options.prefill ?? { ok: false, rows: [] })
+  const unitJson = JSON.stringify(options.unit ?? { name: '', code: '' })
   return `
 window.__SALARY_PLAN_INPUT_SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'};
 window.__SALARY_PLAN_INPUT_PREFILL = ${prefillJson};
+window.__SALARY_PLAN_INPUT_UNIT = ${unitJson};
 ${salaryPlanInputScript}
 `
 }

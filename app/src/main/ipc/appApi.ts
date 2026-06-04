@@ -48,7 +48,8 @@ import {
 } from '../services/monthly-payroll/printSalaryViaExcel'
 import {
   loadIntegratedActiveAggregates,
-  loadIntegratedSimpleAggregates
+  loadIntegratedSimpleAggregates,
+  loadTraffic002Total
 } from '../services/monthly-payroll/monthlyPayrollDataLoaders'
 import {
   applyAnnualAdjustment,
@@ -233,6 +234,42 @@ function sanitizeRecordingPathSegment(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 80) || 'recording'
 }
 
+// 人员经费录入：只保留"单位设置"里配置的那个单位的核对表行（系统有多个单位时，避免录到别的单位）。
+// 预算代码(=单位导入编码)优先匹配，其次按单位名称相互包含匹配；匹配不上时保持原样，避免误清空。
+async function filterPersonnelExpensePrefillToUnit(
+  prefill: PersonnelExpensePlanPrefillResult
+): Promise<PersonnelExpensePlanPrefillResult> {
+  if (!prefill.ok || prefill.rows.length <= 1) return prefill
+  let unit: UnitSettings
+  try {
+    unit = await readUnitSettings()
+  } catch {
+    return prefill
+  }
+  const codeKey = (value: string): string => String(value || '').replace(/\s+/g, '').trim()
+  const nameKey = (value: string): string =>
+    String(value || '')
+      .replace(/\s+/g, '')
+      .replace(/^[0-9]{3,}/, '')
+      .trim()
+  const wantCode = codeKey(unit.unitImportCode)
+  const wantName = nameKey(unit.unitFullName)
+  if (!wantCode && !wantName) return prefill
+  const matched = prefill.rows.filter((row) => {
+    const rowCode = codeKey(row.budgetCode || '')
+    const rowName = nameKey(row.unitName || '')
+    if (wantCode && rowCode && rowCode === wantCode) return true
+    if (wantName && rowName && (rowName.includes(wantName) || wantName.includes(rowName))) return true
+    return false
+  })
+  if (matched.length === 0) return prefill
+  return {
+    ...prefill,
+    rows: matched,
+    message: (prefill.message ? prefill.message + '；' : '') + '已按单位设置过滤为 ' + matched.length + ' 个单位'
+  }
+}
+
 export function registerAppIpc(): void {
   const ipcMain = createLicensedIpcMain()
 
@@ -302,7 +339,8 @@ export function registerAppIpc(): void {
       options?: { archive?: boolean }
     ): Promise<PersonnelExpensePlanPrefillResult> => {
       const status = await getImportWatcherStatus()
-      return readPersonnelExpensePlanPrefill(status.folderPath, options)
+      const prefill = await readPersonnelExpensePlanPrefill(status.folderPath, options)
+      return filterPersonnelExpensePrefillToUnit(prefill)
     }
   )
 
@@ -310,11 +348,23 @@ export function registerAppIpc(): void {
     'salary-quota-match:local-summary',
     async (): Promise<SalaryQuotaMatchLocalSummary> => {
       try {
-        const [active, retired, other] = await Promise.all([
+        const now = new Date()
+        const [active, retired, other, traffic002Total, runs] = await Promise.all([
           loadIntegratedActiveAggregates({ batchCode: '001' }),
           loadIntegratedSimpleAggregates('退休工资'),
-          loadIntegratedSimpleAggregates('其他工资')
+          loadIntegratedSimpleAggregates('其他工资'),
+          loadTraffic002Total(),
+          listMonthlyPayrollRuns()
         ])
+        // 实发合计 = 在职实发 + 遗补实发 + 退休房补实发，取当月最新且未过期的报账记录（与历史报表口径一致）。
+        const currentRun = runs.find(
+          (run) => run.year === now.getFullYear() && run.month === now.getMonth() + 1 && !run.isOutdated
+        )
+        const actualPayTotal = currentRun
+          ? Math.round(
+              (currentRun.activeActualPay + currentRun.survivorActualPay + currentRun.retiredHousingActualPay) * 100
+            ) / 100
+          : 0
         return {
           ok: true,
           activeOtherOneTotal: active.其他一,
@@ -324,7 +374,9 @@ export function registerAppIpc(): void {
           retiredHousingTotal: retired.住房补贴,
           retiredBackpayTotal: retired.补发工资,
           retiredActualPayTotal: retired.实发合计,
-          otherActualPayTotal: other.实发合计
+          otherActualPayTotal: other.实发合计,
+          actualPayTotal,
+          traffic002Total
         }
       } catch (error) {
         return {
@@ -337,6 +389,8 @@ export function registerAppIpc(): void {
           retiredBackpayTotal: 0,
           retiredActualPayTotal: 0,
           otherActualPayTotal: 0,
+          actualPayTotal: 0,
+          traffic002Total: 0,
           message: error instanceof Error ? error.message : String(error)
         }
       }
@@ -1220,7 +1274,7 @@ function getVisibleViews(item: WorksheetMeta): Array<{
   if (item.name === '\u5de5\u8d44\u5e74\u62a5') {
     return getOrderedViews(item, ['\u5728\u804c'])
   }
-  if (item.name === '\u4e00\u4f53\u5316\u5728\u804c') {
+  if (item.name === '\u5728\u804c\u5de5\u8d44') {
     return getOrderedViews(item, ['\u5168\u90e8', '\u5de5\u8d44(001)', '\u6570\u5e01(002)'])
   }
   if (allOnlyWorksheetNames.has(item.name)) {

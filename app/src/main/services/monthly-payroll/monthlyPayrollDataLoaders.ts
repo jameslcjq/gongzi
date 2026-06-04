@@ -129,6 +129,17 @@ export async function loadIntegratedActiveHousingFund(): Promise<number> {
   }
 }
 
+// 002 数币批次的交通费合计：有数字币卡的人员交通费走 002 批次，
+// 额度匹配只处理 001 批次，前置校验时需从实发合计里扣掉这部分。
+export async function loadTraffic002Total(): Promise<number> {
+  try {
+    const rows = await loadIntegratedRows('在职工资', { batchCode: '002' })
+    return roundMoney(rows.reduce((sum, row) => sum + num(row.values['交通费']), 0))
+  } catch {
+    return 0
+  }
+}
+
 export async function loadIntegratedActiveAggregates(
   options: { batchCode?: string } = {}
 ): Promise<IntegratedActiveAggregates> {

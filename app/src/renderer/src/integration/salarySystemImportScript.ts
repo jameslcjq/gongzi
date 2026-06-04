@@ -154,9 +154,10 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
   }
 
   function isOkResponse(json) {
+    if (!json) return false
     if (json && json.__httpOk === false) return false
     var code = json && json.status_code != null ? String(json.status_code) : ''
-    if (!code) return true
+    if (!code) return json.success === true || json.ok === true
     return code === '1000' || code === '1001' || code === '0000' || code === '200'
   }
 
@@ -184,7 +185,17 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
         reason: '上传接口 HTTP ' + res.status
       }
     }
-    return json || { __httpOk: true, __fieldName: fieldName, status_code: '1000', reason: '接口未返回 JSON，HTTP 已成功' }
+    if (!json) {
+      return {
+        __httpOk: false,
+        __fieldName: fieldName,
+        __text: responseText,
+        reason: /^\\s*</.test(responseText || '')
+          ? '上传接口返回了页面内容，不是导入结果。请确认一体化登录未失效，并停在工资导入页面。'
+          : '上传接口没有返回可识别的导入结果'
+      }
+    }
+    return json
   }
 
   async function uploadWithFallback(url, file) {

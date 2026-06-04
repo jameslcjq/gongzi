@@ -1876,6 +1876,16 @@ function isCustomStyledSheet(name: string): boolean {
         <el-table-column label="在职" prop="activeCount" width="70" align="right" />
         <el-table-column label="遗补" prop="survivorCount" width="70" align="right" />
         <el-table-column label="退休房补" prop="retiredHousingCount" width="90" align="right" />
+        <el-table-column label="实发合计" width="120" align="right">
+          <!-- 实发合计 = 在职实发 + 遗补实发 + 退休房补实发；额度匹配前置总额校验基准（网页工资项总额 = 实发合计 - 002交通费） -->
+          <template #default="{ row }">{{
+            formatMoney(
+              (Number(row.activeActualPay) || 0) +
+                (Number(row.survivorActualPay) || 0) +
+                (Number(row.retiredHousingActualPay) || 0)
+            )
+          }}</template>
+        </el-table-column>
         <el-table-column label="在职实发" width="120" align="right">
           <template #default="{ row }">{{ formatMoney(row.activeActualPay) }}</template>
         </el-table-column>

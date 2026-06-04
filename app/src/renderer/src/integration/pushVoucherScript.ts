@@ -122,6 +122,19 @@ export function buildPushVoucherScript(
     return true
   }
 
+  async function clickUntil(root, text, ready, timeoutMs) {
+    var deadline = Date.now() + (timeoutMs || 60000)
+    var clickedOnce = false
+    while (Date.now() < deadline) {
+      if (ready()) return true
+      var clicked = clickTextInWin(root, text)
+      clickedOnce = clickedOnce || clicked
+      await sleep(clicked ? 700 : 900)
+      if (ready()) return true
+    }
+    return ready() || clickedOnce
+  }
+
   async function clickAnyAndWait(root, texts, waitText, timeoutMs) {
     var deadline = Date.now() + (timeoutMs || 60000)
     while (Date.now() < deadline) {
@@ -135,16 +148,31 @@ export function buildPushVoucherScript(
     return ''
   }
 
-  // 在 gld-web 域名下，凭证录入 / 凭证管理上下文里发请求最稳
-  function findGldWindow(win) {
+  function isVoucherEntryUrl(url) {
+    return /gld-web\\/gl\\/html\\/voucher\\/VoucherInput\\.html/i.test(String(url || ''))
+  }
+
+  function looksLikeVoucherEntry(win) {
     try {
-      if (/gld-web\\/gl\\//i.test(win.location.href)) return win
+      if (isVoucherEntryUrl(win.location.href)) return true
+    } catch (e) {}
+    try {
+      var text = normalize(win.document.body && (win.document.body.innerText || win.document.body.textContent) || '')
+      return text.indexOf('凭证录入') >= 0 && text.indexOf('修改附件数') >= 0
+    } catch (e) {}
+    return false
+  }
+
+  // 必须定位到真正的凭证录入页，避免在 BookSet/核算首页上下文误传。
+  function findVoucherWindow(win) {
+    try {
+      if (looksLikeVoucherEntry(win)) return win
     } catch (e) {}
     try {
       var iframes = win.document.querySelectorAll('iframe')
       for (var i = 0; i < iframes.length; i++) {
         var src = iframes[i].src || iframes[i].getAttribute('src') || ''
-        if (/gld-web\\/gl\\//i.test(src)) {
+        if (isVoucherEntryUrl(src)) {
           try { return iframes[i].contentWindow || win } catch (e) { return win }
         }
       }
@@ -152,7 +180,7 @@ export function buildPushVoucherScript(
     try {
       var frames = win.frames
       for (var i = 0; i < frames.length; i++) {
-        var found = findGldWindow(frames[i])
+        var found = findVoucherWindow(frames[i])
         if (found) return found
       }
     } catch (e) {}
@@ -160,7 +188,61 @@ export function buildPushVoucherScript(
   }
 
   function isOnVoucherPage(win) {
-    return !!findGldWindow(win)
+    return !!findVoucherWindow(win)
+  }
+
+  function directOpenVoucherPage(root) {
+    var url = '/gld-web/gl/html/voucher/VoucherInput.html?menuid=' + MENUID + '&moduleid=' + MENUID
+    try {
+      root.location.href = url
+      return true
+    } catch (e) {}
+    try {
+      window.location.href = url
+      return true
+    } catch (e) {}
+    return false
+  }
+
+  async function waitForVoucherPage(root, timeoutMs) {
+    var deadline = Date.now() + (timeoutMs || 60000)
+    while (Date.now() < deadline) {
+      if (isOnVoucherPage(root)) return true
+      await sleep(500)
+    }
+    return isOnVoucherPage(root)
+  }
+
+  async function openVoucherPage(root) {
+    if (isOnVoucherPage(root)) return true
+
+    status('🧭 自动导航：中科单位核算 → 凭证管理 → 凭证录入 ...')
+    if (!textExistsIn(root, '凭证管理')) {
+      await clickAnyAndWait(root, ['中科单位核算', '单位核算', '会计核算'], '凭证管理', 60000)
+    }
+    if (textExistsIn(root, '凭证管理')) {
+      await clickUntil(root, '凭证管理', function () {
+        return isOnVoucherPage(root) || textExistsIn(root, '凭证录入')
+      }, 30000)
+      await sleep(300)
+      await clickUntil(root, '凭证录入', function () {
+        return isOnVoucherPage(root)
+      }, 30000)
+    }
+    if (await waitForVoucherPage(root, 10000)) {
+      await sleep(1500)
+      return true
+    }
+
+    status('🧭 菜单未稳定打开凭证录入，改用凭证录入地址直达 ...', 'warn')
+    if (!directOpenVoucherPage(root)) {
+      throw new Error('无法自动打开“凭证录入”页面。请确认已登录核算模块后重试。')
+    }
+    if (!(await waitForVoucherPage(root, 60000))) {
+      throw new Error('已尝试直达“凭证录入”，但页面仍未加载完成。请稍后重试或检查一体化登录状态。')
+    }
+    await sleep(1500)
+    return true
   }
 
   try {
@@ -170,29 +252,8 @@ export function buildPushVoucherScript(
 
     var root = window.top || window
 
-    // 如果不在 gld-web 页面，尝试点菜单 凭证管理 → 凭证录入
     if (!isOnVoucherPage(root)) {
-      status('🧭 自动导航：中科单位核算 → 凭证管理 → 凭证录入 ...')
-      if (!textExistsIn(root, '凭证管理')) {
-        await clickAnyAndWait(root, ['中科单位核算', '单位核算', '会计核算'], '凭证管理', 60000)
-      }
-      if (!textExistsIn(root, '凭证管理')) {
-        throw new Error('当前页面找不到"凭证管理"菜单。请确认已登录一体化系统，并先打开核算模块。')
-      }
-      await clickAndWait(root, '凭证管理', '凭证录入', 60000)
-      await sleep(400)
-      clickTextInWin(root, '凭证录入')
-      // 等 gld-web frame 出现
-      var deadline = Date.now() + 60000
-      while (Date.now() < deadline) {
-        if (isOnVoucherPage(root)) break
-        await sleep(500)
-      }
-      if (!isOnVoucherPage(root)) {
-        throw new Error('已进入核算模块，但没有等到“凭证录入”页面加载完成，请稍后重试或手动打开“凭证录入”后再推送。')
-      } else {
-        await sleep(1500)
-      }
+      await openVoucherPage(root)
     }
 
     status('📤 推送凭证：' + RUN_LABEL + ' ...')
@@ -205,7 +266,7 @@ export function buildPushVoucherScript(
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     })
 
-    var execWin = findGldWindow(root)
+    var execWin = findVoucherWindow(root)
     if (!execWin) {
       throw new Error('当前未处于“凭证录入”页面，已停止上传，避免把文件发到错误模块。')
     }
@@ -249,8 +310,40 @@ export function buildPushVoucherScript(
       throw new Error('凭证导入失败：' + (json.reason || json.message || JSON.stringify(json)))
     }
 
-    status('✅ 凭证导入完成：' + RUN_LABEL, 'ok')
-    clearStatusLater(8000)
+    // 解析一体化返回的导入明细（不同版本字段名不一，做容错）：
+    //  1) 真实判断是否导入成功——成功 0 条 / 有失败行 → 视为失败，不再"假成功"；
+    //  2) 把返回内容显示在浮窗，便于核对与排错（之前只看 HTTP/status_code，会出现"显示成功但查无凭证"）。
+    var detailObj = (json && (json.data || json.result || json.body)) || json || {}
+    var pickNum = function (obj, keys) {
+      for (var ki = 0; ki < keys.length; ki++) {
+        var v = obj ? obj[keys[ki]] : null
+        if (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) return Number(v)
+      }
+      return null
+    }
+    var okCount = pickNum(detailObj, ['successCount', 'success_count', 'succeedCount', 'succ_count', 'successNum', 'success'])
+    var failCount = pickNum(detailObj, ['failCount', 'fail_count', 'errorCount', 'error_count', 'failNum', 'fail'])
+    var totalCount = pickNum(detailObj, ['totalCount', 'total_count', 'total', 'count'])
+    var retMsg = (json && (json.reason || json.message || json.msg)) ||
+      (detailObj && (detailObj.reason || detailObj.message || detailObj.msg)) || ''
+    var detailParts = []
+    if (totalCount !== null) detailParts.push('共 ' + totalCount)
+    if (okCount !== null) detailParts.push('成功 ' + okCount)
+    if (failCount !== null) detailParts.push('失败 ' + failCount)
+    if (retMsg) detailParts.push(String(retMsg))
+    var detailText = detailParts.join('，')
+    var rawText = JSON.stringify(json)
+    if (rawText && rawText.length > 240) rawText = rawText.slice(0, 240) + '...'
+
+    if ((okCount !== null && okCount <= 0) || (failCount !== null && failCount > 0)) {
+      throw new Error(
+        '凭证导入未真正成功：' + (detailText || '一体化返回成功 0 条 / 存在失败行') +
+        '\\n一体化返回：' + rawText
+      )
+    }
+
+    status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\\n' + detailText : '') + '\\n一体化返回：' + rawText, 'ok')
+    clearStatusLater(12000)
     return { ok: true, response: json }
   } catch (error) {
     var msg = error && error.message ? error.message : String(error)

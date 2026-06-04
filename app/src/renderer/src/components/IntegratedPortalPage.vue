@@ -116,6 +116,21 @@ function activeWebview(): PortalWebview | undefined {
   return webviewMap.get(activeTabId.value)
 }
 
+async function waitForWebview(tabId: string, maxWait = 30000): Promise<PortalWebview | undefined> {
+  const deadline = Date.now() + maxWait
+  while (Date.now() < deadline) {
+    const wv = webviewMap.get(tabId)
+    if (wv) {
+      try {
+        wv.getWebContentsId()
+        return wv
+      } catch {}
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250))
+  }
+  return webviewMap.get(tabId)
+}
+
 async function waitForActiveWebview(maxWait = 15000): Promise<PortalWebview | undefined> {
   const deadline = Date.now() + maxWait
   while (Date.now() < deadline) {
@@ -150,6 +165,9 @@ function closeTab(id: string): void {
   const idx = tabs.value.findIndex((t) => t.id === id)
   if (idx < 0) return
   webviewMap.delete(id)
+  for (const target of ['budget', 'accounting'] as const) {
+    if (pushTabIds[target] === id) delete pushTabIds[target]
+  }
   if (tabs.value.length === 1) {
     // 不能没有标签 —— 重置成首页
     tabs.value = [{ id: nextTabId(), title: '一体化系统', url: portalUrl, loading: true }]
@@ -186,9 +204,10 @@ function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
 let stopOpenTabListener: (() => void) | null = null
 let stopDownloadDoneListener: (() => void) | null = null
 let stopRecorderDevTools: (() => void) | null = null
-// 保险/凭证推送队列：MonthlyPayrollPage 把多步任务塞进 pendingPushQueue，
-// 这里串行处理，每步在 active webview 上跑对应注入脚本
+// 保险/凭证推送队列：MonthlyPayrollPage 把多步任务塞进 pendingPushQueue。
+// 这里按目标模块复用专用 webview 页签，避免工资报账/历史报表当前页影响推送定位。
 const processingPushQueue = ref(false)
+const pushTabIds: Partial<Record<IntegrationModuleTarget, string>> = {}
 
 async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
   if (step.kind === 'insurance') {
@@ -276,9 +295,22 @@ function moduleTargetForStep(step: PushStep): IntegrationModuleTarget | null {
   return null
 }
 
-async function ensureModuleForStep(wv: PortalWebview, step: PushStep): Promise<void> {
-  const target = moduleTargetForStep(step)
-  if (!target) return
+function moduleTabTitle(target: IntegrationModuleTarget): string {
+  return target === 'accounting' ? '核算凭证推送' : '预算执行推送'
+}
+
+function tabLooksLikeModule(tab: Tab, target: IntegrationModuleTarget): boolean {
+  return (tab.title || '') === moduleTabTitle(target)
+}
+
+function findModuleTabId(target: IntegrationModuleTarget): string | null {
+  const remembered = pushTabIds[target]
+  if (remembered && findTabById(remembered)) return remembered
+  const matched = tabs.value.find((tab) => tabLooksLikeModule(tab, target))
+  return matched?.id || null
+}
+
+async function ensureModuleTarget(wv: PortalWebview, target: IntegrationModuleTarget): Promise<void> {
   const result = (await wv.executeJavaScript(
     buildOpenIntegrationModuleScript(target)
   )) as IntegrationModuleNavigationResult | undefined
@@ -287,6 +319,28 @@ async function ensureModuleForStep(wv: PortalWebview, step: PushStep): Promise<v
     return
   }
   if (result.changed) ElMessage.info(result.message)
+}
+
+async function webviewForPushStep(step: PushStep): Promise<PortalWebview | undefined> {
+  const target = moduleTargetForStep(step)
+  if (!target) return waitForActiveWebview()
+
+  let tabId = findModuleTabId(target)
+  if (!tabId) {
+    tabId = openNewTab(portalUrl, true)
+    pushTabIds[target] = tabId
+  } else {
+    pushTabIds[target] = tabId
+    activateTab(tabId)
+  }
+
+  const tab = findTabById(tabId)
+  if (tab) tab.title = moduleTabTitle(target)
+
+  const wv = await waitForWebview(tabId, 45000)
+  if (!wv) return undefined
+  await ensureModuleTarget(wv, target)
+  return wv
 }
 
 function collectInsuranceUnits(steps: PushStep[]): IntegrationPushPreflightUnit[] {
@@ -366,25 +420,17 @@ async function processPushQueue(): Promise<void> {
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true
   try {
-    const wv = await waitForActiveWebview()
-    if (!wv) {
-      ElMessage.error('一体化 webview 尚未就绪，推送任务已停止，请重新触发')
-      pendingPushQueue.value = []
-      return
-    }
     const queuedSteps = pendingPushQueue.value.slice()
     ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
-    if (queuedSteps[0]) await ensureModuleForStep(wv, queuedSteps[0])
-    if (!(await runPushPreflight(wv, queuedSteps))) {
-      await markStepsStatus(queuedSteps, 'failed')
-      pendingPushQueue.value = []
-      return
-    }
     while (pendingPushQueue.value.length > 0) {
       const step = pendingPushQueue.value.shift() as PushStep
       try {
+        const wv = await webviewForPushStep(step)
+        if (!wv) throw new Error('一体化 webview 尚未就绪')
         await markPushStatus(step, 'queued')
-        await ensureModuleForStep(wv, step)
+        if (!(await runPushPreflight(wv, [step]))) {
+          throw new Error('推送前检测未通过')
+        }
         await runOneStep(wv, step)
         await markPushStatus(step, 'success')
       } catch (error) {
@@ -621,8 +667,6 @@ async function openSalaryPlanInput(): Promise<void> {
     return
   }
 
-  await installPortalAutomationScripts(activeTabId.value)
-
   let prefill
   try {
     prefill = await window.salaryApi.getPersonnelExpensePlanPrefill()
@@ -636,9 +680,15 @@ async function openSalaryPlanInput(): Promise<void> {
   }
 
   try {
-    const result = (await wv.executeJavaScript(
+    let result = (await wv.executeJavaScript(
       buildOpenSalaryPlanInputScript(prefill)
     )) as SalaryPlanInputOpenResult
+    if (!result?.ok) {
+      await installPortalAutomationScripts(activeTabId.value)
+      result = (await wv.executeJavaScript(
+        buildOpenSalaryPlanInputScript(prefill)
+      )) as SalaryPlanInputOpenResult
+    }
     if (!result?.ok) {
       ElMessage.warning(result?.message || '请先进入“一般用款计划录入”的待录入列表页')
     }
@@ -676,15 +726,24 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
         retiredBackpayTotal: 0,
         retiredActualPayTotal: 0,
         otherActualPayTotal: 0,
+        actualPayTotal: 0,
+        traffic002Total: 0,
         message: error instanceof Error ? error.message : String(error)
       }
     })
   }
 
-  let salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true })
+  let planUnit = { name: '', code: '' }
+  try {
+    const unit = await window.salaryApi.getUnitSettings()
+    planUnit = { name: (unit.unitFullName || '').trim(), code: (unit.unitImportCode || '').trim() }
+  } catch (error) {
+    console.warn('读取单位设置失败，人员经费录入暂不按单位过滤', error)
+  }
+  let salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true, unit: planUnit })
   try {
     const prefill = await window.salaryApi.getPersonnelExpensePlanPrefill({ archive: false })
-    salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true, prefill })
+    salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true, prefill, unit: planUnit })
   } catch (error) {
     console.warn('人员经费核对表读取失败，使用空预填配置', error)
   }

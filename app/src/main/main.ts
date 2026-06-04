@@ -135,7 +135,7 @@ function createWindow(): void {
     void mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
 
-  if (isDev) {
+  if (isDev && process.env.PAYROLL_OPEN_DEVTOOLS === '1') {
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   }
 

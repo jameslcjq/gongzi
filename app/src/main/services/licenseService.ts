@@ -455,6 +455,28 @@ async function buildDevicePayload() {
   }
 }
 
+async function getDevelopmentLicenseStatus(): Promise<LicenseStatus | null> {
+  if (app.isPackaged) return null
+  const device = await buildDevicePayload()
+  return {
+    valid: true,
+    source: 'cache',
+    product_key: PRODUCT_KEY,
+    product_name: PRODUCT_NAME,
+    license_key: 'DEV-PAYROLL',
+    customer_code: 'DEV',
+    customer_name: '开发测试授权',
+    plan: 'development',
+    expires_at: '2099-12-31',
+    features: { development: true },
+    reason: 'development',
+    message: '开发版自动授权',
+    cached: true,
+    checkedAt: new Date().toISOString(),
+    device_id: device.device_id
+  }
+}
+
 function canonicalStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map((item) => canonicalStringify(item)).join(',')}]`
@@ -823,6 +845,9 @@ export async function claimTrialLicense(
 }
 
 export async function verifyLicense(licenseKeyInput = ''): Promise<LicenseStatus> {
+  const developmentStatus = await getDevelopmentLicenseStatus()
+  if (developmentStatus) return developmentStatus
+
   const requestedLicenseKey = normalizeLicenseKey(licenseKeyInput || getSavedLicenseKey())
   if (!requestedLicenseKey) {
     const offline = await readOfflineLicenseStatus()
@@ -883,6 +908,9 @@ export async function verifyLicense(licenseKeyInput = ''): Promise<LicenseStatus
 }
 
 export async function getCachedLicenseStatus(): Promise<LicenseStatus> {
+  const developmentStatus = await getDevelopmentLicenseStatus()
+  if (developmentStatus) return developmentStatus
+
   const offline = await readOfflineLicenseStatus()
   if (offline) return offline
 

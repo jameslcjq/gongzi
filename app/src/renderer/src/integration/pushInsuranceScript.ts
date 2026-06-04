@@ -35,6 +35,25 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
   function normalize(v) { return String(v || '').replace(/\\s+/g, '') }
+  function isInsurancePageText(text) {
+    var t = normalize(text)
+    return (
+      t.indexOf('直接支付外部数据') >= 0 ||
+      t.indexOf('直接支付录入') >= 0 ||
+      (t.indexOf('直接支付') >= 0 && t.indexOf('外部数据') >= 0)
+    )
+  }
+  function insurancePageTitleExists(win) {
+    try {
+      var nodes = Array.prototype.slice.call(
+        win.document.querySelectorAll('h1,h2,h3,.panel-title,.tabs-title,.breadcrumb,.crumb,.title,.page-title,[class*="title"]')
+      )
+      for (var i = 0; i < nodes.length; i++) {
+        if (isVisible(nodes[i]) && isInsurancePageText(nodes[i].innerText || nodes[i].textContent || nodes[i].title || '')) return true
+      }
+    } catch (e) {}
+    return false
+  }
 
   function ensureStatus() {
     let el = document.getElementById('insurance-push-status')
@@ -122,19 +141,38 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
       if (!waitText || textExistsIn(root, waitText)) return true
       await sleep(500)
     }
-    return true
+    return false
   }
 
-  // 同时扫：① frame.location.href（同域才读得到）  ② DOM 里所有 <iframe> 的 src 属性（跨域也能读）
+  function isTemplateslistUrl(url) {
+    var value = String(url || '')
+    if (!/pay-voucher-web\\/record\\/templateslist/i.test(value)) return false
+    return value.indexOf(MENUID) >= 0 || /[?&]viewCode=zfm621198001(?:&|$)/i.test(value) || /[?&]myMenuId=2020120616061(?:&|$)/i.test(value)
+  }
+
+  async function clickUntil(root, text, ready, timeoutMs, intervalMs) {
+    var deadline = Date.now() + (timeoutMs || 60000)
+    var clickedOnce = false
+    while (Date.now() < deadline) {
+      if (ready()) return true
+      var clicked = clickTextInWin(root, text)
+      clickedOnce = clickedOnce || clicked
+      await sleep(clicked ? 700 : (intervalMs || 900))
+      if (ready()) return true
+    }
+    return ready() || clickedOnce
+  }
+
+  // 同时扫：① frame.location.href（同域才读得到）  ② DOM 里所有 <iframe> 的 src 属性（跨域也能读）。
   function pageReady(win) {
     try {
-      if (/pay-voucher-web\\/record\\/templateslist/i.test(win.location.href)) return true
+      if (isTemplateslistUrl(win.location.href)) return true
     } catch (e) {}
     try {
       var iframes = win.document.querySelectorAll('iframe')
       for (var i = 0; i < iframes.length; i++) {
         var src = iframes[i].src || iframes[i].getAttribute('src') || ''
-        if (/pay-voucher-web\\/record\\/templateslist/i.test(src)) return true
+        if (isTemplateslistUrl(src)) return true
       }
     } catch (e) {}
     try {
@@ -149,14 +187,18 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
   // 找到承载 templateslist 的 window（用于在该 window 上下文执行 fetch，确保 menuid 会话正确）
   function findTemplateslistWindow(win) {
     try {
-      if (/pay-voucher-web\\/record\\/templateslist/i.test(win.location.href)) return win
+      if (isTemplateslistUrl(win.location.href)) return win
     } catch (e) {}
     try {
       var iframes = win.document.querySelectorAll('iframe')
       for (var i = 0; i < iframes.length; i++) {
         var src = iframes[i].src || iframes[i].getAttribute('src') || ''
-        if (/pay-voucher-web\\/record\\/templateslist/i.test(src)) {
-          try { return iframes[i].contentWindow || win } catch (e) { return win }
+        if (isTemplateslistUrl(src)) {
+          try {
+            var frameWin = iframes[i].contentWindow
+            if (frameWin && frameWin.fetch) return frameWin
+          } catch (e) {}
+          return win
         }
       }
     } catch (e) {}
@@ -170,6 +212,49 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     return null
   }
 
+  async function openDirectPayPage(root) {
+    if (pageReady(root)) return true
+
+    status('🧭 自动导航：进入预算执行模块 ...')
+    if (!textExistsIn(root, '集中支付') && textExistsIn(root, '预算执行')) {
+      await clickUntil(root, '预算执行', function () {
+        return pageReady(root) || textExistsIn(root, '集中支付')
+      }, 60000)
+    }
+    if (pageReady(root)) return true
+    if (!textExistsIn(root, '集中支付')) {
+      throw new Error('当前页面找不到“集中支付”菜单。请确认已登录一体化系统，并打开过预算执行入口。')
+    }
+
+    status('🧭 自动导航：集中支付 → 支付管理 ...')
+    await clickUntil(root, '集中支付', function () {
+      return pageReady(root) || textExistsIn(root, '支付管理')
+    }, 60000)
+    if (pageReady(root)) return true
+    if (!textExistsIn(root, '支付管理')) {
+      throw new Error('没有展开“集中支付 → 支付管理”。请确认当前账号有直接支付外部数据权限。')
+    }
+
+    status('🧭 自动导航：支付管理 → 直接支付外部数据 ...')
+    await clickUntil(root, '支付管理', function () {
+      return pageReady(root) || textExistsIn(root, '直接支付外部数据') || textExistsIn(root, '直接支付录入')
+    }, 60000)
+    await sleep(300)
+    await clickUntil(root, '直接支付外部数据', function () {
+      return pageReady(root)
+    }, 45000)
+    if (!pageReady(root)) {
+      await clickUntil(root, '直接支付录入', function () {
+        return pageReady(root)
+      }, 30000)
+    }
+    if (!pageReady(root)) {
+      throw new Error('没有等到“直接支付外部数据”页面加载完成。请确认菜单权限和网络正常后重试。')
+    }
+    await sleep(1500)
+    return true
+  }
+
   try {
     if (!RECORDS.length) {
       status('❌ 没有可推送的记录', 'err')
@@ -179,35 +264,8 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
 
     var root = window.top || window
 
-    // 1. 导航：集中支付 → 支付管理 → 直接支付外部数据
     if (!pageReady(root)) {
-      status('🧭 自动导航：集中支付 → 支付管理 → 直接支付外部数据 ...')
-      // 已在某个一体化页面，未必有左侧菜单 —— 先尝试点。失败提示用户。
-      if (!textExistsIn(root, '集中支付') && textExistsIn(root, '预算执行')) {
-        status('🧭 自动打开预算执行模块 ...')
-        await clickAndWait(root, '预算执行', '集中支付', 60000)
-      }
-      if (!textExistsIn(root, '集中支付')) {
-        throw new Error('当前页面找不到"集中支付"菜单。请确认已登录一体化系统，并先打开"预算执行"模块')
-      }
-      await clickAndWait(root, '集中支付', '支付管理', 60000)
-      await sleep(400)
-      await clickAndWait(root, '支付管理', '直接支付外部数据', 60000)
-      await sleep(400)
-      clickTextInWin(root, '直接支付外部数据')
-      // 等 templateslist iframe 加载（包括跨域 iframe 的 src 属性扫描），最多 60 秒
-      var deadline = Date.now() + 60000
-      while (Date.now() < deadline) {
-        if (pageReady(root)) break
-        await sleep(500)
-      }
-      if (!pageReady(root)) {
-        // 容错：不立刻报错。后端可能已经接受 menuid 会话激活，盲试 POST，错了再说
-        status('⚠ 没看到 templateslist 加载，盲试推送...', 'warn')
-        await sleep(800)
-      } else {
-        await sleep(1500)
-      }
+      await openDirectPayPage(root)
     }
 
     status('📤 推送 ' + RECORDS.length + ' 条保险记录到一体化...')
@@ -217,8 +275,16 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
       '&progress_key=' + progressKey
 
     // 优先在 templateslist iframe 里发请求（更接近原浏览器行为：referer/cookie 上下文一致）
-    var execWin = findTemplateslistWindow(root) || window
-    var fetchFn = (execWin && execWin.fetch) ? execWin.fetch.bind(execWin) : fetch
+    var execWin = findTemplateslistWindow(root)
+    if (!execWin) {
+      throw new Error('已进入预算执行，但没有定位到“直接支付外部数据/直接支付录入”页面，请手动打开该页面后重试。')
+    }
+    var fetchFn
+    try {
+      fetchFn = (execWin && execWin.fetch) ? execWin.fetch.bind(execWin) : fetch
+    } catch (e) {
+      throw new Error('无法在“直接支付外部数据”页面上下文发起推送，请手动打开该页面后重试。')
+    }
 
     var postRes = await fetchFn(postUrl, {
       method: 'POST',
@@ -227,9 +293,24 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
       body: JSON.stringify({ data: JSON.stringify(RECORDS) })
     })
     if (!postRes.ok) throw new Error('savePayRawData HTTP ' + postRes.status)
-    var postJson = await postRes.json()
-    if (postJson.status_code && String(postJson.status_code) !== '200') {
-      throw new Error('savePayRawData 返回 ' + postJson.status_code + ': ' + (postJson.reason || ''))
+    var postText = ''
+    try { postText = await postRes.text() } catch (e) { postText = '' }
+    var postJson = null
+    try { postJson = postText ? JSON.parse(postText) : null } catch (e) {}
+    if (!postJson) {
+      if (/^\\s*</.test(postText || '')) {
+        throw new Error('savePayRawData 返回了页面内容，不是推送结果。请确认一体化登录未失效，并停在“直接支付外部数据”页面。')
+      }
+      throw new Error('savePayRawData 没有返回可识别的推送结果。')
+    }
+    var postCode = postJson.status_code != null ? String(postJson.status_code) : ''
+    var postMessage = String(postJson.reason || postJson.message || postJson.msg || '')
+    var looksOk = postJson.success === true || postJson.ok === true || /成功|完成|已保存|已接收/.test(postMessage)
+    if (!postCode && !looksOk) {
+      throw new Error('savePayRawData 未返回明确成功结果，不能确认数据已保存：' + JSON.stringify(postJson).slice(0, 500))
+    }
+    if (postCode && postCode !== '200' && postCode !== '0000') {
+      throw new Error('savePayRawData 返回 ' + postJson.status_code + ': ' + (postJson.reason || postJson.message || ''))
     }
 
     // 2. 轮询 progress
@@ -238,19 +319,29 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
       '/pay-voucher-server/progress/check?progress_key=' + progressKey +
       '&menuid=' + MENUID + '&_=' + Date.now()
     var lastPct = ''
+    var lastProgressText = ''
+    var completed = false
     var pollDeadline = Date.now() + 60000
     while (Date.now() < pollDeadline) {
       try {
         var pRes = await fetchFn(progressUrl, { credentials: 'include' })
         var pJson = await pRes.json()
         var pct = pJson.progress_value || ''
+        lastProgressText = pJson.progress_text || lastProgressText
         if (pct && pct !== lastPct) {
           status('⏳ 进度 ' + pct + '：' + (pJson.progress_text || ''))
           lastPct = pct
         }
-        if (pct === '100%') break
+        var progressText = String(pJson.progress_text || pJson.message || '')
+        if (pct === '100%' || pct === '100' || pJson.success === true || /完成|成功/.test(progressText)) {
+          completed = true
+          break
+        }
       } catch (e) {}
       await sleep(700)
+    }
+    if (!completed) {
+      throw new Error('直接支付外部数据处理进度未完成，最后进度：' + (lastPct || '未返回') + (lastProgressText ? '，' + lastProgressText : ''))
     }
 
     status('✅ 完成！已推送 ' + RECORDS.length + ' 条到 直接支付外部数据', 'ok')

@@ -44,6 +44,7 @@ Desktop.ini
 .tmp/
 tmp/
 temp/
+.tmp-userscript-build/
 *.bak
 *.backup
 *.swp

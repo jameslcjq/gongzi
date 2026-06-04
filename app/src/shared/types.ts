@@ -266,6 +266,10 @@ export type SalaryQuotaMatchLocalSummary = {
   retiredBackpayTotal: number
   retiredActualPayTotal: number
   otherActualPayTotal: number
+  /** 实发合计 = 在职实发 + 遗补实发 + 退休房补实发（取当月最新未过期报账记录），用于额度匹配前置总额校验 */
+  actualPayTotal: number
+  /** 002 数币批次的交通费合计，前置校验时从实发合计中扣除 */
+  traffic002Total: number
   message?: string
 }
 
