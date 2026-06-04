@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260604-salary-quota-match-batch001-strict'
+  var VERSION = '20260604-salary-quota-match-row-by-row'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -1178,6 +1178,52 @@ export function buildSalaryQuotaMatchScript(
     }
   }
 
+  function selectDatagridRow(row, field) {
+    if (!row) return false
+    var doc = row.ownerDocument
+    var jq = doc ? getJq(doc) : null
+    var index = rowIndex(row, 0)
+    var selected = false
+    try {
+      clickElement(row)
+      selected = true
+    } catch (error) {}
+    if (!doc || !jq) return selected
+    var candidates = Array.prototype.slice.call(doc.querySelectorAll('table[id],div[id]'))
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i]
+      try {
+        if (!jq(el).data('datagrid')) continue
+        var fields = []
+        try {
+          fields = fields.concat(jq(el).datagrid('getColumnFields') || [])
+          fields = fields.concat(jq(el).datagrid('getColumnFields', true) || [])
+        } catch (error) {}
+        if (field && fields.length && fields.indexOf(field) < 0) continue
+        var rows = jq(el).datagrid('getRows') || []
+        if (!rows[index]) continue
+        try {
+          jq(el).datagrid('scrollTo', index)
+        } catch (error) {}
+        jq(el).datagrid('selectRow', index)
+        selected = true
+      } catch (error) {}
+    }
+    return selected
+  }
+
+  async function selectSalaryItemRow(row) {
+    if (!selectDatagridRow(row, CONFIG.itemNameField)) return false
+    await sleep(CONFIG.rowSettleWait)
+    return true
+  }
+
+  async function selectQuotaRow(row) {
+    if (!selectDatagridRow(row, CONFIG.quotaAmountField)) return false
+    await sleep(250)
+    return true
+  }
+
   function findDatagridEditor(row, field) {
     var doc = row && row.ownerDocument
     var jq = doc ? getJq(doc) : null
@@ -1397,10 +1443,8 @@ export function buildSalaryQuotaMatchScript(
         var rowKey = itemName + '|' + amount + '|' + rowIndex(row, 0)
 
         status('处理：' + itemName + '\\n金额：' + formatAmount(amount))
-        clickElement(row)
-        await sleep(CONFIG.rowSettleWait)
-        if (!(await clickModify(itemPage.doc))) {
-          throw new Error('没有找到“修改”按钮：' + itemName + '。当前可见按钮：' + (visibleButtonTexts(itemPage.doc) || '未读取到'))
+        if (!(await selectSalaryItemRow(row))) {
+          throw new Error('无法选中工资单数据：' + itemName)
         }
         var quotas = await waitForQuotaRows(itemPage.doc)
         status('处理：' + itemName + '\\n工资项金额：' + formatAmount(amount) + '\\n读取到额度行：' + quotas.length + ' 行')
@@ -1421,15 +1465,32 @@ export function buildSalaryQuotaMatchScript(
         )
         for (var a = 0; a < plan.allocations.length; a++) {
           var allocation = plan.allocations[a]
-          clickElement(allocation.row)
-          await sleep(300)
+          status(
+            '逐条处理：' +
+              itemName +
+              '\\n工资项金额：' +
+              formatAmount(amount) +
+              '\\n当前指标：' +
+              allocation.label +
+              '\\n调整金额：' +
+              formatAmount(allocation.amount)
+          )
+          if (!(await selectSalaryItemRow(row))) {
+            throw new Error('无法选中工资单数据：' + itemName)
+          }
+          if (!(await selectQuotaRow(allocation.row))) {
+            throw new Error('无法选中可挂接指标：' + itemName + ' / ' + allocation.label)
+          }
+          if (!(await clickModify(itemPage.doc))) {
+            throw new Error('没有找到“修改”按钮：' + itemName + ' / ' + allocation.label + '。当前可见按钮：' + (visibleButtonTexts(itemPage.doc) || '未读取到'))
+          }
           if (!(await enterAmount(allocation.row, allocation.amount))) {
             throw new Error('无法填写挂接金额：' + itemName + ' / ' + allocation.label)
           }
-          await sleep(300)
+          await sleep(350)
+          if (!(await clickSave(itemPage.doc))) throw new Error('保存失败：' + itemName + ' / ' + allocation.label)
+          await sleep(900)
         }
-        await sleep(350)
-        if (!(await clickSave(itemPage.doc))) throw new Error('保存失败：' + itemName)
         matched += 1
         processed[rowKey] = true
         await sleep(1200)
