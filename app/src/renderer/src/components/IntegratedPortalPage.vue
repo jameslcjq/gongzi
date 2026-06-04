@@ -116,6 +116,21 @@ function activeWebview(): PortalWebview | undefined {
   return webviewMap.get(activeTabId.value)
 }
 
+async function waitForActiveWebview(maxWait = 15000): Promise<PortalWebview | undefined> {
+  const deadline = Date.now() + maxWait
+  while (Date.now() < deadline) {
+    const wv = activeWebview()
+    if (wv) {
+      try {
+        wv.getWebContentsId()
+        return wv
+      } catch {}
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250))
+  }
+  return activeWebview()
+}
+
 function findTabById(id: string): Tab | undefined {
   return tabs.value.find((t) => t.id === id)
 }
@@ -351,13 +366,14 @@ async function processPushQueue(): Promise<void> {
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true
   try {
-    const wv = activeWebview()
+    const wv = await waitForActiveWebview()
     if (!wv) {
-      ElMessage.error('一体化 webview 尚未就绪，推送任务已丢弃，请重新触发')
+      ElMessage.error('一体化 webview 尚未就绪，推送任务已停止，请重新触发')
       pendingPushQueue.value = []
       return
     }
     const queuedSteps = pendingPushQueue.value.slice()
+    ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
     if (queuedSteps[0]) await ensureModuleForStep(wv, queuedSteps[0])
     if (!(await runPushPreflight(wv, queuedSteps))) {
       await markStepsStatus(queuedSteps, 'failed')
@@ -383,6 +399,7 @@ async function processPushQueue(): Promise<void> {
       // 步骤间隔，让浮窗状态可读
       await new Promise((r) => window.setTimeout(r, 1200))
     }
+    ElMessage.success(`一体化推送完成：${queuedSteps.length} 步`)
   } finally {
     processingPushQueue.value = false
   }

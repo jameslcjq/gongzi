@@ -246,11 +246,14 @@ function enqueueIntegratedPush(steps: PushStep[], stepHints: string[], label: st
     ElMessage.warning('没有可推送的文件')
     return
   }
-  pendingPushQueue.value = steps
   ElMessage.info(
     `已准备 ${steps.length} 步${label}（${stepHints.join('、')}），正在跳转到"一体化对接"...`
   )
   requestSwitchToIntegration()
+  const queuedSteps = steps.slice()
+  window.setTimeout(() => {
+    pendingPushQueue.value = queuedSteps
+  }, 600)
 }
 
 async function appendInsurancePushStep(
