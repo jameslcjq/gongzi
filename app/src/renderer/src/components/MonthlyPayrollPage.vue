@@ -19,6 +19,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, DocumentChecked, FolderOpened, Printer, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import {
   pendingPushQueue,
+  pushInProgress,
   requestSwitchToIntegration,
   type PushStep
 } from '../integration/insurancePushQueue'
@@ -245,6 +246,11 @@ function canPushAll(row: MonthlyPayrollRun): boolean {
 function enqueueIntegratedPush(steps: PushStep[], stepHints: string[], label: string): void {
   if (!steps.length) {
     ElMessage.warning('没有可推送的文件')
+    return
+  }
+  // 正在推送时拒绝再次点击，避免覆盖当前队列、打断进行中的推送
+  if (pushInProgress.value || pendingPushQueue.value.length > 0) {
+    ElMessage.warning('正在推送中，请等待当前推送完成后再试')
     return
   }
   ElMessage.info(

@@ -251,12 +251,12 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
 
     status('导入成功：' + (result && (result.data || result.reason || result.message) || FILE_NAME), 'ok')
     clearStatusLater(10000)
-    return { ok: true, response: result, agency: agency, batchId: batchId, trace: TRACE }
+    return { ok: true, response: result, agency: agency, batchId: batchId, trace: TRACE, traceText: TRACE.join('\\n') }
   } catch (error) {
     var message = error && error.message ? error.message : String(error)
     status('导入失败：' + message, 'err')
     clearStatusLater(15000)
-    return { ok: false, message: message, trace: TRACE }
+    return { ok: false, message: message, trace: TRACE, traceText: TRACE.join('\\n') }
   }
 })()
 `

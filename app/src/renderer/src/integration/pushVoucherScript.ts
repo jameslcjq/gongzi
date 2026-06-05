@@ -283,7 +283,8 @@ export function buildPushVoucherScript(
         return {
           ok: false,
           reason: '未能打开“凭证录入”页面：菜单中未找到入口，页内直接打开(iframe)也未成功（一体化可能已升级为 SmartFin，需按新菜单适配；详见日志“门户结构诊断”）',
-          trace: TRACE
+          trace: TRACE,
+          traceText: TRACE.join('\\n')
         }
       }
     }
@@ -376,12 +377,12 @@ export function buildPushVoucherScript(
 
     status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\\n' + detailText : '') + '\\n一体化返回：' + rawText, 'ok')
     clearStatusLater(12000)
-    return { ok: true, response: json, trace: TRACE }
+    return { ok: true, response: json, trace: TRACE, traceText: TRACE.join('\\n') }
   } catch (error) {
     var msg = error && error.message ? error.message : String(error)
     status('❌ ' + msg, 'err')
     clearStatusLater(12000)
-    return { ok: false, reason: msg, trace: TRACE }
+    return { ok: false, reason: msg, trace: TRACE, traceText: TRACE.join('\\n') }
   }
 })()
 `

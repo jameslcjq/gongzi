@@ -215,6 +215,40 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     return null
   }
 
+  function injectTemplateslistIframe(root) {
+    try {
+      var doc = (root && root.document) || document
+      var existing = doc.getElementById('payroll-templateslist-iframe')
+      if (existing) return existing
+      var url = '/pay-voucher-web/record/templateslist.html?menuid=' + MENUID + '&viewCode=zfm621198001&myMenuId=2020120616061'
+      var ifr = doc.createElement('iframe')
+      ifr.id = 'payroll-templateslist-iframe'
+      ifr.src = url
+      ifr.style.cssText = 'position:fixed;left:-99999px;top:0;width:1200px;height:800px;border:0;z-index:-1;'
+      doc.body.appendChild(ifr)
+      return ifr
+    } catch (e) { return null }
+  }
+
+  // 菜单点不动时（门户升级为 SmartFin），页内注入同源 iframe 直达"直接支付外部数据"页(templateslist)，
+  // onload 后确认确实落在该页（而非被重定向到登录/SSO）；之后上传按该 iframe 的 fetch 上下文进行。
+  async function openDirectPayViaIframe(root) {
+    var ifr = injectTemplateslistIframe(root)
+    if (!ifr) return false
+    await new Promise(function (resolve) {
+      var done = false
+      function fin() { if (!done) { done = true; resolve() } }
+      try { ifr.addEventListener('load', fin) } catch (e) {}
+      setTimeout(fin, 30000)
+    })
+    await sleep(2000)
+    try {
+      var w = ifr.contentWindow
+      if (w && w.location && w.location.href) return isTemplateslistUrl(w.location.href)
+    } catch (e) {}
+    return pageReady(root)
+  }
+
   async function openDirectPayPage(root) {
     if (pageReady(root)) return true
 
@@ -262,13 +296,30 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     if (!RECORDS.length) {
       status('❌ 没有可推送的记录', 'err')
       clearStatusLater(5000)
-      return { ok: false, reason: '记录为空', trace: TRACE }
+      return { ok: false, reason: '记录为空', trace: TRACE, traceText: TRACE.join('\\n') }
     }
 
     var root = window.top || window
 
     if (!pageReady(root)) {
-      await openDirectPayPage(root)
+      try {
+        await openDirectPayPage(root)
+      } catch (navErr) {
+        status('🧭 菜单导航失败：' + (navErr && navErr.message ? navErr.message : navErr) + '，改用页内 iframe 直达 ...', 'warn')
+      }
+    }
+    if (!pageReady(root)) {
+      await openDirectPayViaIframe(root)
+    }
+    if (!pageReady(root)) {
+      status('❌ 未能打开"直接支付外部数据"页面', 'err')
+      clearStatusLater(10000)
+      return {
+        ok: false,
+        reason: '未能打开"直接支付外部数据"页：菜单导航与页内 iframe 直达都失败（一体化可能已升级为 SmartFin，需按新菜单适配；详见日志"门户结构诊断"）',
+        trace: TRACE,
+        traceText: TRACE.join('\\n')
+      }
     }
 
     status('📤 推送 ' + RECORDS.length + ' 条保险记录到一体化...')
@@ -349,12 +400,12 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
 
     status('✅ 完成！已推送 ' + RECORDS.length + ' 条到 直接支付外部数据', 'ok')
     clearStatusLater(8000)
-    return { ok: true, recordCount: RECORDS.length, trace: TRACE }
+    return { ok: true, recordCount: RECORDS.length, trace: TRACE, traceText: TRACE.join('\\n') }
   } catch (error) {
     var msg = error && error.message ? error.message : String(error)
     status('❌ ' + msg, 'err')
     clearStatusLater(12000)
-    return { ok: false, reason: msg, trace: TRACE }
+    return { ok: false, reason: msg, trace: TRACE, traceText: TRACE.join('\\n') }
   }
 })()
 `

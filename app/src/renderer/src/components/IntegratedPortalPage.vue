@@ -23,7 +23,7 @@ import { buildSalarySystemImportScript } from '../integration/salarySystemImport
 // 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 预览确认后入库
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
 import { buildPushVoucherScript } from '../integration/pushVoucherScript'
-import { pendingPushQueue, type PushStep } from '../integration/insurancePushQueue'
+import { pendingPushQueue, pushInProgress, type PushStep } from '../integration/insurancePushQueue'
 import { appendPushLogLine, openPushLogFolder } from '../integration/pushLogger'
 import { buildPortalDiagnosticsScript } from '../integration/portalDiagnosticsScript'
 import {
@@ -256,11 +256,22 @@ function logPush(
 
 // 把推送脚本（保险/凭证/工资）内部的导航/上传 trace 也写进面板和日志文件，
 // 这样"卡在哪一步菜单/哪一次上传"都能在文件里看到。
-function logStepTrace(runId: number, kindLabel: string, trace: unknown): void {
-  if (!Array.isArray(trace)) return
-  for (const raw of trace) {
-    const line = String(raw ?? '').trim()
-    if (line) logPush(runId, 'info', '脚本', `${kindLabel}｜${line}`)
+function logStepTrace(runId: number, kindLabel: string, trace: unknown, traceText?: unknown): void {
+  // 兼容两种回传：数组 trace 或字符串 traceText（字符串通道对 executeJavaScript 序列化最稳）
+  let lines: string[] = []
+  if (Array.isArray(trace)) lines = trace.map((x) => String(x ?? ''))
+  else if (typeof traceText === 'string') lines = traceText.split('\n')
+  let any = false
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (line) {
+      logPush(runId, 'info', '脚本', `${kindLabel}｜${line}`)
+      any = true
+    }
+  }
+  // 脚本应有 trace 却一条没取到 → 留线索（便于发现"返回值里 trace 丢了"这类问题）
+  if (!any && trace === undefined && traceText === undefined) {
+    logPush(runId, 'warn', '脚本', `${kindLabel}｜未取到脚本内部 trace（返回值缺少 trace 字段）`)
   }
 }
 
@@ -338,7 +349,27 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
   })
 }
 
-function execStepScript(wv: PortalWebview, code: string, label: string): Promise<unknown> {
+// 轮询一句无害脚本，直到 webview 真正挂载且 dom-ready，注入才不会报
+// "The WebView must be attached to the DOM and the dom-ready event emitted..."。
+// 页面跳转/重定向期间 executeJavaScript 会抛错或卡住，这里逐次重试直到就绪或超时。
+async function waitForWebviewReady(wv: PortalWebview, timeoutMs = 60000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      await withTimeout(wv.executeJavaScript('1'), 3000, 'probe')
+      return true
+    } catch {
+      await new Promise((r) => window.setTimeout(r, 800))
+    }
+  }
+  return false
+}
+
+async function execStepScript(wv: PortalWebview, code: string, label: string): Promise<unknown> {
+  // 先确保页面就绪，避免在页面跳转/重载途中注入而直接失败
+  if (!(await waitForWebviewReady(wv, 60000))) {
+    throw new Error(`${label}：一体化页面未就绪（webview 仍在加载/跳转），已停止本步`)
+  }
   return withTimeout(
     wv.executeJavaScript(code),
     PUSH_SCRIPT_TIMEOUT_MS,
@@ -358,8 +389,9 @@ async function runOneStep(
       reason?: string
       recordCount?: number
       trace?: string[]
+      traceText?: string
     }
-    logStepTrace(runId, '保险', r?.trace)
+    logStepTrace(runId, '保险', r?.trace, r?.traceText)
     if (r?.ok) {
       ElMessage.success(`✅ 保险已推送 ${r.recordCount} 条 / ${step.label}`)
     } else {
@@ -371,8 +403,8 @@ async function runOneStep(
       wv,
       buildPushVoucherScript(step.fileName, step.fileBase64, step.label),
       '凭证'
-    )) as { ok: boolean; reason?: string; trace?: string[] }
-    logStepTrace(runId, '凭证', r?.trace)
+    )) as { ok: boolean; reason?: string; trace?: string[]; traceText?: string }
+    logStepTrace(runId, '凭证', r?.trace, r?.traceText)
     if (r?.ok) {
       ElMessage.success(`✅ 凭证已导入 / ${step.label}`)
     } else {
@@ -402,7 +434,7 @@ async function runOneStep(
         }),
         name
       )) as SalarySystemImportResult | undefined
-      logStepTrace(runId, name, r?.trace)
+      logStepTrace(runId, name, r?.trace, r?.traceText)
       if (r?.ok) {
         ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
       } else {
@@ -427,7 +459,7 @@ async function runOneStep(
       }),
       name
     )) as SalarySystemImportResult | undefined
-    logStepTrace(runId, name, r?.trace)
+    logStepTrace(runId, name, r?.trace, r?.traceText)
     if (r?.ok) ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
     else throw new Error(`${name}失败：${r?.message || '未知错误'}`)
   }
@@ -473,6 +505,10 @@ async function ensureModuleTarget(
   const name = moduleDisplayName(target)
   let result: IntegrationModuleNavigationResult | undefined
   try {
+    if (!(await waitForWebviewReady(wv, 30000))) {
+      logPush(runId, 'warn', '切换模块', `「${name}」跳过：页面未就绪（webview 仍在加载/跳转），交给页面脚本自动导航`, name)
+      return
+    }
     result = (await withTimeout(
       wv.executeJavaScript(buildOpenIntegrationModuleScript(target)),
       MODULE_TARGET_TIMEOUT_MS,
@@ -608,6 +644,7 @@ async function processPushQueue(): Promise<void> {
   if (processingPushQueue.value) return
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true
+  pushInProgress.value = true
   const runId = ++pushRunSeq
   currentPushRunId = runId
   try {
@@ -640,18 +677,13 @@ async function processPushQueue(): Promise<void> {
       const name = stepKindLabel(step)
       try {
         await markPushStatus(step, 'queued')
-        const target = moduleTargetForStep(step)
-        if (target) {
-          logPush(
-            runId,
-            'info',
-            '切换模块',
-            `${name}：尝试打开「${moduleDisplayName(target)}」`,
-            moduleDisplayName(target)
-          )
-          await ensureModuleTarget(wv, target, runId)
-        } else {
+        if (step.kind === 'salary-system-import') {
           logPush(runId, 'info', '上传', `${name}：后台接口推送，无需跳转页面`, '后台接口')
+        } else {
+          // 不再做外层模块切换：保险/凭证脚本内部会自己开模块并带 iframe 兜底；
+          // 外层 ensureModuleTarget 只是重复点菜单，既慢（曾空耗 84-90s）又可能把页面切到导航中途、
+          // 导致 webview 未就绪而整步失败。
+          logPush(runId, 'info', '准备', `${name}：交由页面脚本自行导航到目标页（含 iframe 兜底）`)
         }
         logPush(runId, 'info', '上传', `${name}：开始执行（${stepDetail(step)}）`)
         await runOneStep(wv, step, runId)
@@ -666,12 +698,16 @@ async function processPushQueue(): Promise<void> {
         ElMessage.error(`执行 ${step.kind} 步骤失败，已停止后续 ${stopped} 个步骤：${msg}`)
         // 失败时自动抓取门户结构快照（只读），便于在看不到内网页面时定位菜单/iframe 布局
         try {
-          const diag = (await withTimeout(
-            wv.executeJavaScript(buildPortalDiagnosticsScript()),
-            15000,
-            '门户结构诊断超时'
-          )) as unknown
-          logStepTrace(runId, '诊断', Array.isArray(diag) ? diag : [String(diag)])
+          if (await waitForWebviewReady(wv, 15000)) {
+            const diag = (await withTimeout(
+              wv.executeJavaScript(buildPortalDiagnosticsScript()),
+              15000,
+              '门户结构诊断超时'
+            )) as unknown
+            logStepTrace(runId, '诊断', Array.isArray(diag) ? diag : [String(diag)])
+          } else {
+            logPush(runId, 'warn', '诊断', '页面未就绪，未能抓取门户结构（webview 仍在加载/跳转）')
+          }
         } catch (diagError) {
           logPush(
             runId,
@@ -689,6 +725,7 @@ async function processPushQueue(): Promise<void> {
     ElMessage.success(`一体化推送完成：${queuedSteps.length} 步`)
   } finally {
     processingPushQueue.value = false
+    pushInProgress.value = false
   }
 }
 
@@ -941,8 +978,15 @@ async function openSalaryPlanInput(): Promise<void> {
 }
 
 type SalarySystemImportResult =
-  | { ok: true; response?: unknown; agency?: { agency_name?: string }; batchId?: string; trace?: string[] }
-  | { ok: false; message?: string; trace?: string[] }
+  | {
+      ok: true
+      response?: unknown
+      agency?: { agency_name?: string }
+      batchId?: string
+      trace?: string[]
+      traceText?: string
+    }
+  | { ok: false; message?: string; trace?: string[]; traceText?: string }
 
 // ---------------------------------------------------------------------------
 // 一体化页面脚本注入（跨 frame）
