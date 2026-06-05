@@ -23,19 +23,30 @@ import StatReportPage from './components/StatReportPage.vue'
 import RecordFormDialog from './components/RecordFormDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import WorksheetView from './components/WorksheetView.vue'
+import {
+  displayWorksheetName,
+  modules,
+  nonWorksheetModuleKeys,
+  visibleModules
+} from './appModules'
+import {
+  appendSyncSummaryWarnings,
+  buildBudgetActiveMasterSyncWarnings,
+  buildHrMasterSyncWarnings,
+  buildTeacherDetailMasterSyncWarnings,
+  buildTownshipMasterSyncWarnings,
+  flattenSyncDiffRows,
+  type SyncDiffTableRow
+} from './syncDiffHelpers'
 import type {
   AnnualReportWorkflowInput,
   AppSummary,
-  BudgetActiveMasterSyncPreview,
   ExcelImportLog,
-  HrMasterSyncPreview,
   ImportBatchSummary,
   ImportWatcherStatus,
   LookupFailureEntry,
   MasterSyncSelectionItem,
-  TeacherDetailMasterSyncPreview,
   TownshipIdCardFillResult,
-  TownshipMasterSyncPreview,
   WorkflowDefinition,
   WorkflowRunResult,
   WorkflowRunPayload,
@@ -44,13 +55,6 @@ import type {
   WorksheetRecordValue,
   WorksheetRecordsResult
 } from '@shared/types'
-
-type ModuleGroup = {
-  key: string
-  label: string
-  tables: string[]
-  hidden?: boolean
-}
 
 type IpcResponse<T> = {
   success: boolean
@@ -84,45 +88,6 @@ type LicenseDeviceInfo = {
   hardware: string
 }
 
-const modules: ModuleGroup[] = [
-  { key: 'integration', label: '一体化对接', tables: [] },
-  { key: 'integrated', label: '工资数据', tables: ['在职工资', '退休工资', '其他工资'] },
-  { key: 'payroll', label: '工资业务', tables: [] },
-  { key: 'budget', label: '预算', tables: ['预算在职', '预算退休', '预算其他'] },
-  { key: 'annual', label: '工资年报', tables: ['工资年报', '绩效工资'] },
-  { key: 'township', label: '乡镇补贴', tables: ['乡镇补贴'] },
-  {
-    key: 'housing',
-    label: '退休房补',
-    tables: ['人员明细导出', '新房补']
-  },
-  { key: 'pivot', label: '统计分析', tables: [] },
-  {
-    key: 'hr',
-    label: '人事管理',
-    tables: [
-      '人事信息',
-      '在编教职工基本信息',
-      '教职工学历',
-      '教职工教师资格',
-      '教职工任教信息',
-      '教职工工作履历',
-      '职级简历'
-    ]
-  }
-]
-
-const visibleModules = modules.filter((module) => !module.hidden)
-const worksheetDisplayNames: Record<string, string> = {
-  在职工资: '在职工资',
-  退休工资: '退休工资',
-  其他工资: '其他工资'
-}
-
-function displayWorksheetName(name: string) {
-  return worksheetDisplayNames[name] ?? name
-}
-
 const summary = ref<AppSummary | null>(null)
 const error = ref('')
 const loginStorageKey = 'salary-system:logged-in'
@@ -146,8 +111,7 @@ const hasVisitedIntegrationModule = ref(activeModuleKey.value === 'integration')
 const hasVisitedPivotModule = ref(activeModuleKey.value === 'pivot')
 // 工资表格大块（工资数据/预算/年报/乡镇/房补/人事）共用一个 WorksheetView；
 // 一体化、工资业务、统计分析这三个模块没有自己的工作表侧栏。
-const NON_WORKSHEET_MODULE_KEYS = new Set(['integration', 'payroll', 'pivot'])
-const showWorksheetGroup = computed(() => !NON_WORKSHEET_MODULE_KEYS.has(activeModuleKey.value))
+const showWorksheetGroup = computed(() => !nonWorksheetModuleKeys.has(activeModuleKey.value))
 const hasVisitedWorksheetGroup = ref(showWorksheetGroup.value)
 const selectedWorksheetId = ref('')
 const worksheetRecords = ref<WorksheetRecordsResult | null>(null)
@@ -177,17 +141,6 @@ let hrMasterSyncPrompting = false
 let townshipSyncPrompting = false
 let budgetActiveSyncPrompting = false
 let teacherDetailSyncPrompting = false
-
-type SyncDiffTableRow = MasterSyncSelectionItem & {
-  key: string
-  sourceName: string
-  name: string
-  action: 'insert' | 'update'
-  fieldName: string
-  currentValue: string
-  nextValue: string
-  selected: boolean
-}
 
 const syncDiffDialogVisible = ref(false)
 const syncDiffDialogTitle = ref('')
@@ -865,36 +818,6 @@ async function promptTeacherDetailMasterSync() {
   }
 }
 
-function flattenSyncDiffRows(
-  sourceName: string,
-  diffs: Array<{
-    idCard: string
-    name: string
-    action?: 'insert' | 'update'
-    changes: Array<{ fieldName: string; currentValue: string; nextValue: string }>
-    sourceRecordId?: number
-    budgetRecordId?: number
-    townshipRecordId?: number
-  }>,
-  sourceRecordKey: 'sourceRecordId' | 'budgetRecordId' | 'townshipRecordId'
-): SyncDiffTableRow[] {
-  return diffs.flatMap((diff) => {
-    const sourceRecordId = diff[sourceRecordKey]
-    return diff.changes.map((change) => ({
-      key: `${sourceName}|${sourceRecordId ?? ''}|${diff.idCard}|${change.fieldName}`,
-      sourceName,
-      sourceRecordId,
-      idCard: diff.idCard,
-      name: diff.name,
-      action: diff.action ?? 'update',
-      fieldName: change.fieldName,
-      currentValue: change.currentValue,
-      nextValue: change.nextValue,
-      selected: true
-    }))
-  })
-}
-
 function openSyncDiffDialog(
   title: string,
   summaryText: string,
@@ -907,40 +830,6 @@ function openSyncDiffDialog(
   return new Promise((resolve) => {
     syncDiffResolver = resolve
   })
-}
-
-function buildHrMasterSyncWarnings(preview: HrMasterSyncPreview): string[] {
-  return [
-    ...(preview.missingIdCardRows
-      ? [`${displayWorksheetName('在职工资')}有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
-      : []),
-    ...(preview.missingLookupRows
-      ? [`${displayWorksheetName('在职工资')}有 ${preview.missingLookupRows} 条按工资金额未匹配到岗位/薪级对照，未纳入本次更新。`]
-      : [])
-  ]
-}
-
-function buildBudgetActiveMasterSyncWarnings(preview: BudgetActiveMasterSyncPreview): string[] {
-  return preview.missingIdCardRows
-    ? [`预算在职有 ${preview.missingIdCardRows} 条缺少证件号码，未纳入人事信息匹配。`]
-    : []
-}
-
-function buildTeacherDetailMasterSyncWarnings(preview: TeacherDetailMasterSyncPreview): string[] {
-  return preview.missingIdCardRows
-    ? [`在编教职工基本信息有 ${preview.missingIdCardRows} 条缺少身份证号码，未纳入人事信息匹配。`]
-    : []
-}
-
-function buildTownshipMasterSyncWarnings(preview: TownshipMasterSyncPreview): string[] {
-  return preview.missingMasterRows
-    ? [`乡镇补贴有 ${preview.missingMasterRows} 条身份证号在人事信息中未匹配到，未纳入本次更新。`]
-    : []
-}
-
-function appendSyncSummaryWarnings(summary: string, warnings: string[]): string {
-  if (warnings.length === 0) return summary
-  return `${summary}；${warnings.join('；')}`
 }
 
 async function showIdCardLookupNotice(title: string, warnings: string[]): Promise<void> {

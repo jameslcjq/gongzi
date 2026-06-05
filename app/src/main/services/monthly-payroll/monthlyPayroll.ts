@@ -1,11 +1,10 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { basename, extname, join } from 'node:path'
-import * as XLSX from 'xlsx'
+import { mkdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { failRule, okRule } from '../ruleResult'
 import type {
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
-  MonthlyPayrollSourcePeriodInspection,
+  MonthlyPayrollSalaryPrintPageSummary,
   MonthlyPayrollVoucherPageCounts,
   MonthlyPayrollWorkflowInput,
   RuleResult,
@@ -32,6 +31,7 @@ import {
 import {
   applyIntegratedWriteBackPlan,
   applyTaxAndRecomputeIntegratedActive,
+  buildIntegratedActiveBackpayAdjustmentPlan,
   buildIntegratedActiveWriteBackPlan,
   buildIntegratedOtherWriteBackPlan,
   buildMonthlyPayrollWriteBackPreview,
@@ -55,7 +55,6 @@ import {
   isMonthlyPayrollMonthArchived,
   normalizeMonthlyPayrollDataSourceMode,
   persistMonthlyPayrollRun,
-  resolvePayrollPeriod
 } from './monthlyPayrollRuns'
 import { registerMonthlyPayrollSources } from './monthlyPayrollSources'
 import {
@@ -67,7 +66,7 @@ import {
   toChineseRmb
 } from './voucherSheet'
 import { sumSocialByCanonicalName, sumSocialByKeyword } from './socialSecuritySummary'
-import { getSalaryWorkbookPrintPageSummary, writeTaxToSalaryWorkbookViaExcel } from './printSalaryViaExcel'
+import { getSalaryWorkbookPrintPageSummary } from './printSalaryViaExcel'
 import { writeSalaryImportWorkbook } from './salaryImportWorkbook'
 import {
   addBackpayAdjustment,
@@ -93,6 +92,30 @@ import {
   roundMoney,
   text
 } from './monthlyPayrollUtils'
+import {
+  gridColumns,
+  timestamp,
+  writeWorkbook
+} from './monthlyPayrollWorkbookUtils'
+import {
+  assertCurrentPayrollPeriod,
+  isIntegratedDataSource,
+  missingSourceMessage,
+  normalizeList,
+  normalizeMonthlyPayrollInput,
+  validateMonthlyPayrollSourcePeriods
+} from './monthlyPayrollPeriodChecks'
+import {
+  appendBusinessSummaryMessages,
+  buildBusinessSummary,
+  buildSalarySummaryFromIntegratedAggregates,
+  buildSalaryWorkbookBusinessSummary
+} from './monthlyPayrollBusinessSummary'
+import {
+  applyTaxToSalarySummary,
+  backupAndWriteTaxToSalaryWorkbook,
+  buildTaxByIdCardFromSummary
+} from './monthlyPayrollTax'
 export {
   archiveMonthlyPayrollRun,
   cancelMonthlyPayrollMonthClose,
@@ -101,331 +124,16 @@ export {
   listMonthlyPayrollRuns,
   updateMonthlyPayrollPushStatus
 } from './monthlyPayrollRuns'
-
-type MonthlyPayrollBusinessSummary = {
-  activeCount: number
-  activePayableTotal: number
-  activeActualPay: number
-  survivorCount: number
-  survivorActualPay: number
-  retiredHousingCount: number
-  retiredHousingActualPay: number
-}
-
-// 业务口径：有工资表 Excel 时走兼容模式，用它校准本地工资数据；没有工资表时以本地工资表为权威来源。
-function normalizeMonthlyPayrollInput(
-  input?: MonthlyPayrollWorkflowInput
-): MonthlyPayrollWorkflowInput {
-  const hasSalaryWorkbook = Boolean(input?.salaryWorkbookPath)
-  const hasSocialSecurityWorkbook = Boolean(input?.socialSecurityWorkbookPath)
-  const normalized: MonthlyPayrollWorkflowInput = {
-    ...(input ?? {}),
-    dataSourceMode: hasSalaryWorkbook ? 'salary-workbook' : 'integrated',
-    processScope: hasSocialSecurityWorkbook ? 'salary-social' : 'salary'
-  }
-  if (!hasSocialSecurityWorkbook) {
-    return { ...normalized, socialSecurityWorkbookPath: undefined }
-  }
-  return normalized
-}
+export { inspectMonthlyPayrollSourcePeriods } from './monthlyPayrollPeriodChecks'
 
 const workflowName = '月度工资报账预处理'
 const generateWorkflowName = '月度工资报账汇总生成'
 // 财政凭证附件要求：保险凭证固定 7 页；工资凭证页数另按工资表、遗补、退休房补动态统计。
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
-
-function isIntegratedDataSource(input: MonthlyPayrollWorkflowInput | undefined): boolean {
-  return normalizeMonthlyPayrollDataSourceMode(input?.dataSourceMode) === 'integrated'
-}
-
-function missingSourceMessage(input: MonthlyPayrollWorkflowInput | undefined): string | null {
-  if (!input) return '月度工资报账需要先选择处理月份。'
-  return null
-}
-
-function currentPayrollPeriod(): { year: number; month: number } {
-  const now = new Date()
-  return { year: now.getFullYear(), month: now.getMonth() + 1 }
-}
-
-function assertCurrentPayrollPeriod(
-  input: MonthlyPayrollWorkflowInput | undefined
-): { year: number; month: number } {
-  // 工资报账只允许当月重新生成，历史月份只能查看归档，防止覆盖已报账结果。
-  const target = resolvePayrollPeriod(input)
-  const current = currentPayrollPeriod()
-  if (target.year !== current.year || target.month !== current.month) {
-    throw new Error(`工资报账只能处理当月业务，请切回${current.year}年${current.month}月。`)
-  }
-  return target
-}
-
-function previousPayrollPeriod(period: { year: number; month: number }): { year: number; month: number } {
-  return period.month > 1
-    ? { year: period.year, month: period.month - 1 }
-    : { year: period.year - 1, month: 12 }
-}
-
-function periodKey(period: { year: number; month: number }): string {
-  return `${period.year}-${String(period.month).padStart(2, '0')}`
-}
-
-function periodLabelFromKey(key: string): string {
-  const [year, month] = key.split('-')
-  return `${Number(year)}年${Number(month)}月`
-}
-
-function periodRangeCovers(range: PayrollPeriodRange, key: string): boolean {
-  const start = range.startMonth <= range.endMonth ? range.startMonth : range.endMonth
-  const end = range.startMonth <= range.endMonth ? range.endMonth : range.startMonth
-  return start <= key && key <= end
-}
-
-function periodRangeEqualsMonth(range: PayrollPeriodRange, key: string): boolean {
-  return range.startMonth === key && range.endMonth === key
-}
-
-function normalizeList(values: string[] | undefined): string[] {
-  return Array.from(new Set((values ?? []).map((value) => text(value)).filter(Boolean)))
-}
-
-function formatPeriodRange(range: PayrollPeriodRange): string {
-  const start = periodLabelFromKey(range.startMonth)
-  const end = periodLabelFromKey(range.endMonth)
-  return range.startMonth === range.endMonth ? start : `${start}至${end}`
-}
-
-function formatPeriodRanges(ranges: PayrollPeriodRange[]): string[] {
-  return ranges
-    .slice()
-    .sort((left, right) =>
-      left.startMonth.localeCompare(right.startMonth) || left.endMonth.localeCompare(right.endMonth)
-    )
-    .map(formatPeriodRange)
-}
-
-function buildSocialSecurityPeriodSummary(
-  targetDate: { year: number; month: number },
-  socialSecurity: SocialSecuritySummary
-): MonthlyPayrollSourcePeriodInspection['socialSecurity'] {
-  const targetKey = periodKey(targetDate)
-  const targetLabel = periodLabelFromKey(targetKey)
-  const extraPeriods = formatPeriodRanges(
-    socialSecurity.periods.filter((range) => !periodRangeCovers(range, targetKey))
-  )
-  return {
-    periods: formatPeriodRanges(socialSecurity.periods),
-    message: extraPeriods.length
-      ? `已检测到社保所属期：包含${targetLabel}，另含补缴/调整所属期 ${extraPeriods.join('、')}`
-      : `已检测到社保所属期：包含${targetLabel}`
-  }
-}
-
-function buildTaxPeriodSummary(
-  targetDate: { year: number; month: number },
-  tax: TaxSummary
-): MonthlyPayrollSourcePeriodInspection['tax'] {
-  const expectedKey = periodKey(previousPayrollPeriod(targetDate))
-  return {
-    periods: formatPeriodRanges(tax.periods),
-    message: `已检测到个税所属期：${formatPeriodRanges(tax.periods).join('、')}（本月应申报${periodLabelFromKey(expectedKey)}个税）`
-  }
-}
-
-function validateMonthlyPayrollSourcePeriods(
-  targetDate: { year: number; month: number },
-  socialSecurity: SocialSecuritySummary | undefined,
-  tax: TaxSummary | undefined
-): void {
-  const targetKey = periodKey(targetDate)
-  const targetLabel = periodLabelFromKey(targetKey)
-
-  if (socialSecurity) {
-    if (socialSecurity.periods.length === 0) {
-      throw new Error('社保文件未识别到“费款所属期起/止”，无法确认是否包含本月，请更换为含所属期列的社保未申报汇总。')
-    }
-    if (!socialSecurity.periods.some((range) => periodRangeCovers(range, targetKey))) {
-      throw new Error(`社保文件必须包含${targetLabel}。当前检测到：${formatPeriodRanges(socialSecurity.periods).join('、')}，请更换文件。`)
-    }
-  }
-
-  if (tax) {
-    const expectedKey = periodKey(previousPayrollPeriod(targetDate))
-    const expectedLabel = periodLabelFromKey(expectedKey)
-    if (tax.periods.length === 0) {
-      throw new Error('个税文件未识别到“税款所属期起/止”，无法确认是否为上月个税，请更换为含所属期列的个税计算表。')
-    }
-    if (!tax.periods.every((range) => periodRangeEqualsMonth(range, expectedKey))) {
-      throw new Error(`个税文件税款所属期应为${expectedLabel}（${targetLabel}申报上月个税）。当前检测到：${formatPeriodRanges(tax.periods).join('、')}，请更换文件。`)
-    }
-  }
-}
-
-export async function inspectMonthlyPayrollSourcePeriods(
-  input?: MonthlyPayrollWorkflowInput
-): Promise<MonthlyPayrollSourcePeriodInspection> {
-  input = normalizeMonthlyPayrollInput(input)
-  const targetDate = assertCurrentPayrollPeriod(input)
-  const [socialSecurity, tax] = await Promise.all([
-    input.socialSecurityWorkbookPath
-      ? parseSocialSecurityWorkbook(input.socialSecurityWorkbookPath)
-      : Promise.resolve<SocialSecuritySummary | undefined>(undefined),
-    input.taxWorkbookPath
-      ? parseTaxWorkbook(input.taxWorkbookPath)
-      : Promise.resolve<TaxSummary | undefined>(undefined)
-  ])
-  validateMonthlyPayrollSourcePeriods(targetDate, socialSecurity, tax)
-  return {
-    socialSecurity: socialSecurity ? buildSocialSecurityPeriodSummary(targetDate, socialSecurity) : undefined,
-    tax: tax ? buildTaxPeriodSummary(targetDate, tax) : undefined
-  }
-}
-
-function buildTaxByIdCardFromSummary(tax: TaxSummary | undefined): Record<string, number> {
-  const map: Record<string, number> = {}
-  if (!tax) return map
-  for (const row of tax.rows) {
-    if (!row.idCard) continue
-    map[row.idCard] = row.taxAmount
-  }
-  return map
-}
-
-function applyTaxToSalarySummary(
-  salary: SalarySummary,
-  taxByIdCard: Record<string, number>,
-  options: { clearTaxWhenMissing?: boolean } = {}
-): SalarySummary {
-  // 个税表是本月扣税来源；未提供个税表时可按业务口径把本月扣税清零重新算实发。
-  if (Object.keys(taxByIdCard).length === 0 && !options.clearTaxWhenMissing) return salary
-
-  let oldTaxTotal = 0
-  let nextTaxTotal = 0
-  const activePeople = salary.activePeople.map((person) => {
-    const currentTax = num(person.values['当月个人所得税'])
-    const hasOverride = Object.prototype.hasOwnProperty.call(taxByIdCard, person.idCard)
-    const nextTax = hasOverride
-      ? roundMoney(taxByIdCard[person.idCard])
-      : options.clearTaxWhenMissing ? 0 : currentTax
-    oldTaxTotal = roundMoney(oldTaxTotal + currentTax)
-    nextTaxTotal = roundMoney(nextTaxTotal + nextTax)
-    if (nextTax === currentTax) return person
-
-    const values = { ...person.values }
-    values['当月个人所得税'] = nextTax
-    values['代扣合计'] = roundMoney(num(values['代扣合计']) - currentTax + nextTax)
-    values['实发合计'] = roundMoney(num(values['实发合计']) + currentTax - nextTax)
-    return { ...person, values }
-  })
-
-  const delta = roundMoney(nextTaxTotal - oldTaxTotal)
-  return {
-    ...salary,
-    active: {
-      ...salary.active,
-      个税: roundMoney(num(salary.active['个税']) + delta),
-      五险一金: roundMoney(num(salary.active['五险一金']) + delta),
-      实发工资合计: roundMoney(num(salary.active['实发工资合计']) - delta)
-    },
-    activePeople
-  }
-}
-
-function buildBusinessSummary(input: {
-  active?: IntegratedActiveRecomputeResult
-  survivor?: IntegratedSimplePaySummary
-  retiredHousing?: IntegratedSimplePaySummary
-}): MonthlyPayrollBusinessSummary {
-  return {
-    activeCount: input.active?.rowCount ?? 0,
-    activePayableTotal: input.active?.payableTotal ?? 0,
-    activeActualPay: input.active?.actualPayTotal ?? 0,
-    survivorCount: input.survivor?.rowCount ?? 0,
-    survivorActualPay: input.survivor?.actualPayTotal ?? 0,
-    retiredHousingCount: input.retiredHousing?.rowCount ?? 0,
-    retiredHousingActualPay: input.retiredHousing?.actualPayTotal ?? 0
-  }
-}
-
-function buildSalaryWorkbookBusinessSummary(
-  salary: SalarySummary | undefined,
-  retired: RetiredSummary
-): MonthlyPayrollBusinessSummary {
-  return {
-    activeCount: salary?.activePeople.length ?? 0,
-    activePayableTotal: salary ? num(salary.active['应发工资合计']) : 0,
-    activeActualPay: salary ? num(salary.active['实发工资合计']) : 0,
-    survivorCount: salary ? num(salary.survivor['人数']) || salary.survivorPeople.length : 0,
-    survivorActualPay: salary ? num(salary.survivor['合计']) : 0,
-    retiredHousingCount: retired.count,
-    retiredHousingActualPay: retired.housing
-  }
-}
-
-function buildSalarySummaryFromIntegratedAggregates(
-  active: IntegratedActiveAggregates,
-  other: IntegratedSimpleAggregates
-): SalarySummary {
-  return {
-    active: {
-      人数: active.count,
-      岗位工资: active.基本工资,
-      薪级工资: 0,
-      基本补发: 0,
-      应发基础工资: active.基本工资,
-      教龄津贴: active.教龄津贴,
-      岗位津贴: active.基础性绩效,
-      生活补贴: 0,
-      绩效补发: 0,
-      基础性绩效: active.基础性绩效,
-      乡镇补贴: active.其他一,
-      边远乡镇补贴: 0,
-      住房补贴: active.住房补贴,
-      交通补贴: active.交通补贴,
-      应发工资合计: active.应发工资,
-      养老保险: active.养老保险,
-      职业年金: active.职业年金,
-      医保大病统筹: active.医疗保险,
-      失业保险: active.失业保险,
-      住房公积金: active.公积金,
-      个税: active.个税,
-      扣款补发: 0,
-      补扣工资: active.个税,
-      五险一金: active.五险一金合计,
-      实发工资合计: active.实发合计
-    },
-    survivor: {
-      人数: other.count,
-      遗属补助: other.住房补贴,
-      补发数: other.补发工资,
-      合计: other.应发工资小计
-    },
-    activePeople: [],
-    survivorPeople: Array.from({ length: other.count }, (_, index) => ({
-      idCard: '',
-      name: '',
-      account: '',
-      rowNumber: index + 1,
-      values: {}
-    }))
-  }
-}
-
-function buildBusinessSummaryMessages(summary: MonthlyPayrollBusinessSummary): string[] {
-  return [
-    `在职 ${summary.activeCount} 人，应发 ${formatMoney(summary.activePayableTotal)} 元，实发 ${formatMoney(summary.activeActualPay)} 元`,
-    `遗补 ${summary.survivorCount} 人，实发 ${formatMoney(summary.survivorActualPay)} 元`,
-    `退休房补 ${summary.retiredHousingCount} 人，实发 ${formatMoney(summary.retiredHousingActualPay)} 元`
-  ]
-}
-
-function appendBusinessSummaryMessages(
-  messages: string[],
-  summary: MonthlyPayrollBusinessSummary
-): string[] {
-  return [...messages, ...buildBusinessSummaryMessages(summary)]
-}
+const salaryPrintSummaryCache = new Map<string, MonthlyPayrollSalaryPrintPageSummary>()
+const RETIRED_HOUSING_REPORT_SHEET_NAME = '退休房补'
+const LEGACY_RETIRED_HOUSING_REPORT_SHEET_NAME = '退休工资'
 
 export async function preprocessMonthlyPayroll(
   payload?: { monthlyPayroll?: MonthlyPayrollWorkflowInput }
@@ -475,7 +183,9 @@ export async function preprocessMonthlyPayroll(
     const integratedOtherPaySummary = await recomputeIntegratedOtherLikeWorksheet('其他工资')
     const integratedRetiredPaySummary = await recomputeIntegratedOtherLikeWorksheet('退休工资')
 
-    await runDetailImports(input, salary)
+    if (!input.confirmWriteBack) {
+      await runDetailImports(input, salary)
+    }
 
     if (input.processScope === 'social') {
       if (!socialSecurity) {
@@ -612,7 +322,12 @@ export async function preprocessMonthlyPayroll(
         insuranceCheck.warnings
       )
     }
-    let activeWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
+    let activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
+    let activeBackpayWriteBackPlan = await buildIntegratedActiveBackpayAdjustmentPlan(salary.activePeople)
+    let activeWriteBackPlan = mergeIntegratedWriteBackPlans(
+      activeFieldWriteBackPlan,
+      activeBackpayWriteBackPlan
+    )
     let survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
     let writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
     let writeBackPreview = buildMonthlyPayrollWriteBackPreview(writeBackPlan, {
@@ -646,9 +361,17 @@ export async function preprocessMonthlyPayroll(
       const appliedPlan = writeBackPlan
       await applyIntegratedWriteBackPlan(writeBackPlan)
       integratedActiveRecompute = activeWriteBackPlan.changes.length > 0
-        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
+        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard, {
+            clearTaxWhenMissing: !tax,
+            preserveExistingTaxField: activeBackpayWriteBackPlan.changes.length > 0
+          })
         : await summarizeIntegratedActive(taxByIdCard)
-      activeWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
+      activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
+      activeBackpayWriteBackPlan = await buildIntegratedActiveBackpayAdjustmentPlan(salary.activePeople)
+      activeWriteBackPlan = mergeIntegratedWriteBackPlans(
+        activeFieldWriteBackPlan,
+        activeBackpayWriteBackPlan
+      )
       survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
       writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
       writeBackPreview = mergeAppliedWriteBackPreview(appliedPlan, writeBackPlan)
@@ -742,12 +465,14 @@ export async function generateMonthlyPayrollReports(
       report.payrollBackpayPath ? `补发工资：${report.payrollBackpayPath}` : '',
       report.voucherImportPath ? `凭证导入：${report.voucherImportPath}` : ''
     ].filter(Boolean)
-    return okRule(
+    const result = okRule(
       generateWorkflowName,
       affectedRows,
       [report.message, ...outputMessages],
       []
     )
+    result.monthlyPayrollReport = report
+    return result
   } catch (error) {
     return failRule(generateWorkflowName, error)
   }
@@ -1478,7 +1203,7 @@ function buildReportSheets(
       actualPay: roundMoney(retiredHousingPeople.reduce((s, r) => s + r.actualPay, 0))
     }
     sheets.push({
-      name: '退休工资',
+      name: RETIRED_HOUSING_REPORT_SHEET_NAME,
       columns: gridColumns(7),
       showColumnHeader: false,
       columnWidths: [6, 12, 22, 12, 12, 14, 14],
@@ -1522,19 +1247,44 @@ async function getGeneratedSalaryPrintSummary(
   if (!input.salaryWorkbookPath || input.processScope === 'social') return null
   try {
     const printSettings = await readMonthlyPayrollPrintSettings()
-    return await getSalaryWorkbookPrintPageSummary({
+    const cacheKey = salaryPrintSummaryCacheKey(input.salaryWorkbookPath, printSettings.reportPrinterName)
+    const cached = cacheKey ? salaryPrintSummaryCache.get(cacheKey) : undefined
+    if (cached) return cached
+    const summary = await getSalaryWorkbookPrintPageSummary({
       salaryWorkbookPath: input.salaryWorkbookPath,
       taxWorkbookPath: input.taxWorkbookPath,
       printerName: printSettings.reportPrinterName
     })
+    if (cacheKey) salaryPrintSummaryCache.set(cacheKey, summary)
+    return summary
   } catch (error) {
     console.warn('生成报表时统计工资表页数失败：', error)
     return null
   }
 }
 
+function salaryPrintSummaryCacheKey(
+  salaryWorkbookPath: string,
+  printerName: string | undefined
+): string | null {
+  try {
+    const stat = statSync(salaryWorkbookPath)
+    return [
+      salaryWorkbookPath,
+      stat.size,
+      stat.mtimeMs,
+      printerName ?? ''
+    ].join('|')
+  } catch {
+    return null
+  }
+}
+
 function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): number {
-  const sheet = sheets.find((item) => item.name === '退休工资')
+  const sheet = sheets.find((item) =>
+    item.name === RETIRED_HOUSING_REPORT_SHEET_NAME ||
+    item.name === LEGACY_RETIRED_HOUSING_REPORT_SHEET_NAME
+  )
   if (!sheet) return 0
   if (sheet.rows.length === 0) return 0
   if (sheet.rows.length <= 3) return 1
@@ -1947,111 +1697,4 @@ function sumSocialByAnyKeywordGroups(
       return sum
     }, 0)
   )
-}
-
-function writeWorkbook(
-  filePath: string,
-  sheets: MonthlyPayrollReportSheet[],
-  bookType: XLSX.BookType = 'xlsx'
-): void {
-  const workbook = XLSX.utils.book_new()
-  for (const sheet of sheets) {
-    const data = sheet.showColumnHeader === false ? sheet.rows : [sheet.columns, ...sheet.rows]
-    const worksheet = XLSX.utils.aoa_to_sheet(data)
-    XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheet.name))
-  }
-  writeFileSync(filePath, XLSX.write(workbook, { bookType, type: 'buffer' }))
-}
-
-function gridColumns(count: number): string[] {
-  return Array.from({ length: count }, (_, index) => columnLabel(index))
-}
-
-function removeIndexes<T>(items: T[], indexes: number[]): T[] {
-  const hidden = new Set(indexes)
-  return items.filter((_, index) => !hidden.has(index))
-}
-
-function columnLabel(index: number): string {
-  let value = index + 1
-  let label = ''
-  while (value > 0) {
-    const remainder = (value - 1) % 26
-    label = String.fromCharCode(65 + remainder) + label
-    value = Math.floor((value - 1) / 26)
-  }
-  return label
-}
-
-function safeSheetName(name: string): string {
-  return name.replace(/[:\\/?*[\]]/g, '').slice(0, 31) || 'Sheet1'
-}
-
-function timestamp(): string {
-  const date = new Date()
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-}
-
-async function backupAndWriteTaxToSalaryWorkbook(
-  salaryWorkbookPath: string,
-  salary: SalarySummary,
-  taxByIdCard: Record<string, number>,
-  period: { year: number; month: number },
-  stamp: string,
-  existingOriginalPath: string | null = null
-): Promise<string | null> {
-  if (!salaryWorkbookNeedsTaxWrite(salary, taxByIdCard)) return null
-  const backupPath = existingOriginalPath && existsSync(existingOriginalPath)
-    ? existingOriginalPath
-    : backupSalaryWorkbookBeforeTaxWrite(salaryWorkbookPath, period, stamp)
-  await writeTaxToSalaryWorkbookViaExcel({
-    salaryWorkbookPath,
-    taxByIdCard
-  })
-  return backupPath
-}
-
-function salaryWorkbookNeedsTaxWrite(
-  salary: SalarySummary,
-  taxByIdCard: Record<string, number>
-): boolean {
-  if (Object.keys(taxByIdCard).length === 0) return false
-  return salary.activePeople.some((person) => {
-    if (!Object.prototype.hasOwnProperty.call(taxByIdCard, person.idCard)) return false
-    return num(person.values['当月个人所得税']) !== roundMoney(taxByIdCard[person.idCard])
-  })
-}
-
-function backupSalaryWorkbookBeforeTaxWrite(
-  salaryWorkbookPath: string,
-  period: { year: number; month: number },
-  stamp: string
-): string {
-  const backupDir = getMonthlyPayrollTempPath(period.year, period.month, '工资表回写备份')
-  mkdirSync(backupDir, { recursive: true })
-  const extension = extname(salaryWorkbookPath) || '.xlsx'
-  const baseName = basename(salaryWorkbookPath, extension).replace(/[<>:"/\\|?*]+/g, '_') || '工资表'
-  const backupPath = uniqueLocalPath(backupDir, `个税回写前_${stamp}_${baseName}${extension}`)
-  copyFileSync(salaryWorkbookPath, backupPath)
-  return backupPath
-}
-
-function uniqueLocalPath(targetDir: string, fileName: string): string {
-  let candidate = join(targetDir, fileName)
-  if (!existsSync(candidate)) return candidate
-
-  const dotIndex = fileName.lastIndexOf('.')
-  const stem = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName
-  const extension = dotIndex > 0 ? fileName.slice(dotIndex) : ''
-  for (let index = 2; ; index += 1) {
-    candidate = join(targetDir, `${stem}_${index}${extension}`)
-    if (!existsSync(candidate)) return candidate
-  }
-}
-
-function dateStamp(): string {
-  const date = new Date()
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
 }

@@ -199,13 +199,21 @@ try {
     $idText = ([string]$idValue).Trim().ToUpper()
     if (-not $idText) { continue }
     if ($TaxMap.ContainsKey($idText)) {
-      $wsActive.Cells.Item($r, 25).Value2 = [double]$TaxMap[$idText]
+      $taxCell = $wsActive.Cells.Item($r, 25)
+      $taxCell.Value2 = [double]$TaxMap[$idText]
+      $taxCell.NumberFormat = "0.00"
       $applied += 1
     }
   }
 
   if ($applied -gt 0) {
     $xl.CalculateFull()
+    for ($r = 2; $r -le $lastRow; $r++) {
+      $nameText = ([string]$wsActive.Cells.Item($r, 5).Text).Trim()
+      if ($nameText -and $nameText.Contains("合计")) {
+        $wsActive.Cells.Item($r, 25).NumberFormat = "0.00"
+      }
+    }
     $wb.Save()
   }
 
@@ -333,11 +341,20 @@ try {
         $idText = ([string]$idValue).Trim().ToUpper()
         if (-not $idText) { continue }
         if ($TaxMap.ContainsKey($idText)) {
-          $wsActive.Cells.Item($r, 25).Value2 = [double]$TaxMap[$idText]
+          $taxCell = $wsActive.Cells.Item($r, 25)
+          $taxCell.Value2 = [double]$TaxMap[$idText]
+          $taxCell.NumberFormat = "0.00"
           $taxApplied += 1
         }
       }
       if ($taxApplied -gt 0) {
+        $xl.CalculateFull()
+        for ($r = 2; $r -le $lastRow; $r++) {
+          $nameText = ([string]$wsActive.Cells.Item($r, 5).Text).Trim()
+          if ($nameText -and $nameText.Contains("合计")) {
+            $wsActive.Cells.Item($r, 25).NumberFormat = "0.00"
+          }
+        }
         $wb.Save()
       }
     }

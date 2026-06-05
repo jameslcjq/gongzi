@@ -9,6 +9,7 @@ import {
   integratedActivePayFields,
   integratedSimplePayFields
 } from './integratedPayrollRules'
+import { activeBackpayAdjustmentTotals } from './salaryBackpayAdjustments'
 import {
   coerceComparableValue,
   formatMoney,
@@ -87,14 +88,12 @@ export const activeCompareFields: Array<[string, string]> = [
   ['职业年金缴费', '职业年金缴费'],
   ['医疗保险', '医疗保险'],
   ['失业保险', '失业保险'],
-  ['公积金', '公积金'],
-  ['补扣工资', '当月个人所得税']
+  ['公积金', '公积金']
 ]
 
 export function getActiveCompareFields(taxField: string): Array<[string, string]> {
-  return activeCompareFields.map(([target, source]) =>
-    target === '补扣工资' ? [taxField, source] : [target, source]
-  )
+  void taxField
+  return activeCompareFields
 }
 
 export const survivorCompareFields: Array<[string, string]> = [
@@ -128,13 +127,14 @@ export type IntegratedActiveRecomputeResult = {
 
 export async function applyTaxAndRecomputeIntegratedActive(
   taxByIdCard: Record<string, number>,
-  options: { clearTaxWhenMissing?: boolean } = {}
+  options: { clearTaxWhenMissing?: boolean; preserveExistingTaxField?: boolean } = {}
 ): Promise<IntegratedActiveRecomputeResult> {
   const settings = await readMonthlyPayrollSettings()
   const taxField = settings.taxField
   const inactiveTaxField = inactiveMonthlyPayrollTaxField(taxField)
   const hasTaxOverrides = Object.keys(taxByIdCard).length > 0
-  const shouldRewriteTax = hasTaxOverrides || Boolean(options.clearTaxWhenMissing)
+  const shouldRewriteTax = !options.preserveExistingTaxField &&
+    (hasTaxOverrides || Boolean(options.clearTaxWhenMissing))
   const worksheet = getWorksheetByName('在职工资')
   const idCardCol = findColumnByName(worksheet, '证件号码')
   const taxCol = findColumnByName(worksheet, taxField)
@@ -188,9 +188,11 @@ export async function applyTaxAndRecomputeIntegratedActive(
       const taxCarrier = selectIntegratedRepresentativeRow(personRows, batchColumn)
       for (const row of personRows) {
         const receivesOverrideTax = overrideTax !== undefined && num(row.id) === num(taxCarrier.id)
-        const taxAmount = overrideTax !== undefined
-          ? (receivesOverrideTax ? overrideTax : 0)
-          : options.clearTaxWhenMissing ? 0 : num(row[taxCol])
+        const taxAmount = options.preserveExistingTaxField
+          ? num(row[taxCol])
+          : overrideTax !== undefined
+            ? (receivesOverrideTax ? overrideTax : 0)
+            : options.clearTaxWhenMissing ? 0 : num(row[taxCol])
         const payable = payCols.reduce((sum, col) => sum + num(row[col]), 0)
         const taxDeduction = taxDeductionCol === taxCol
           ? taxAmount
@@ -395,6 +397,123 @@ export async function buildIntegratedActiveWriteBackPlan(
     '在职工资 缺少证件号码字段',
     (targetFieldName) => targetFieldName === '交通费' ? '002' : '001'
   )
+}
+
+export async function buildIntegratedActiveBackpayAdjustmentPlan(
+  sourcePeople: PayrollPerson[]
+): Promise<IntegratedWriteBackPlan> {
+  const worksheet = getWorksheetByName('在职工资')
+  const columns = getWorksheetLocalColumns(worksheet)
+  const idColumn = findColumnByName(worksheet, '证件号码')
+  const nameColumn = findColumnByName(worksheet, '姓名')
+  const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
+  const backpayColumn = findColumnByName(worksheet, '补发工资')
+  const deductionColumn = findColumnByName(worksheet, '补扣工资')
+
+  const database = await getDatabase()
+  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
+  const latestByIdBatch = new Map<string, Record<string, unknown>>()
+  for (const row of rows) {
+    const idCard = normalizeIdCard(row[idColumn])
+    if (!idCard) continue
+    const key = integratedCurrentRowKey(idCard, row, batchColumn)
+    const previous = latestByIdBatch.get(key)
+    if (!previous || num(row.id) > num(previous.id)) latestByIdBatch.set(key, row)
+  }
+
+  const rowsByIdCard = new Map<string, Record<string, unknown>[]>()
+  for (const row of latestByIdBatch.values()) {
+    const idCard = normalizeIdCard(row[idColumn])
+    const grouped = rowsByIdCard.get(idCard) ?? []
+    grouped.push(row)
+    rowsByIdCard.set(idCard, grouped)
+  }
+
+  const changes: IntegratedWriteBackChange[] = []
+  const manual: IntegratedManualDifference[] = []
+  for (const person of sourcePeople) {
+    const personRows = rowsByIdCard.get(person.idCard)
+    if (!personRows) continue
+
+    const name = person.name || text(personRows[0]?.[nameColumn])
+    const totals = activeBackpayAdjustmentTotals(person)
+    appendActiveBackpayAdjustmentChange({
+      changes,
+      manual,
+      personRows,
+      batchColumn,
+      fieldColumn: backpayColumn,
+      fieldName: '补发工资',
+      idCard: person.idCard,
+      name,
+      sourceValue: totals.increaseTotal,
+      reason: '两个补发项目正数汇总'
+    })
+    appendActiveBackpayAdjustmentChange({
+      changes,
+      manual,
+      personRows,
+      batchColumn,
+      fieldColumn: deductionColumn,
+      fieldName: '补扣工资',
+      idCard: person.idCard,
+      name,
+      sourceValue: totals.deductionTotal,
+      reason: '两个补发项目负数与个税汇总'
+    })
+  }
+
+  return { changes, manual }
+}
+
+function appendActiveBackpayAdjustmentChange(input: {
+  changes: IntegratedWriteBackChange[]
+  manual: IntegratedManualDifference[]
+  personRows: Record<string, unknown>[]
+  batchColumn: string | undefined
+  fieldColumn: string
+  fieldName: string
+  idCard: string
+  name: string
+  sourceValue: number
+  reason: string
+}): void {
+  const targetValue = roundMoney(
+    input.personRows.reduce((sum, row) => sum + num(row[input.fieldColumn]), 0)
+  )
+  if (roundMoney(input.sourceValue - targetValue) === 0) return
+
+  const decision = decideIntegratedFieldWriteBack({
+    personRows: input.personRows,
+    fieldColumn: input.fieldColumn,
+    sourceValue: input.sourceValue,
+    targetValue,
+    batchColumn: input.batchColumn,
+    batchHint: '001'
+  })
+  if (decision.ok) {
+    input.changes.push({
+      worksheetName: '在职工资',
+      idCard: input.idCard,
+      name: input.name,
+      fieldName: input.fieldName,
+      sourceValue: input.sourceValue,
+      targetValue,
+      batchCode: decision.batchCode,
+      reason: input.reason,
+      updates: decision.updates
+    })
+  } else {
+    input.manual.push({
+      worksheetName: '在职工资',
+      idCard: input.idCard,
+      name: input.name,
+      fieldName: input.fieldName,
+      sourceValue: input.sourceValue,
+      targetValue,
+      reason: `${input.reason}，${decision.reason}`
+    })
+  }
 }
 
 export async function buildIntegratedOtherWriteBackPlan(

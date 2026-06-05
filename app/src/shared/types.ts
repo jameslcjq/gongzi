@@ -29,6 +29,7 @@ export type RuleResult = {
   messages: string[]
   warnings: string[]
   monthlyPayrollWriteBack?: MonthlyPayrollWriteBackPreview
+  monthlyPayrollReport?: MonthlyPayrollReportResult
 }
 
 export type AnnualReportWorkflowInput = {

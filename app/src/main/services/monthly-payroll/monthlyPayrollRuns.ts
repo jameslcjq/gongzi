@@ -673,7 +673,7 @@ function archivedSalaryWorkbookPaths(payrollRun: MonthlyPayrollRun): string[] {
 }
 
 function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): number {
-  const sheet = sheets.find((item) => item.name === '退休工资')
+  const sheet = sheets.find((item) => RETIRED_HOUSING_REPORT_SHEET_NAMES.has(item.name))
   if (!sheet) return 0
   if (sheet.rows.length === 0) return 0
   if (sheet.rows.length <= 3) return 1
@@ -1250,8 +1250,9 @@ function uniqueArchivePath(targetDir: string, fileName: string): string {
   }
 }
 
-const FINGERPRINT_SKIP_SHEETS = new Set(['退休工资'])
+const FINGERPRINT_SKIP_SHEETS = new Set(['退休工资', '退休房补'])
 const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
+const RETIRED_HOUSING_REPORT_SHEET_NAMES = new Set(['退休工资', '退休房补'])
 // 与 monthlyPayroll.ts 保持一致：保险凭证固定附件页数用于历史快照重建。
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
 

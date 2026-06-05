@@ -4,6 +4,7 @@ import { all, getDatabase } from '../../db/connection'
 import { getWorksheetLocalColumns } from '../../db/schema'
 import { getWorksheetByName, tableNameOf } from '../worksheetTable'
 import type { SalarySummary } from './monthlyPayrollTypes'
+import { activeBackpayAdjustmentTotals } from './salaryBackpayAdjustments'
 import { normalizeIdCard, num, roundMoney, text } from './monthlyPayrollUtils'
 
 type TemplateColumn = {
@@ -93,8 +94,9 @@ export async function writeSalaryImportWorkbook(
     assignField('公车补贴', 22, num(person.values['公车补贴']))
     assignField('住房补贴', 23, num(person.values['住房补贴']))
     assignField('基础绩效奖', 24, num(person.values['基础绩效奖']))
-    assignField('补发工资', 25, num(person.values['补发工资']))
-    assignField('补扣工资', 26, num(person.values['当月个人所得税']) || num(person.values['补扣工资']))
+    const adjustmentTotals = activeBackpayAdjustmentTotals(person)
+    assignField('补发工资', 25, adjustmentTotals.increaseTotal)
+    assignField('补扣工资', 26, adjustmentTotals.deductionTotal)
     const splitOtherOne = roundMoney(num(person.values['乡镇补贴']) + num(person.values['边远补贴']))
     const otherOne = splitOtherOne || num(person.values['其他一'])
     assignField('其他一', 27, otherOne)

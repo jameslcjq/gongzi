@@ -1,18 +1,3 @@
-<script lang="ts">
-import type {
-  MonthlyPayrollPrintSettings as CachedMonthlyPayrollPrintSettings,
-  PrinterSummary as CachedPrinterSummary
-} from '@shared/types'
-
-type CachedMonthlyPayrollPrintOptions = {
-  printers: CachedPrinterSummary[]
-  settings: CachedMonthlyPayrollPrintSettings
-}
-
-let cachedMonthlyPayrollPrintOptions: CachedMonthlyPayrollPrintOptions | null = null
-let pendingMonthlyPayrollPrintOptions: Promise<CachedMonthlyPayrollPrintOptions> | null = null
-</script>
-
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -25,6 +10,26 @@ import {
 } from '../integration/insurancePushQueue'
 import { appendPushLogLine } from '../integration/pushLogger'
 import type { InsuranceRecord } from '../integration/pushInsuranceScript'
+import {
+  cachedMonthlyPayrollPrintersFallback,
+  loadCachedMonthlyPayrollPrintOptions,
+  updateCachedMonthlyPayrollPrintOptions
+} from '../monthly-payroll/printOptionsCache'
+import {
+  buildMergeMap,
+  colWidthPercents,
+  formatCurrency,
+  isCustomStyledSheet,
+  isRetiredHousingSheetName,
+  isSalaryVoucher,
+  mergeFor,
+  reportSheetClass,
+  rowHeightStyle,
+  voucherAmount,
+  voucherUpperAmount,
+  voucherUsageLines,
+  type MergeEntry
+} from '../monthly-payroll/reportPresentation'
 import type {
   ImportWatcherStatus,
   MonthlyPayrollDataSourceMode,
@@ -118,42 +123,27 @@ function applyPrintOptions(nextPrinters: PrinterSummary[], settings: MonthlyPayr
 }
 
 async function loadPrintOptions() {
-  if (cachedMonthlyPayrollPrintOptions) {
-    applyPrintOptions(
-      cachedMonthlyPayrollPrintOptions.printers,
-      cachedMonthlyPayrollPrintOptions.settings
-    )
-    return
-  }
-
-  pendingMonthlyPayrollPrintOptions ??= Promise.all([
-    window.salaryApi.listPrinters(),
-    window.salaryApi.getMonthlyPayrollPrintSettings()
-  ]).then(([nextPrinters, settings]) => ({
-    printers: nextPrinters,
-    settings
-  }))
-
-  try {
-    cachedMonthlyPayrollPrintOptions = await pendingMonthlyPayrollPrintOptions
-    applyPrintOptions(
-      cachedMonthlyPayrollPrintOptions.printers,
-      cachedMonthlyPayrollPrintOptions.settings
-    )
-  } finally {
-    pendingMonthlyPayrollPrintOptions = null
-  }
+  const options = await loadCachedMonthlyPayrollPrintOptions(() =>
+    Promise.all([
+      window.salaryApi.listPrinters(),
+      window.salaryApi.getMonthlyPayrollPrintSettings()
+    ]).then(([nextPrinters, settings]) => ({
+      printers: nextPrinters,
+      settings
+    }))
+  )
+  applyPrintOptions(options.printers, options.settings)
 }
 
 async function savePrintSettings() {
   const settings = await window.salaryApi.setMonthlyPayrollPrintSettings({
     ...printSettings.value
   })
-  cachedMonthlyPayrollPrintOptions = {
-    printers: cachedMonthlyPayrollPrintOptions?.printers ?? printers.value,
+  const options = updateCachedMonthlyPayrollPrintOptions({
+    printers: cachedMonthlyPayrollPrintersFallback(printers.value),
     settings
-  }
-  applyPrintOptions(cachedMonthlyPayrollPrintOptions.printers, settings)
+  })
+  applyPrintOptions(options.printers, settings)
 }
 
 async function loadMonthlyPayrollSettings(): Promise<void> {
@@ -480,11 +470,15 @@ async function loadHistoryReport(row: MonthlyPayrollRun, showMessage: boolean) {
     if (showMessage) ElMessage.warning('这条历史记录没有可查看的报表快照，且导出文件不存在')
     return
   }
-  report.value = snapshot
-  activeReportSheet.value = firstVisibleSheetName(snapshot.sheets)
+  showReportSnapshot(snapshot)
   selectedMonth.value = `${row.year}-${String(row.month).padStart(2, '0')}`
   selectedReportRunId.value = row.id
   if (showMessage) ElMessage.success('已打开历史报表视图')
+}
+
+function showReportSnapshot(snapshot: MonthlyPayrollReportResult): void {
+  report.value = snapshot
+  activeReportSheet.value = firstVisibleSheetName(snapshot.sheets)
 }
 
 function firstVisibleSheetName(sheets: MonthlyPayrollReportSheet[]): string {
@@ -979,12 +973,25 @@ async function runGenerate(writeBack?: MonthlyPayrollWriteBackPreview): Promise<
     emit('workflowNotice', next)
     if (next.ok) {
       selectedMonth.value = selectedMonthLabel.value
-      const nextHistory = await refreshHistory()
-      const latest = pickLatestMonthRun(
-        nextHistory.filter((row) => row.year === selectedPeriod.value.year && row.month === selectedPeriod.value.month)
-      )
-      if (latest) {
-        await loadHistoryReport(latest, false)
+      if (next.monthlyPayrollReport) {
+        showReportSnapshot(next.monthlyPayrollReport)
+        selectedReportRunId.value = null
+        void refreshHistory().then((nextHistory) => {
+          const latest = pickLatestMonthRun(
+            nextHistory.filter((row) => row.year === selectedPeriod.value.year && row.month === selectedPeriod.value.month)
+          )
+          selectedReportRunId.value = latest?.id ?? null
+        }).catch((error) => {
+          console.warn('生成后刷新工资报账历史失败', error)
+        })
+      } else {
+        const nextHistory = await refreshHistory()
+        const latest = pickLatestMonthRun(
+          nextHistory.filter((row) => row.year === selectedPeriod.value.year && row.month === selectedPeriod.value.month)
+        )
+        if (latest) {
+          await loadHistoryReport(latest, false)
+        }
       }
       ElMessage.success(next.messages[0] ?? '月度工资报账汇总生成完成')
     } else {
@@ -1006,7 +1013,7 @@ function isReportPrintSheet(name: string | undefined): boolean {
     name === '自动生成' ||
     name === '五险一金' ||
     name === '工退遗汇总' ||
-    name === '退休工资'
+    isRetiredHousingSheetName(name)
   )
 }
 
@@ -1015,7 +1022,7 @@ const PRINT_ALL_SHEETS = [
   '五险一金',
   '工退遗汇总',
   '报销凭证',
-  '退休工资'
+  '退休房补'
 ] as const
 
 const currentPrinterName = computed(() =>
@@ -1339,7 +1346,7 @@ function cleanRemoteErrorMessage(error: unknown, fallback: string): string {
 }
 
 function getRetiredHousingPrintPageCount(): number {
-  const sheet = report.value?.sheets.find((item) => item.name === '退休工资')
+  const sheet = report.value?.sheets.find((item) => isRetiredHousingSheetName(item.name))
   return sheet ? splitRetiredHousingSheet(sheet).length : 0
 }
 
@@ -1380,7 +1387,7 @@ const activePages = computed<MonthlyPayrollReportSheet[]>(() => {
   const sheet = activeSheet.value
   if (!sheet) return []
   if (sheet.name === '自动生成') return splitAutoSheet(sheet)
-  if (sheet.name === '退休工资') return splitRetiredHousingSheet(sheet)
+  if (isRetiredHousingSheetName(sheet.name)) return splitRetiredHousingSheet(sheet)
   return [sheet]
 })
 
@@ -1430,33 +1437,6 @@ function splitAutoSheet(sheet: MonthlyPayrollReportSheet): MonthlyPayrollReportS
   return [left, right]
 }
 
-function reportSheetClass(name: string): string {
-  if (name === '自动生成') return 'sheet-auto'
-  if (name === '五险一金') return 'sheet-insurance'
-  if (name === '工退遗汇总') return 'sheet-summary'
-  if (name === '报销凭证') return 'sheet-voucher'
-  if (name === '退休工资') return 'sheet-retired-housing sheet-integrated-retired'
-  if (name === '补发工资') return 'sheet-wide sheet-backpay'
-  if (name === '保险导入') return 'sheet-wide sheet-insurance-import'
-  return 'sheet-standard'
-}
-
-function formatCurrency(value: unknown): string {
-  const amount = Number(value || 0)
-  return `¥${amount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })}`
-}
-
-function voucherUsageLines(row: unknown[]): string[] {
-  return String(row[8] ?? '').split('\n').filter(Boolean)
-}
-
-function isSalaryVoucher(row: unknown[]): boolean {
-  return String(row[0] ?? '').includes('工资')
-}
-
 function voucherPrintTotalPagesForRow(row: unknown[]): number | null {
   const savedPages = Number(row[VOUCHER_ATTACHMENT_PAGES_INDEX] ?? 0)
   if (Number.isFinite(savedPages) && savedPages > 0) return savedPages
@@ -1470,65 +1450,6 @@ function voucherUsagePrintText(row: unknown[]): string {
   return lines
     .map((line) => line.replace(/(-?\d[\d,]*(?:\.\d+)?)$/, ' $1'))
     .join('\n')
-}
-
-function voucherAmount(value: unknown): string {
-  const n = Number(value || 0)
-  if (!Number.isFinite(n) || n === 0) return ''
-  return `¥${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-function voucherUpperAmount(row: unknown[], amountIndex: number): string {
-  if (amountIndex === 2) return String(row[9] ?? '')
-  if (amountIndex === 3) return String(row[13] ?? '')
-  return toChineseRmb(Number(row[amountIndex] || 0))
-}
-
-function toChineseRmb(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return '零元整'
-  const digits = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖']
-  const convert4 = (num: number): string => {
-    const q = Math.floor(num / 1000)
-    const b = Math.floor((num % 1000) / 100)
-    const s = Math.floor((num % 100) / 10)
-    const g = num % 10
-    let out = ''
-    if (q > 0) out += `${digits[q]}仟`
-    if (b > 0) out += `${digits[b]}佰`
-    else if (q > 0 && (s > 0 || g > 0)) out += '零'
-    if (s > 0) out += `${digits[s]}拾`
-    else if ((q > 0 || b > 0) && g > 0 && !out.endsWith('零')) out += '零'
-    if (g > 0) out += digits[g]
-    return out
-  }
-  const convertInteger = (num: number): string => {
-    const yi = Math.floor(num / 100000000)
-    const wan = Math.floor((num % 100000000) / 10000)
-    const yuan = num % 10000
-    let out = ''
-    if (yi > 0) {
-      out += `${convert4(yi)}亿`
-      if (wan === 0 && yuan > 0) out += '零'
-      else if (wan > 0 && wan < 1000) out += '零'
-    }
-    if (wan > 0) {
-      out += `${convert4(wan)}万`
-      if (yuan > 0 && yuan < 1000) out += '零'
-    }
-    if (yuan > 0) out += convert4(yuan)
-    return out || '零'
-  }
-  const sign = value < 0 ? '负' : ''
-  const rounded = Math.abs(Math.round(value * 100) / 100)
-  const integer = Math.floor(rounded)
-  const cents = Math.round((rounded - integer) * 100)
-  const jiao = Math.floor(cents / 10)
-  const fen = cents % 10
-  let out = `${sign}${convertInteger(integer)}元`
-  if (jiao > 0) out += `${digits[jiao]}角`
-  else if (fen > 0) out += '零'
-  out += fen > 0 ? `${digits[fen]}分` : '整'
-  return out
 }
 
 function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): string {
@@ -1546,58 +1467,6 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   return String(value)
 }
 
-type MergeSpan = { colspan: number, rowspan: number }
-type MergeEntry = { master?: MergeSpan, covered?: boolean }
-
-function refToRowCol(ref: string): { r: number, c: number } {
-  const match = /^([A-Z]+)(\d+)$/.exec(ref)
-  if (!match) return { r: 0, c: 0 }
-  let col = 0
-  for (const ch of match[1]) col = col * 26 + (ch.charCodeAt(0) - 64)
-  return { r: parseInt(match[2], 10), c: col }
-}
-
-function buildMergeMap(merges: string[] | undefined): Map<string, MergeEntry> {
-  const map = new Map<string, MergeEntry>()
-  if (!merges) return map
-  for (const range of merges) {
-    const [a, b] = range.split(':')
-    const { r: r1, c: c1 } = refToRowCol(a)
-    const { r: r2, c: c2 } = refToRowCol(b)
-    map.set(`${r1},${c1}`, { master: { colspan: c2 - c1 + 1, rowspan: r2 - r1 + 1 } })
-    for (let r = r1; r <= r2; r += 1) {
-      for (let c = c1; c <= c2; c += 1) {
-        if (r === r1 && c === c1) continue
-        map.set(`${r},${c}`, { covered: true })
-      }
-    }
-  }
-  return map
-}
-
-function mergeFor(map: Map<string, MergeEntry>, r: number, c: number): MergeEntry | undefined {
-  return map.get(`${r},${c}`)
-}
-
-function colWidthPercents(widths: number[] | undefined, fallbackCount: number): string[] {
-  const list = widths && widths.length ? widths : Array(fallbackCount).fill(1)
-  const total = list.reduce((s, w) => s + (w || 0), 0) || list.length
-  return list.map((w) => `${(((w || 0) / total) * 100).toFixed(3)}%`)
-}
-
-function rowHeightStyle(heights: Array<number | null> | undefined, index: number): string {
-  const h = heights?.[index]
-  return h ? `height:${h}pt` : ''
-}
-
-function isCustomStyledSheet(name: string): boolean {
-  return (
-    name === '自动生成' ||
-    name === '五险一金' ||
-    name === '工退遗汇总' ||
-    name === '退休工资'
-  )
-}
 </script>
 
 <template>

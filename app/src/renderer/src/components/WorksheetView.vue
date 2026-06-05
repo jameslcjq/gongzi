@@ -20,6 +20,14 @@ import type {
   WorksheetRecord,
   WorksheetRecordsResult
 } from '@shared/types'
+import {
+  allFieldTabs,
+  genericPersonTabs,
+  nonSortableFields,
+  personnelDetailTabs,
+  personnelDrawerTables,
+  plainAllFieldTables
+} from './worksheetViewConfig'
 
 const props = defineProps<{
   worksheet: {
@@ -61,14 +69,6 @@ const emit = defineEmits<{
 
 const sortState = ref<{ key: string; order: 'asc' | 'desc' } | null>(null)
 const worksheetTitle = computed(() => props.displayName || props.worksheet.name)
-const NON_SORTABLE_FIELDS = new Set([
-  '身份证号',
-  '身份证号码',
-  '证件号码',
-  '证件号码*',
-  '教职工身份证号'
-])
-
 function onPageSizeSelect(value: string) {
   emit('page-size-change', value === 'all' ? props.allPageSize : 100)
 }
@@ -85,25 +85,6 @@ function onColumnSort(params: { key: string; order: 'asc' | 'desc' | null }) {
   sortState.value = { key: params.key, order: params.order }
   emit('sort-change', { column: columnName, order: params.order })
 }
-
-const PERSONNEL_DRAWER_TABLES = new Set([
-  '人事信息',
-  '在编教职工基本信息',
-  '预算在职',
-  '预算退休',
-  '预算其他',
-  '在职工资',
-  '退休工资',
-  '其他工资'
-])
-const PLAIN_ALL_FIELD_TABLES = new Set([
-  '预算在职',
-  '预算退休',
-  '预算其他',
-  '在职工资',
-  '退休工资',
-  '其他工资'
-])
 
 const detailEnabled = computed(() => true)
 
@@ -141,29 +122,14 @@ const childTables = ref<ChildTable[]>([])
 const childTablesLoading = ref(false)
 
 const isPersonnelDetail = computed(() => props.worksheet.worksheetId === 'local-hr-detail')
-const isPersonnelDrawerStyle = computed(() => PERSONNEL_DRAWER_TABLES.has(props.worksheet.name))
-const isPlainAllFieldTable = computed(() => PLAIN_ALL_FIELD_TABLES.has(props.worksheet.name))
+const isPersonnelDrawerStyle = computed(() => personnelDrawerTables.has(props.worksheet.name))
+const isPlainAllFieldTable = computed(() => plainAllFieldTables.has(props.worksheet.name))
 
 const activeTab = ref('basic')
-const PD_TABS = [
-  { id: 'basic', label: '基本信息' },
-  { id: 'edu',   label: '学历职称' },
-  { id: 'cert',  label: '教师资格' },
-  { id: 'teach', label: '任教' },
-  { id: 'career',label: '工作履历' },
-  { id: 'all',   label: '字段详情' }
-]
-const GENERIC_PERSON_TABS = [
-  { id: 'basic', label: '基本信息' },
-  { id: 'edu', label: '学历职称' },
-  { id: 'career', label: '岗位薪酬' },
-  { id: 'all', label: '字段详情' }
-]
-const ALL_FIELD_TABS = [{ id: 'all', label: '字段详情' }]
 const detailTabs = computed(() => {
-  if (isPersonnelDetail.value) return PD_TABS
-  if (isPlainAllFieldTable.value) return ALL_FIELD_TABS
-  return GENERIC_PERSON_TABS
+  if (isPersonnelDetail.value) return personnelDetailTabs
+  if (isPlainAllFieldTable.value) return allFieldTabs
+  return genericPersonTabs
 })
 const showDetailTabs = computed(() => !isPlainAllFieldTable.value)
 
@@ -612,7 +578,7 @@ const virtualColumns = computed<VirtualTableColumn[]>(() => {
       dataKey: columnNameOf(field.fieldId),
       title: field.name,
       width: 140,
-      sortable: !NON_SORTABLE_FIELDS.has(field.name),
+      sortable: !nonSortableFields.has(field.name),
       cellRenderer: ({ cellData }) => renderCellText(cellData)
     }))
   ]
