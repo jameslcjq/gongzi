@@ -69,6 +69,12 @@ import {
 import { sumSocialByCanonicalName, sumSocialByKeyword } from './socialSecuritySummary'
 import { getSalaryWorkbookPrintPageSummary, writeTaxToSalaryWorkbookViaExcel } from './printSalaryViaExcel'
 import { writeSalaryImportWorkbook } from './salaryImportWorkbook'
+import {
+  addBackpayAdjustment,
+  addSignedBackpayAdjustment,
+  createBackpayAdjustmentRow,
+  hasBackpayAdjustments
+} from './backpayAdjustmentRows'
 import type {
   IntegratedActiveAggregates,
   IntegratedSimpleAggregates,
@@ -1747,7 +1753,7 @@ function buildBackpayRows(
     const key = normalizeIdCard(idCard)
     const existing = rowsById.get(key)
     if (existing) return existing
-    const row = createBackpayRow(key, name, year, month)
+    const row = createBackpayAdjustmentRow(key, name, year, month)
     rowsById.set(key, row)
     return row
   }
@@ -1757,59 +1763,23 @@ function buildBackpayRows(
     const performanceBackpay = num(person.values['绩效补发'])
     if (basicBackpay === 0 && performanceBackpay === 0) continue
     const row = ensureRow(person.idCard, person.name)
-    row[5] = roundMoney(num(row[5]) + basicBackpay)
-    row[6] = roundMoney(num(row[6]) + performanceBackpay)
+    addSignedBackpayAdjustment(row, basicBackpay, 'basicIncrease', 'basicDeduction')
+    addSignedBackpayAdjustment(row, performanceBackpay, 'performanceIncrease', 'performanceDeduction')
   }
 
   for (const item of tax?.rows ?? []) {
     const taxBackpay = -item.taxAmount
     if (!item.idCard) {
-      const row = createBackpayRow('', item.name, year, month)
-      row[5] = taxBackpay
+      const row = createBackpayAdjustmentRow('', item.name, year, month)
+      addBackpayAdjustment(row, 'taxDeduction', taxBackpay)
       rowsWithoutId.push(row)
       continue
     }
     const row = ensureRow(item.idCard, item.name)
-    row[5] = roundMoney(num(row[5]) + taxBackpay)
+    addBackpayAdjustment(row, 'taxDeduction', taxBackpay)
   }
 
-  return [...rowsById.values(), ...rowsWithoutId].filter(
-    (row) => num(row[5]) !== 0 || num(row[6]) !== 0
-  )
-}
-
-function createBackpayRow(
-  idCard: string,
-  name: string,
-  year: number,
-  month: number
-): Array<string | number> {
-  return [
-    idCard,
-    month,
-    name,
-    '事业',
-    year,
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    ''
-  ]
+  return [...rowsById.values(), ...rowsWithoutId].filter(hasBackpayAdjustments)
 }
 
 function resolveHousingFund(salary: SalarySummary, integratedActiveHousingFund: number): number {

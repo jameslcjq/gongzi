@@ -12,6 +12,12 @@ import {
 import { loadIntegratedRows } from './integratedPayroll'
 import { readMonthlyPayrollSettings } from './monthlyPayrollSettings'
 import { resolvePayrollPeriod } from './monthlyPayrollRuns'
+import {
+  addBackpayAdjustment,
+  addSignedBackpayAdjustment,
+  createBackpayAdjustmentRow,
+  hasBackpayAdjustments
+} from './backpayAdjustmentRows'
 import type {
   IntegratedActiveAggregates,
   IntegratedSimpleAggregates,
@@ -223,30 +229,21 @@ export async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<str
         return backpay !== 0 || tax !== 0
       })
       .map((row) => {
-        const out = createIntegratedBackpayRow(row.idCard, row.name, year, month)
-        out[17] = roundMoney(num(row.values['补发工资']))
+        const out = createBackpayAdjustmentRow(row.idCard, row.name, year, month)
+        addSignedBackpayAdjustment(
+          out,
+          num(row.values['补发工资']),
+          'basicIncrease',
+          'basicDeduction'
+        )
         const tax = roundMoney(num(row.values[taxField]))
-        out[taxField === '补扣工资' ? 18 : 22] = tax
+        addBackpayAdjustment(out, 'taxDeduction', -tax)
         return out
       })
+      .filter(hasBackpayAdjustments)
   } catch {
     return []
   }
-}
-
-function createIntegratedBackpayRow(
-  idCard: string,
-  name: string,
-  year: number,
-  month: number
-): Array<string | number> {
-  const row: Array<string | number> = Array.from({ length: 24 }, () => '')
-  row[0] = idCard
-  row[1] = month
-  row[2] = name
-  row[3] = '事业'
-  row[4] = year
-  return row
 }
 
 export async function loadIntegratedSimpleAggregates(

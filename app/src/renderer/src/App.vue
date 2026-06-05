@@ -143,6 +143,12 @@ const appVersion = ref('dev')
 const activeModuleKey = ref(modules[0].key)
 const hasVisitedPayrollModule = ref(activeModuleKey.value === 'payroll')
 const hasVisitedIntegrationModule = ref(activeModuleKey.value === 'integration')
+const hasVisitedPivotModule = ref(activeModuleKey.value === 'pivot')
+// 工资表格大块（工资数据/预算/年报/乡镇/房补/人事）共用一个 WorksheetView；
+// 一体化、工资业务、统计分析这三个模块没有自己的工作表侧栏。
+const NON_WORKSHEET_MODULE_KEYS = new Set(['integration', 'payroll', 'pivot'])
+const showWorksheetGroup = computed(() => !NON_WORKSHEET_MODULE_KEYS.has(activeModuleKey.value))
+const hasVisitedWorksheetGroup = ref(showWorksheetGroup.value)
 const selectedWorksheetId = ref('')
 const worksheetRecords = ref<WorksheetRecordsResult | null>(null)
 const recordsLoading = ref(false)
@@ -256,6 +262,12 @@ watch(activeModuleKey, () => {
   }
   if (activeModuleKey.value === 'integration') {
     hasVisitedIntegrationModule.value = true
+  }
+  if (activeModuleKey.value === 'pivot') {
+    hasVisitedPivotModule.value = true
+  }
+  if (showWorksheetGroup.value) {
+    hasVisitedWorksheetGroup.value = true
   }
   const tables = tablesInModule.value
   if (tables.length > 0) {
@@ -1428,7 +1440,7 @@ onUnmounted(() => {
     </header>
 
     <div class="md-main">
-      <div v-if="activeModuleKey === 'pivot'" class="md-pivot-wrapper">
+      <div v-if="hasVisitedPivotModule" v-show="activeModuleKey === 'pivot'" class="md-pivot-wrapper">
         <div class="md-pivot-tabs">
           <button
             class="md-pivot-tab"
@@ -1503,8 +1515,8 @@ onUnmounted(() => {
         </main>
       </template>
 
-      <template v-if="activeModuleKey !== 'pivot' && activeModuleKey !== 'payroll' && activeModuleKey !== 'integration'">
-        <aside class="md-sidebar">
+      <template v-if="hasVisitedWorksheetGroup">
+        <aside v-show="showWorksheetGroup" class="md-sidebar">
           <div class="md-sidebar-list">
             <div
               v-for="table in tablesInModule"
@@ -1520,7 +1532,7 @@ onUnmounted(() => {
           </div>
         </aside>
 
-        <main class="md-content">
+        <main v-show="showWorksheetGroup" class="md-content">
           <el-alert
             v-if="error"
             type="error"
