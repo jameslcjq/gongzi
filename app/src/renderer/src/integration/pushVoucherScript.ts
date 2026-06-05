@@ -239,7 +239,15 @@ export function buildPushVoucherScript(
   async function openVoucherPage(root) {
     if (isOnVoucherPage(root)) return 'ok'
 
-    status('🧭 自动导航：中科单位核算 → 凭证管理 → 凭证录入 ...')
+    // iframe 优先：SmartFin 菜单已变，点菜单只会狂弹窗且慢；页内同源 iframe 直达凭证录入已验证可用
+    status('🧭 在页内直接打开凭证录入(iframe) ...')
+    if (await openVoucherViaIframe(root)) {
+      await sleep(800)
+      return 'ok'
+    }
+
+    // iframe 没成功，再退回点菜单（兼容老门户）
+    status('🧭 iframe 未成功，改走菜单导航：中科单位核算 → 凭证管理 → 凭证录入 ...', 'warn')
     if (!textExistsIn(root, '凭证管理')) {
       await clickAnyAndWait(root, ['中科单位核算', '单位核算', '会计核算'], '凭证管理', 60000)
     }
@@ -254,15 +262,6 @@ export function buildPushVoucherScript(
     }
     if (await waitForVoucherPage(root, 10000)) {
       await sleep(1500)
-      return 'ok'
-    }
-
-    // 菜单没能打开（门户可能已升级为 SmartFin，菜单结构变了）。不跳转 window.top（会摧毁脚本上下文卡死），
-    // 也不让主程序 loadURL 直达裸地址（会被服务端 ERR_ABORTED 拦截）。改为页内注入同源 iframe 直接加载
-    // 凭证录入页，复用当前登录 cookie；成功则后续按该 iframe 上传。
-    status('🧭 菜单未找到凭证录入入口，尝试在页内直接打开(iframe) ...', 'warn')
-    if (await openVoucherViaIframe(root)) {
-      await sleep(800)
       return 'ok'
     }
     return 'fail'

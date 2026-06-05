@@ -196,10 +196,16 @@ function openHomeTab(): void {
 // 兼容：万一某些版本/路径还是触发了 @new-window，也把它接住
 function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
   event.preventDefault?.()
+  void tabId
+  if (shouldSuppressPopupTab()) {
+    if (event.url && event.url !== 'about:blank') {
+      logPush(currentPushRunId, 'info', '准备', `已拦截推送中弹出的新窗口（避免开一堆标签）：${String(event.url).slice(0, 100)}`)
+    }
+    return
+  }
   if (event.url && event.url !== 'about:blank') {
     openNewTab(event.url)
   }
-  void tabId
 }
 
 // 主进程通过 IPC 通知"webview 内有弹窗请求"
@@ -227,9 +233,26 @@ type PushLogEntry = {
 }
 const pushRunLog = ref<PushLogEntry[]>([])
 const pushPanelOpen = ref(false)
+// 推送进度（面板顶部进度条用）：让用户点完按钮一跳过来就能看到"已经开始、第几步"
+const pushTotalSteps = ref(0)
+const pushCompletedSteps = ref(0)
+const pushCurrentLabel = ref('')
+const pushProgressPct = computed(() =>
+  pushTotalSteps.value > 0
+    ? Math.min(100, Math.round((pushCompletedSteps.value / pushTotalSteps.value) * 100))
+    : 0
+)
 let pushRunSeq = 0
 let pushLogSeq = 0
 let currentPushRunId = 0
+// 实时 console 流已为该 runId 落过脚本日志时，结束时就不再重复 dump trace
+let liveTraceRunId = 0
+// 推送期间（及结束后短暂宽限）抑制"弹窗转新标签"：自动化点门户菜单会被当成新窗口弹出，
+// 而推送本身用页内 iframe 完成、并不需要这些弹窗，否则会开出一堆无用标签页。
+let suppressPopupsUntil = 0
+function shouldSuppressPopupTab(): boolean {
+  return pushInProgress.value || Date.now() < suppressPopupsUntil
+}
 
 function logPush(
   runId: number,
@@ -273,6 +296,12 @@ function logStepTrace(runId: number, kindLabel: string, trace: unknown, traceTex
   if (!any && trace === undefined && traceText === undefined) {
     logPush(runId, 'warn', '脚本', `${kindLabel}｜未取到脚本内部 trace（返回值缺少 trace 字段）`)
   }
+}
+
+// 实时流（onConsoleMessage）已覆盖本轮脚本日志时跳过结束 dump，避免重复；否则用返回值兜底
+function maybeLogStepTrace(runId: number, kindLabel: string, trace: unknown, traceText?: unknown): void {
+  if (liveTraceRunId === runId) return
+  logStepTrace(runId, kindLabel, trace, traceText)
 }
 
 async function revealPushLogFolder(): Promise<void> {
@@ -339,6 +368,11 @@ const PUSH_SCRIPT_TIMEOUT_MS = 180000
 // 给它单独一个较短超时；超时则记一条并继续交给页面脚本自己导航，绝不拖垮队列。
 const MODULE_TARGET_TIMEOUT_MS = 90000
 
+// 单步失败后自动重试前的等待，给页面/iframe 一点"焐热"时间，把"第一遍常失败、第二遍就行"的冷启动自动化掉。
+// 最多尝试 3 次（即首次 + 自动重试 2 次）。
+const RETRY_DELAY_MS = 5000
+const MAX_STEP_ATTEMPTS = 3
+
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: number | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -391,7 +425,7 @@ async function runOneStep(
       trace?: string[]
       traceText?: string
     }
-    logStepTrace(runId, '保险', r?.trace, r?.traceText)
+    maybeLogStepTrace(runId, '保险', r?.trace, r?.traceText)
     if (r?.ok) {
       ElMessage.success(`✅ 保险已推送 ${r.recordCount} 条 / ${step.label}`)
     } else {
@@ -404,7 +438,7 @@ async function runOneStep(
       buildPushVoucherScript(step.fileName, step.fileBase64, step.label),
       '凭证'
     )) as { ok: boolean; reason?: string; trace?: string[]; traceText?: string }
-    logStepTrace(runId, '凭证', r?.trace, r?.traceText)
+    maybeLogStepTrace(runId, '凭证', r?.trace, r?.traceText)
     if (r?.ok) {
       ElMessage.success(`✅ 凭证已导入 / ${step.label}`)
     } else {
@@ -434,7 +468,7 @@ async function runOneStep(
         }),
         name
       )) as SalarySystemImportResult | undefined
-      logStepTrace(runId, name, r?.trace, r?.traceText)
+      maybeLogStepTrace(runId, name, r?.trace, r?.traceText)
       if (r?.ok) {
         ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
       } else {
@@ -459,7 +493,7 @@ async function runOneStep(
       }),
       name
     )) as SalarySystemImportResult | undefined
-    logStepTrace(runId, name, r?.trace, r?.traceText)
+    maybeLogStepTrace(runId, name, r?.trace, r?.traceText)
     if (r?.ok) ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
     else throw new Error(`${name}失败：${r?.message || '未知错误'}`)
   }
@@ -640,7 +674,7 @@ async function runPushPreflight(wv: PortalWebview, steps: PushStep[]): Promise<b
 }
 
 async function processPushQueue(): Promise<void> {
-  // 推送必须串行：一体化页面保存、弹窗和进度条都依赖当前页面状态，失败后停止后续步骤。
+  // 推送串行执行；某一步失败则跳过该步、继续推其余，最后统一汇总成功/失败。
   if (processingPushQueue.value) return
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true
@@ -649,6 +683,9 @@ async function processPushQueue(): Promise<void> {
   currentPushRunId = runId
   try {
     const queuedSteps = pendingPushQueue.value.slice()
+    pushTotalSteps.value = queuedSteps.length
+    pushCompletedSteps.value = 0
+    pushCurrentLabel.value = '启动中…'
     logPush(runId, 'info', '准备', `推送开始：共 ${queuedSteps.length} 步`)
     ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
 
@@ -672,9 +709,12 @@ async function processPushQueue(): Promise<void> {
       logPush(runId, 'info', '等待页面', `当前页面：${state.url || '未知'}`)
     }
 
+    const succeeded: string[] = []
+    const failed: { name: string; msg: string }[] = []
     while (pendingPushQueue.value.length > 0) {
       const step = pendingPushQueue.value.shift() as PushStep
       const name = stepKindLabel(step)
+      pushCurrentLabel.value = name
       try {
         await markPushStatus(step, 'queued')
         if (step.kind === 'salary-system-import') {
@@ -685,17 +725,40 @@ async function processPushQueue(): Promise<void> {
           // 导致 webview 未就绪而整步失败。
           logPush(runId, 'info', '准备', `${name}：交由页面脚本自行导航到目标页（含 iframe 兜底）`)
         }
-        logPush(runId, 'info', '上传', `${name}：开始执行（${stepDetail(step)}）`)
-        await runOneStep(wv, step, runId)
+        // 自动重试：第一次常因页面/iframe 冷启动失败，等几秒重试，把"第二次才行"自动化
+        let attempt = 0
+        for (;;) {
+          attempt++
+          try {
+            logPush(
+              runId,
+              'info',
+              '上传',
+              `${name}：开始执行${attempt > 1 ? `（自动第 ${attempt} 次）` : ''}（${stepDetail(step)}）`
+            )
+            await runOneStep(wv, step, runId)
+            break
+          } catch (stepError) {
+            if (attempt >= MAX_STEP_ATTEMPTS) throw stepError
+            const m = stepError instanceof Error ? stepError.message : String(stepError)
+            logPush(
+              runId,
+              'warn',
+              '上传',
+              `${name}：第 ${attempt} 次未成功（${m}），${Math.round(RETRY_DELAY_MS / 1000)} 秒后自动重试 …`
+            )
+            await new Promise((r) => window.setTimeout(r, RETRY_DELAY_MS))
+          }
+        }
         await markPushStatus(step, 'success')
         logPush(runId, 'ok', '完成', `${name}：完成`)
+        succeeded.push(name)
       } catch (error) {
         await markPushStatus(step, 'failed')
-        const stopped = pendingPushQueue.value.length
-        pendingPushQueue.value = []
         const msg = error instanceof Error ? error.message : String(error)
-        logPush(runId, 'err', '失败', `${name} 步骤失败，已停止后续 ${stopped} 个步骤：${msg}`)
-        ElMessage.error(`执行 ${step.kind} 步骤失败，已停止后续 ${stopped} 个步骤：${msg}`)
+        failed.push({ name, msg })
+        // 改为"跳过失败项、继续推其余"：不清空队列、不中断，最后统一汇总
+        logPush(runId, 'err', '失败', `${name}：推送失败，已跳过并继续推其余：${msg}`)
         // 失败时自动抓取门户结构快照（只读），便于在看不到内网页面时定位菜单/iframe 布局
         try {
           if (await waitForWebviewReady(wv, 15000)) {
@@ -716,16 +779,40 @@ async function processPushQueue(): Promise<void> {
             `抓取门户结构失败：${diagError instanceof Error ? diagError.message : String(diagError)}`
           )
         }
-        return
       }
+      pushCompletedSteps.value++
       // 步骤间隔，让浮窗状态可读
       await new Promise((r) => window.setTimeout(r, 1200))
     }
-    logPush(runId, 'ok', '完成', `一体化推送完成：${queuedSteps.length} 步`)
-    ElMessage.success(`一体化推送完成：${queuedSteps.length} 步`)
+    // 汇总：跳过失败项、继续推其余后，统一报告成功/失败
+    if (failed.length === 0) {
+      logPush(runId, 'ok', '完成', `一体化推送完成：全部 ${succeeded.length} 项成功`)
+      ElMessage.success(`一体化推送完成：全部 ${succeeded.length} 项成功`)
+    } else {
+      logPush(
+        runId,
+        'warn',
+        '完成',
+        `推送结束：成功 ${succeeded.length} 项（${succeeded.join('、') || '无'}），失败 ${failed.length} 项（${failed.map((f) => f.name).join('、')}）`
+      )
+      void ElMessageBox.alert(
+        [
+          `成功 ${succeeded.length} 项：${succeeded.join('、') || '无'}`,
+          '',
+          `失败 ${failed.length} 项：`,
+          ...failed.map((f) => `· ${f.name}：${f.msg}`),
+          '',
+          '可对失败项单独重新推送（失败原因见右下角面板/推送日志）。'
+        ].join('\n'),
+        '推送结果汇总',
+        { type: succeeded.length === 0 ? 'error' : 'warning', confirmButtonText: '知道了' }
+      )
+    }
   } finally {
     processingPushQueue.value = false
     pushInProgress.value = false
+    // 再宽限 8 秒，拦住推送收尾后才迟到弹出的窗口
+    suppressPopupsUntil = Date.now() + 8000
   }
 }
 
@@ -846,6 +933,10 @@ onMounted(() => {
         }
       } catch {}
     }
+    if (shouldSuppressPopupTab()) {
+      logPush(currentPushRunId, 'info', '准备', `已拦截推送中弹出的新窗口（避免开一堆标签）：${String(payload.url).slice(0, 100)}`)
+      return
+    }
     console.log(
       '[portal] 拦截弹窗，转新标签 ←',
       sourceTabTitle || payload.sourceWebContentsId,
@@ -889,6 +980,26 @@ function onDomReady(tabId: string): void {
 function onStartLoading(tabId: string): void {
   const t = findTabById(tabId)
   if (t) t.loading = true
+}
+
+// 推送进行中，把推送脚本的 console 日志（[insurance-push]/[voucher-push]/[salary-system-import]）
+// 实时转发到面板与日志文件——解决"推送中看不到进度、以为没在工作"。
+function onConsoleMessage(event: { message?: string } | undefined): void {
+  if (!processingPushQueue.value) return
+  const raw = String(event?.message ?? '')
+  let label = ''
+  if (raw.startsWith('[insurance-push]')) label = '保险'
+  else if (raw.startsWith('[voucher-push]')) label = '凭证'
+  else if (raw.startsWith('[salary-system-import]')) label = '工资'
+  else return
+  const text = raw.replace(/^\[[^\]]+\]\s*/, '').trim()
+  if (!text) return
+  liveTraceRunId = currentPushRunId
+  // 一体化返回里出现校验/失败提示时标黄，作为"状态提醒"，避免被绿色"完成"盖住
+  const level: PushLogLevel = /校验失败|失败数|请到导入界面|导入日志里查看/.test(text)
+    ? 'warn'
+    : 'info'
+  logPush(currentPushRunId, level, '脚本', `${label}｜${text}`)
 }
 
 function onFinishLoad(tabId: string): void {
@@ -1204,7 +1315,6 @@ void nextTick(() => {
       <span class="portal-url" :title="activeTab?.url">{{ activeTab?.url }}</span>
       <div class="portal-actions">
         <el-button :icon="Refresh" @click="reload">刷新</el-button>
-        <el-button type="primary" @click="openSalaryPlanInput">人员经费录入</el-button>
         <el-button
           :icon="Download"
           :loading="salaryExporting"
@@ -1251,6 +1361,7 @@ void nextTick(() => {
         partition="persist:integrated-portal"
         allowpopups
         @dom-ready="onDomReady(tab.id)"
+        @console-message="onConsoleMessage($event)"
         @did-start-loading="onStartLoading(tab.id)"
         @did-finish-load="onFinishLoad(tab.id)"
         @did-frame-finish-load="onFrameFinishLoad(tab.id)"
@@ -1270,6 +1381,19 @@ void nextTick(() => {
           <button class="push-log-btn" @click="pushPanelOpen = !pushPanelOpen">
             {{ pushPanelOpen ? '收起' : '展开' }}
           </button>
+        </div>
+        <div v-if="pushTotalSteps > 0" class="push-progress">
+          <div class="push-progress-text">
+            {{ pushInProgress ? '推送中' : '推送结束' }}
+            {{ pushCompletedSteps }}/{{ pushTotalSteps }}{{ pushCurrentLabel ? '：' + pushCurrentLabel : '' }}
+          </div>
+          <div class="push-progress-track">
+            <div
+              class="push-progress-fill"
+              :class="{ done: !pushInProgress }"
+              :style="{ width: pushProgressPct + '%' }"
+            />
+          </div>
         </div>
         <div v-show="pushPanelOpen" class="push-log-body">
           <div
@@ -1482,6 +1606,36 @@ void nextTick(() => {
 
 .push-log-spacer {
   flex: 1;
+}
+
+.push-progress {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.push-progress-text {
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: #ffd27a;
+}
+
+.push-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.push-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #409eff;
+  transition: width 0.3s ease;
+}
+
+.push-progress-fill.done {
+  background: #67c23a;
 }
 
 .push-log-btn {

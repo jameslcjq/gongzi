@@ -101,6 +101,12 @@ watch(
   }
 )
 
+// 推送在"一体化"页执行并把状态写入数据库；推送结束（pushInProgress 由真转假）后
+// 自动刷新历史，确保报表里的"凭证/保险/工资 推送状态"及时反映出来。
+watch(pushInProgress, (current, previous) => {
+  if (previous && !current) void refreshHistory()
+})
+
 function applyPrintOptions(nextPrinters: PrinterSummary[], settings: MonthlyPayrollPrintSettings) {
   printers.value = nextPrinters
   printSettings.value = {

@@ -256,7 +256,7 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     if (!textExistsIn(root, '集中支付') && textExistsIn(root, '预算执行')) {
       await clickUntil(root, '预算执行', function () {
         return pageReady(root) || textExistsIn(root, '集中支付')
-      }, 60000)
+      }, 20000)
     }
     if (pageReady(root)) return true
     if (!textExistsIn(root, '集中支付')) {
@@ -266,7 +266,7 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     status('🧭 自动导航：集中支付 → 支付管理 ...')
     await clickUntil(root, '集中支付', function () {
       return pageReady(root) || textExistsIn(root, '支付管理')
-    }, 60000)
+    }, 20000)
     if (pageReady(root)) return true
     if (!textExistsIn(root, '支付管理')) {
       throw new Error('没有展开“集中支付 → 支付管理”。请确认当前账号有直接支付外部数据权限。')
@@ -275,15 +275,15 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     status('🧭 自动导航：支付管理 → 直接支付外部数据 ...')
     await clickUntil(root, '支付管理', function () {
       return pageReady(root) || textExistsIn(root, '直接支付外部数据') || textExistsIn(root, '直接支付录入')
-    }, 60000)
+    }, 20000)
     await sleep(300)
     await clickUntil(root, '直接支付外部数据', function () {
       return pageReady(root)
-    }, 45000)
+    }, 20000)
     if (!pageReady(root)) {
       await clickUntil(root, '直接支付录入', function () {
         return pageReady(root)
-      }, 30000)
+      }, 15000)
     }
     if (!pageReady(root)) {
       throw new Error('没有等到“直接支付外部数据”页面加载完成。请确认菜单权限和网络正常后重试。')
@@ -302,14 +302,18 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     var root = window.top || window
 
     if (!pageReady(root)) {
+      // iframe 优先：SmartFin 菜单已变，点菜单只会狂弹窗且慢；页内 iframe 直达已验证可用
+      status('🧭 在页内直接打开"直接支付外部数据"(iframe) ...')
+      await openDirectPayViaIframe(root)
+    }
+    if (!pageReady(root)) {
+      // iframe 没成功，再退回点菜单（兼容老门户）
+      status('🧭 iframe 未成功，改走菜单导航 ...', 'warn')
       try {
         await openDirectPayPage(root)
       } catch (navErr) {
-        status('🧭 菜单导航失败：' + (navErr && navErr.message ? navErr.message : navErr) + '，改用页内 iframe 直达 ...', 'warn')
+        status('🧭 菜单导航也失败：' + (navErr && navErr.message ? navErr.message : navErr), 'warn')
       }
-    }
-    if (!pageReady(root)) {
-      await openDirectPayViaIframe(root)
     }
     if (!pageReady(root)) {
       status('❌ 未能打开"直接支付外部数据"页面', 'err')

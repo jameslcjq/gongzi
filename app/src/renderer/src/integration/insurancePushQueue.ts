@@ -46,7 +46,7 @@ export type PushStep = InsurancePushStep | VoucherPushStep | SalarySystemImportP
 
 export const pendingPushQueue = ref<PushStep[]>([])
 
-/** 一体化页是否正在处理推送队列。入口页据此拒绝重复点击、避免覆盖队列。 */
+/** 一体化页是否正在处理推送队列。入口页据此拒绝重复点击、避免覆盖队列；历史页据此在推送结束后刷新状态。 */
 export const pushInProgress = ref(false)
 
 /** App.vue 注入"切到一体化模块"回调 */
