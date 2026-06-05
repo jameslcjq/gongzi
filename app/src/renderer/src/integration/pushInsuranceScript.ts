@@ -32,6 +32,8 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
 ;(async function pushInsurance() {
   const RECORDS = ${JSON.stringify(records)}
   const MENUID = ${JSON.stringify(PAY_VOUCHER_MENUID)}
+  var TRACE = []
+  var TRACE_T0 = Date.now()
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
   function normalize(v) { return String(v || '').replace(/\\s+/g, '') }
@@ -76,6 +78,7 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     else if (kind === 'err') el.style.background = 'rgba(180,40,40,0.95)'
     else el.style.background = 'rgba(33,33,33,0.92)'
     console.log('[insurance-push]', text)
+    try { TRACE.push('+' + ((Date.now() - TRACE_T0) / 1000).toFixed(1) + 's ' + text) } catch (e) {}
   }
   function clearStatusLater(ms) {
     setTimeout(function () {
@@ -259,7 +262,7 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
     if (!RECORDS.length) {
       status('❌ 没有可推送的记录', 'err')
       clearStatusLater(5000)
-      return { ok: false, reason: '记录为空' }
+      return { ok: false, reason: '记录为空', trace: TRACE }
     }
 
     var root = window.top || window
@@ -346,12 +349,12 @@ export function buildPushInsuranceScript(records: InsuranceRecord[]): string {
 
     status('✅ 完成！已推送 ' + RECORDS.length + ' 条到 直接支付外部数据', 'ok')
     clearStatusLater(8000)
-    return { ok: true, recordCount: RECORDS.length }
+    return { ok: true, recordCount: RECORDS.length, trace: TRACE }
   } catch (error) {
     var msg = error && error.message ? error.message : String(error)
     status('❌ ' + msg, 'err')
     clearStatusLater(12000)
-    return { ok: false, reason: msg }
+    return { ok: false, reason: msg, trace: TRACE }
   }
 })()
 `

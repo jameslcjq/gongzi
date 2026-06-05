@@ -22,6 +22,7 @@ import {
   requestSwitchToIntegration,
   type PushStep
 } from '../integration/insurancePushQueue'
+import { appendPushLogLine } from '../integration/pushLogger'
 import type { InsuranceRecord } from '../integration/pushInsuranceScript'
 import type {
   ImportWatcherStatus,
@@ -248,6 +249,9 @@ function enqueueIntegratedPush(steps: PushStep[], stepHints: string[], label: st
   }
   ElMessage.info(
     `已准备 ${steps.length} 步${label}（${stepHints.join('、')}），正在跳转到"一体化对接"...`
+  )
+  appendPushLogLine(
+    `==== 触发${label}：准备 ${steps.length} 步（${stepHints.join('、')}），切换到一体化对接 ====`
   )
   requestSwitchToIntegration()
   const queuedSteps = steps.slice()

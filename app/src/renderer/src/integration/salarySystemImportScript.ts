@@ -26,6 +26,8 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
   var FILTER_UNIT_CODE = ${JSON.stringify(options.filterUnitCode || '')}
   var MONTH = ${JSON.stringify(options.month || '')}
   var MENUID = ${JSON.stringify(SALARY_MENUID)}
+  var TRACE = []
+  var TRACE_T0 = Date.now()
 
   function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms) }) }
   function normalize(value) { return String(value || '').replace(/\\s+/g, '') }
@@ -64,6 +66,7 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
     else if (kind === 'warn') el.style.background = 'rgba(200,140,0,.95)'
     else el.style.background = 'rgba(33,33,33,.92)'
     console.log('[salary-system-import]', text)
+    try { TRACE.push('+' + ((Date.now() - TRACE_T0) / 1000).toFixed(1) + 's ' + text) } catch (e) {}
   }
 
   function clearStatusLater(ms) {
@@ -248,12 +251,12 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
 
     status('导入成功：' + (result && (result.data || result.reason || result.message) || FILE_NAME), 'ok')
     clearStatusLater(10000)
-    return { ok: true, response: result, agency: agency, batchId: batchId }
+    return { ok: true, response: result, agency: agency, batchId: batchId, trace: TRACE }
   } catch (error) {
     var message = error && error.message ? error.message : String(error)
     status('导入失败：' + message, 'err')
     clearStatusLater(15000)
-    return { ok: false, message: message }
+    return { ok: false, message: message, trace: TRACE }
   }
 })()
 `

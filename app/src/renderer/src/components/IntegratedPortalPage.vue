@@ -24,6 +24,8 @@ import { buildSalarySystemImportScript } from '../integration/salarySystemImport
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
 import { buildPushVoucherScript } from '../integration/pushVoucherScript'
 import { pendingPushQueue, type PushStep } from '../integration/insurancePushQueue'
+import { appendPushLogLine, openPushLogFolder } from '../integration/pushLogger'
+import { buildPortalDiagnosticsScript } from '../integration/portalDiagnosticsScript'
 import {
   buildIntegrationPushPreflightScript,
   type IntegrationPushPreflightResult,
@@ -209,14 +211,155 @@ let stopRecorderDevTools: (() => void) | null = null
 const processingPushQueue = ref(false)
 const pushTabIds: Partial<Record<IntegrationModuleTarget, string>> = {}
 
-async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
+// ---------------------------------------------------------------------------
+// 推送过程日志：把"切模块 / 等页面 / 上传 / 回写状态"每一步显式记录下来，
+// 让"点了推送没跳转"从黑盒变成可定位。注意：这里只做可观察性，不改导航逻辑。
+// ---------------------------------------------------------------------------
+type PushLogLevel = 'info' | 'ok' | 'warn' | 'err'
+type PushLogEntry = {
+  id: number
+  runId: number
+  ts: number
+  level: PushLogLevel
+  phase: string
+  target?: string
+  message: string
+}
+const pushRunLog = ref<PushLogEntry[]>([])
+const pushPanelOpen = ref(false)
+let pushRunSeq = 0
+let pushLogSeq = 0
+let currentPushRunId = 0
+
+function logPush(
+  runId: number,
+  level: PushLogLevel,
+  phase: string,
+  message: string,
+  target?: string
+): void {
+  pushLogSeq += 1
+  pushRunLog.value.push({ id: pushLogSeq, runId, ts: Date.now(), level, phase, target, message })
+  // 只保留最近 200 条，避免长时间运行后越积越多
+  if (pushRunLog.value.length > 200) {
+    pushRunLog.value.splice(0, pushRunLog.value.length - 200)
+  }
+  // 出问题或新一轮开始时自动展开，其余 info 不打扰已收起面板的用户
+  if (level === 'err' || level === 'warn' || phase === '准备') pushPanelOpen.value = true
+  const tag = `[push#${runId}][${phase}]${target ? '[' + target + ']' : ''}`
+  if (level === 'err') console.error(tag, message)
+  else if (level === 'warn') console.warn(tag, message)
+  else console.log(tag, message)
+  // 落盘到持久日志文件（全程留痕，供内网排查）
+  appendPushLogLine(`#${runId} [${phase}]${target ? '[' + target + ']' : ''} ${level.toUpperCase()} ${message}`)
+}
+
+// 把推送脚本（保险/凭证/工资）内部的导航/上传 trace 也写进面板和日志文件，
+// 这样"卡在哪一步菜单/哪一次上传"都能在文件里看到。
+function logStepTrace(runId: number, kindLabel: string, trace: unknown): void {
+  if (!Array.isArray(trace)) return
+  for (const raw of trace) {
+    const line = String(raw ?? '').trim()
+    if (line) logPush(runId, 'info', '脚本', `${kindLabel}｜${line}`)
+  }
+}
+
+async function revealPushLogFolder(): Promise<void> {
+  try {
+    await openPushLogFolder()
+  } catch (error) {
+    ElMessage.error(`打开日志文件夹失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function clearPushLog(): void {
+  pushRunLog.value = []
+}
+
+function pushLogTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+async function copyPushLog(): Promise<void> {
+  const text = pushRunLog.value
+    .map(
+      (e) =>
+        `#${e.runId} ${pushLogTime(e.ts)} [${e.phase}]${e.target ? '[' + e.target + ']' : ''} ${e.level.toUpperCase()} ${e.message}`
+    )
+    .join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('推送调试信息已复制到剪贴板')
+  } catch (error) {
+    console.warn('复制推送日志失败', error)
+    ElMessage.warning('复制失败，请手动选择面板内容复制')
+  }
+}
+
+function moduleDisplayName(target: IntegrationModuleTarget): string {
+  return target === 'accounting' ? '中科单位核算' : '预算执行'
+}
+
+function describeWebviewState(wv: PortalWebview): { url: string; looksLikeLogin: boolean } {
+  let url = ''
+  try {
+    url = wv.getURL()
+  } catch {}
+  const looksLikeLogin = /\/login|\/sso|passport|signin/i.test(url)
+  return { url, looksLikeLogin }
+}
+
+function stepKindLabel(step: PushStep): string {
+  if (step.kind === 'insurance') return '保险'
+  if (step.kind === 'voucher') return '凭证'
+  return step.mode === 'backpay' ? '补发工资' : '工资'
+}
+
+function stepDetail(step: PushStep): string {
+  if (step.kind === 'insurance') return `${step.records.length} 条`
+  return step.fileName
+}
+
+// 单步注入脚本的最长执行时间。超时即判失败并抛出，确保 processingPushQueue 能在 finally 里复位，
+// 避免页面跳转导致 executeJavaScript 永不 resolve 而把整条推送队列（含后续保险/工资）永久卡死。
+const PUSH_SCRIPT_TIMEOUT_MS = 180000
+
+// 切模块（buildOpenIntegrationModuleScript）同样可能因页面跳转而卡住 executeJavaScript（曾导致保险推送整条队列冻结、后续无任何日志）。
+// 给它单独一个较短超时；超时则记一条并继续交给页面脚本自己导航，绝不拖垮队列。
+const MODULE_TARGET_TIMEOUT_MS = 90000
+
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: number | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer !== undefined) window.clearTimeout(timer)
+  })
+}
+
+function execStepScript(wv: PortalWebview, code: string, label: string): Promise<unknown> {
+  return withTimeout(
+    wv.executeJavaScript(code),
+    PUSH_SCRIPT_TIMEOUT_MS,
+    `${label}脚本执行超时（${Math.round(PUSH_SCRIPT_TIMEOUT_MS / 1000)}s，可能页面发生跳转导致上下文丢失），已停止本步`
+  )
+}
+
+async function runOneStep(
+  wv: PortalWebview,
+  step: PushStep,
+  runId = currentPushRunId
+): Promise<void> {
   if (step.kind === 'insurance') {
     ElMessage.info(`【保险】开始：${step.label}（${step.records.length} 条）`)
-    const r = (await wv.executeJavaScript(buildPushInsuranceScript(step.records))) as {
+    const r = (await execStepScript(wv, buildPushInsuranceScript(step.records), '保险')) as {
       ok: boolean
       reason?: string
       recordCount?: number
+      trace?: string[]
     }
+    logStepTrace(runId, '保险', r?.trace)
     if (r?.ok) {
       ElMessage.success(`✅ 保险已推送 ${r.recordCount} 条 / ${step.label}`)
     } else {
@@ -224,9 +367,12 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
     }
   } else if (step.kind === 'voucher') {
     ElMessage.info(`【凭证】开始：${step.label}（${step.fileName}）`)
-    const r = (await wv.executeJavaScript(
-      buildPushVoucherScript(step.fileName, step.fileBase64, step.label)
-    )) as { ok: boolean; reason?: string }
+    const r = (await execStepScript(
+      wv,
+      buildPushVoucherScript(step.fileName, step.fileBase64, step.label),
+      '凭证'
+    )) as { ok: boolean; reason?: string; trace?: string[] }
+    logStepTrace(runId, '凭证', r?.trace)
     if (r?.ok) {
       ElMessage.success(`✅ 凭证已导入 / ${step.label}`)
     } else {
@@ -234,13 +380,15 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
     }
   } else if (step.kind === 'salary-system-import') {
     const name = step.mode === 'backpay' ? '补发工资' : '工资导入'
-    ElMessage.info(`【${name}】开始：${step.label}（${step.fileName}）`)
+    // 工资走后台接口推送（不跳转页面），明确告知用户，避免被当成"没反应"。
+    ElMessage.info(`【${name}】后台接口推送（无需跳转页面）：${step.label}（${step.fileName}）`)
     let filterUnitName = ''
     try {
       const unit = await window.salaryApi.getUnitSettings()
       filterUnitName = (unit.unitFullName || '').trim()
       const filterUnitCode = (unit.unitImportCode || '').trim()
-      const r = (await wv.executeJavaScript(
+      const r = (await execStepScript(
+        wv,
         buildSalarySystemImportScript({
           mode: step.mode,
           file: {
@@ -251,8 +399,10 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
           filterUnitName,
           filterUnitCode,
           month: step.month
-        })
+        }),
+        name
       )) as SalarySystemImportResult | undefined
+      logStepTrace(runId, name, r?.trace)
       if (r?.ok) {
         ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
       } else {
@@ -263,7 +413,8 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
       if (filterUnitName) throw error
       console.warn('读取单位设置失败，继续由一体化单位列表判断', error)
     }
-    const r = (await wv.executeJavaScript(
+    const r = (await execStepScript(
+      wv,
       buildSalarySystemImportScript({
         mode: step.mode,
         file: {
@@ -273,8 +424,10 @@ async function runOneStep(wv: PortalWebview, step: PushStep): Promise<void> {
         },
         filterUnitName,
         month: step.month
-      })
+      }),
+      name
     )) as SalarySystemImportResult | undefined
+    logStepTrace(runId, name, r?.trace)
     if (r?.ok) ElMessage.success(`✅ ${name}已导入 / ${step.label}`)
     else throw new Error(`${name}失败：${r?.message || '未知错误'}`)
   }
@@ -291,7 +444,9 @@ async function markPushStatus(step: PushStep, status: MonthlyPayrollPushStatus):
 
 function moduleTargetForStep(step: PushStep): IntegrationModuleTarget | null {
   if (step.kind === 'voucher') return 'accounting'
-  if (step.kind === 'insurance' || step.kind === 'salary-system-import') return 'budget'
+  if (step.kind === 'insurance') return 'budget'
+  // 工资/补发工资是后台接口导入（discoverAgency → 上传），不依赖打开"预算执行"页面，
+  // 因此不强制模块跳转，避免被当成"没反应"或误判失败。
   return null
 }
 
@@ -310,15 +465,49 @@ function findModuleTabId(target: IntegrationModuleTarget): string | null {
   return matched?.id || null
 }
 
-async function ensureModuleTarget(wv: PortalWebview, target: IntegrationModuleTarget): Promise<void> {
-  const result = (await wv.executeJavaScript(
-    buildOpenIntegrationModuleScript(target)
-  )) as IntegrationModuleNavigationResult | undefined
+async function ensureModuleTarget(
+  wv: PortalWebview,
+  target: IntegrationModuleTarget,
+  runId = currentPushRunId
+): Promise<void> {
+  const name = moduleDisplayName(target)
+  let result: IntegrationModuleNavigationResult | undefined
+  try {
+    result = (await withTimeout(
+      wv.executeJavaScript(buildOpenIntegrationModuleScript(target)),
+      MODULE_TARGET_TIMEOUT_MS,
+      `「${name}」切换超时（${Math.round(MODULE_TARGET_TIMEOUT_MS / 1000)}s，可能页面正在跳转导致上下文丢失）`
+    )) as IntegrationModuleNavigationResult | undefined
+  } catch (error) {
+    // 关键：切模块卡住绝不能拖垮整条队列（曾导致保险推送后续无任何日志）。超时/异常即记录并继续，交给页面脚本自己导航。
+    logPush(
+      runId,
+      'warn',
+      '切换模块',
+      `「${name}」切换未完成：${error instanceof Error ? error.message : String(error)}（继续交给页面脚本自动导航）`,
+      name
+    )
+    return
+  }
   if (!result?.ok) {
+    // 仍按原逻辑"继续交给页面脚本自动导航"，只是把失败显式记录，
+    // 方便区分"没找到入口 / 页面未登录 / 页面未加载完成"。
+    logPush(
+      runId,
+      'warn',
+      '切换模块',
+      `「${name}」未确认打开：${result?.message || '未知原因'}（继续交给页面脚本自动导航）`,
+      name
+    )
     console.warn('一体化模块切换未完成，继续交由页面脚本自动导航', result?.message)
     return
   }
-  if (result.changed) ElMessage.info(result.message)
+  if (result.changed) {
+    logPush(runId, 'info', '切换模块', result.message, name)
+    ElMessage.info(result.message)
+  } else {
+    logPush(runId, 'info', '切换模块', `已在「${name}」模块`, name)
+  }
 }
 
 async function webviewForPushStep(step: PushStep): Promise<PortalWebview | undefined> {
@@ -419,35 +608,84 @@ async function processPushQueue(): Promise<void> {
   if (processingPushQueue.value) return
   if (!pendingPushQueue.value.length) return
   processingPushQueue.value = true
+  const runId = ++pushRunSeq
+  currentPushRunId = runId
   try {
+    const queuedSteps = pendingPushQueue.value.slice()
+    logPush(runId, 'info', '准备', `推送开始：共 ${queuedSteps.length} 步`)
+    ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
+
+    logPush(runId, 'info', '等待页面', '等待一体化 webview 就绪 …')
     const wv = await waitForActiveWebview(45000)
     if (!wv) {
+      logPush(runId, 'err', '等待页面', '一体化 webview 尚未就绪，推送任务已停止，请重新触发')
       ElMessage.error('一体化 webview 尚未就绪，推送任务已停止，请重新触发')
       pendingPushQueue.value = []
       return
     }
-    const queuedSteps = pendingPushQueue.value.slice()
-    ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
+    const state = describeWebviewState(wv)
+    if (state.looksLikeLogin) {
+      logPush(
+        runId,
+        'warn',
+        '等待页面',
+        `当前页面疑似登录页，可能无法跳转，请先登录一体化系统后再推送：${state.url}`
+      )
+    } else {
+      logPush(runId, 'info', '等待页面', `当前页面：${state.url || '未知'}`)
+    }
+
     while (pendingPushQueue.value.length > 0) {
       const step = pendingPushQueue.value.shift() as PushStep
+      const name = stepKindLabel(step)
       try {
         await markPushStatus(step, 'queued')
         const target = moduleTargetForStep(step)
-        if (target) await ensureModuleTarget(wv, target)
-        await runOneStep(wv, step)
+        if (target) {
+          logPush(
+            runId,
+            'info',
+            '切换模块',
+            `${name}：尝试打开「${moduleDisplayName(target)}」`,
+            moduleDisplayName(target)
+          )
+          await ensureModuleTarget(wv, target, runId)
+        } else {
+          logPush(runId, 'info', '上传', `${name}：后台接口推送，无需跳转页面`, '后台接口')
+        }
+        logPush(runId, 'info', '上传', `${name}：开始执行（${stepDetail(step)}）`)
+        await runOneStep(wv, step, runId)
         await markPushStatus(step, 'success')
+        logPush(runId, 'ok', '完成', `${name}：完成`)
       } catch (error) {
         await markPushStatus(step, 'failed')
         const stopped = pendingPushQueue.value.length
         pendingPushQueue.value = []
-        ElMessage.error(
-          `执行 ${step.kind} 步骤失败，已停止后续 ${stopped} 个步骤：${error instanceof Error ? error.message : String(error)}`
-        )
+        const msg = error instanceof Error ? error.message : String(error)
+        logPush(runId, 'err', '失败', `${name} 步骤失败，已停止后续 ${stopped} 个步骤：${msg}`)
+        ElMessage.error(`执行 ${step.kind} 步骤失败，已停止后续 ${stopped} 个步骤：${msg}`)
+        // 失败时自动抓取门户结构快照（只读），便于在看不到内网页面时定位菜单/iframe 布局
+        try {
+          const diag = (await withTimeout(
+            wv.executeJavaScript(buildPortalDiagnosticsScript()),
+            15000,
+            '门户结构诊断超时'
+          )) as unknown
+          logStepTrace(runId, '诊断', Array.isArray(diag) ? diag : [String(diag)])
+        } catch (diagError) {
+          logPush(
+            runId,
+            'warn',
+            '诊断',
+            `抓取门户结构失败：${diagError instanceof Error ? diagError.message : String(diagError)}`
+          )
+        }
         return
       }
       // 步骤间隔，让浮窗状态可读
       await new Promise((r) => window.setTimeout(r, 1200))
     }
+    logPush(runId, 'ok', '完成', `一体化推送完成：${queuedSteps.length} 步`)
     ElMessage.success(`一体化推送完成：${queuedSteps.length} 步`)
   } finally {
     processingPushQueue.value = false
@@ -703,8 +941,8 @@ async function openSalaryPlanInput(): Promise<void> {
 }
 
 type SalarySystemImportResult =
-  | { ok: true; response?: unknown; agency?: { agency_name?: string }; batchId?: string }
-  | { ok: false; message?: string }
+  | { ok: true; response?: unknown; agency?: { agency_name?: string }; batchId?: string; trace?: string[] }
+  | { ok: false; message?: string; trace?: string[] }
 
 // ---------------------------------------------------------------------------
 // 一体化页面脚本注入（跨 frame）
@@ -930,6 +1168,7 @@ void nextTick(() => {
           >导出工资</el-button
         >
         <el-button :icon="Link" @click="openExternal">外部浏览器</el-button>
+        <el-button @click="revealPushLogFolder">推送日志</el-button>
       </div>
     </header>
 
@@ -976,6 +1215,32 @@ void nextTick(() => {
         @page-title-updated="handlePageTitle(tab.id, $event)"
         @new-window="handleNewWindow(tab.id, $event)"
       />
+
+      <div v-if="pushRunLog.length" class="push-log-panel" :class="{ collapsed: !pushPanelOpen }">
+        <div class="push-log-header">
+          <strong>推送过程</strong>
+          <span class="push-log-spacer" />
+          <button class="push-log-btn" title="复制全部日志" @click="copyPushLog">复制</button>
+          <button class="push-log-btn" title="打开日志文件夹" @click="revealPushLogFolder">日志文件</button>
+          <button class="push-log-btn" title="清空日志" @click="clearPushLog">清空</button>
+          <button class="push-log-btn" @click="pushPanelOpen = !pushPanelOpen">
+            {{ pushPanelOpen ? '收起' : '展开' }}
+          </button>
+        </div>
+        <div v-show="pushPanelOpen" class="push-log-body">
+          <div
+            v-for="entry in pushRunLog"
+            :key="entry.id"
+            class="push-log-row"
+            :class="'lvl-' + entry.level"
+          >
+            <span class="push-log-time">{{ pushLogTime(entry.ts) }}</span>
+            <span class="push-log-run">#{{ entry.runId }}</span>
+            <span class="push-log-phase">{{ entry.phase }}</span>
+            <span class="push-log-msg">{{ entry.message }}</span>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -1137,5 +1402,105 @@ void nextTick(() => {
 .portal-webview.active {
   visibility: visible;
   z-index: 1;
+}
+
+/* 推送过程日志面板：浮在 webview 右下角，让"切模块/等页面/上传/回写"每步可见。
+   用 fixed 脱离 webview 的层叠上下文，确保盖在内嵌 webview 之上（与全局 toast 一致）。 */
+.push-log-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: calc(100% - 32px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(28, 28, 30, 0.94);
+  color: #f5f5f5;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.push-log-panel.collapsed {
+  width: auto;
+}
+
+.push-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.push-log-spacer {
+  flex: 1;
+}
+
+.push-log-btn {
+  padding: 2px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: transparent;
+  color: #f5f5f5;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.push-log-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.push-log-body {
+  max-height: 240px;
+  padding: 6px 0;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.push-log-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.push-log-time {
+  flex: none;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+}
+
+.push-log-run {
+  flex: none;
+  color: #9aa0a6;
+}
+
+.push-log-phase {
+  flex: none;
+  min-width: 56px;
+  color: #c0c6cc;
+}
+
+.push-log-msg {
+  flex: 1;
+  min-width: 0;
+}
+
+.push-log-row.lvl-ok .push-log-msg {
+  color: #7ee2a8;
+}
+
+.push-log-row.lvl-warn .push-log-msg {
+  color: #ffcf66;
+}
+
+.push-log-row.lvl-err .push-log-msg {
+  color: #ff8a8a;
 }
 </style>

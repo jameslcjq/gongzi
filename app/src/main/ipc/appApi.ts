@@ -65,6 +65,7 @@ import {
 } from '../services/performancePayroll'
 import { getUnitSettingsLockState, readUnitSettings, writeUnitSettings } from '../services/unitSettings'
 import { resolveSchoolUnitSettings } from '../services/schoolLookup'
+import { appendPushLog, ensurePushLogDir } from '../services/pushLog'
 import {
   readMonthlyPayrollPrintSettings,
   writeMonthlyPayrollPrintSettings
@@ -766,6 +767,20 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('app:open-path', async (_event, path: string): Promise<string> => {
     return shell.openPath(path)
+  })
+
+  // 一体化推送过程日志：渲染进程逐行写入，按天分文件，便于内网排查
+  ipcMain.handle('push-log:append', async (_event, line: string): Promise<void> => {
+    try {
+      await appendPushLog(String(line ?? ''))
+    } catch (error) {
+      console.warn('写入推送日志失败', error)
+    }
+  })
+
+  ipcMain.handle('push-log:open-folder', async (): Promise<string> => {
+    const dir = await ensurePushLogDir()
+    return shell.openPath(dir)
   })
 
   ipcMain.handle(
