@@ -8,6 +8,7 @@ import {
   Lock,
   Setting,
   Tickets,
+  Tools,
   Upload,
   User
 } from '@element-plus/icons-vue'
@@ -23,6 +24,8 @@ import StatReportPage from './components/StatReportPage.vue'
 import RecordFormDialog from './components/RecordFormDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import WorksheetView from './components/WorksheetView.vue'
+import { internalToolsEnabled } from './internalToolsMode'
+import type { BudgetProjectCodeResult } from './integration/budgetProjectCodeScript'
 import {
   displayWorksheetName,
   modules,
@@ -42,6 +45,8 @@ import type {
   AnnualReportWorkflowInput,
   AppSummary,
   ExcelImportLog,
+  ExchangePackagePreview,
+  ExchangeStatus,
   ImportBatchSummary,
   ImportWatcherStatus,
   LookupFailureEntry,
@@ -55,6 +60,8 @@ import type {
   WorksheetRecordValue,
   WorksheetRecordsResult
 } from '@shared/types'
+
+const showInternalTools = internalToolsEnabled
 
 type IpcResponse<T> = {
   success: boolean
@@ -135,8 +142,13 @@ const importWatcher = ref<ImportWatcherStatus | null>(null)
 const importWatcherLoading = ref(false)
 const workflowNoticeLogs = ref<ExcelImportLog[]>([])
 const seenImportLogKeys = new Set<string>()
+const exchangeStatus = ref<ExchangeStatus | null>(null)
+const exchangeStatusLoading = ref(false)
+const seenExchangePackageKeys = new Set<string>()
+const seenExchangeSyncMessages = new Set<string>()
 let importWatcherInitialized = false
 let importWatcherTimer: ReturnType<typeof setInterval> | undefined
+let exchangeStatusTimer: ReturnType<typeof setInterval> | undefined
 let hrMasterSyncPrompting = false
 let townshipSyncPrompting = false
 let budgetActiveSyncPrompting = false
@@ -157,6 +169,7 @@ const syncDiffAllSelected = computed(
 
 const importDialogVisible = ref(false)
 const settingsDialogVisible = ref(false)
+const settingsInitialTab = ref('unit')
 const fieldDialogVisible = ref(false)
 const fieldSaving = ref(false)
 const recordDialogVisible = ref(false)
@@ -171,6 +184,9 @@ const lookupFailureRows = ref<LookupFailureEntry[]>([])
 const pivotSubTab = ref<'reports' | 'pivot'>('reports')
 const payrollSubTab = ref<'monthly' | 'performance' | 'annualAdjustment'>('monthly')
 const monthlyPayrollRefreshKey = ref(0)
+const integratedPortalPageRef = ref<{
+  resolveBudgetProjectCodesFromPortal: () => Promise<BudgetProjectCodeResult>
+} | null>(null)
 
 const activeModule = computed(
   () => modules.find((item) => item.key === activeModuleKey.value) ?? visibleModules[0]
@@ -407,6 +423,94 @@ async function clearImportNotifications() {
     ElMessage.success('导入通知已清空')
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '清空导入通知失败')
+  }
+}
+
+async function refreshExchangeStatus() {
+  if (!isLicenseValid.value || exchangeStatusLoading.value) return
+
+  exchangeStatusLoading.value = true
+  try {
+    const next = await window.salaryApi.scanExchangeMedia()
+    exchangeStatus.value = next
+    handleExchangeSyncMessages(next)
+    await handleExchangePackageNotifications(next)
+  } catch {
+    // 授权、盘符或临时介质状态异常时不打扰主流程；用户进入交换包界面时再显示细节。
+  } finally {
+    exchangeStatusLoading.value = false
+  }
+}
+
+async function handleExchangePackageNotifications(next: ExchangeStatus) {
+  const pendingPackages = next.localInboxPackages
+    .filter((file) => file.kind === 'monthly-package' && file.stable)
+
+  const freshPackages = pendingPackages.filter((file) => !seenExchangePackageKeys.has(getExchangePackageKey(file)))
+  if (freshPackages.length === 0) return
+
+  freshPackages.forEach((file) => seenExchangePackageKeys.add(getExchangePackageKey(file)))
+
+  const first = freshPackages[0]
+  const sourceText = '本机收件箱'
+  const countText = freshPackages.length > 1 ? `等 ${freshPackages.length} 个` : ''
+  const previewMessage = await buildExchangePackagePreviewMessage(first.filePath)
+
+  try {
+    await ElMessageBox.confirm(
+      `发现${sourceText}里有待导入的工资业务包：${first.fileName}${countText}。\n${previewMessage}\n当前只会打开文件夹，不会自动导入或写入数据。`,
+      '发现内网业务包',
+      {
+        type: 'info',
+        confirmButtonText: '打开位置',
+        cancelButtonText: '稍后处理'
+      }
+    )
+    await openExchangePackageLocation(first.filePath)
+  } catch {
+    // 用户选择稍后处理。
+  }
+}
+
+function handleExchangeSyncMessages(next: ExchangeStatus) {
+  for (const message of next.syncMessages || []) {
+    if (!message || seenExchangeSyncMessages.has(message)) continue
+    seenExchangeSyncMessages.add(message)
+    ElMessage.success(message)
+  }
+}
+
+async function buildExchangePackagePreviewMessage(filePath: string): Promise<string> {
+  try {
+    const preview = await window.salaryApi.previewExchangePackage(filePath)
+    return formatExchangePackagePreview(preview)
+  } catch (error) {
+    return `预览失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function formatExchangePackagePreview(preview: ExchangePackagePreview): string {
+  const manifest = preview.manifest
+  const unit = [manifest?.unitCode, manifest?.unitName].filter(Boolean).join(' ')
+  const period = manifest?.year && manifest?.month
+    ? `${manifest.year}年${manifest.month}月`
+    : '年月未知'
+  const packageId = manifest?.packageId ? `包号：${manifest.packageId}` : '包号未知'
+  const checksum = preview.ok
+    ? `校验通过：${preview.checksumSummary.matched}/${preview.checksumSummary.declared}`
+    : `校验异常：缺失 ${preview.checksumSummary.missing}，不一致 ${preview.checksumSummary.mismatched}，未声明 ${preview.checksumSummary.unchecked}`
+  const problems = [...preview.errors, ...preview.warnings].slice(0, 2).join('；')
+  return [unit || '单位未知', period, packageId, checksum, problems].filter(Boolean).join('；')
+}
+
+function getExchangePackageKey(file: ExchangeStatus['localInboxPackages'][number]): string {
+  return `${file.location}|${file.filePath}|${file.size}|${file.modifiedAt}`
+}
+
+async function openExchangePackageLocation(filePath: string) {
+  const folder = filePath.replace(/[\\/][^\\/]*$/, '')
+  if (folder) {
+    await window.salaryApi.openLocalPath(folder)
   }
 }
 
@@ -1158,6 +1262,22 @@ async function openSettingsWorksheet(name: string) {
   settingsDialogVisible.value = false
 }
 
+function openSettings(initialTab = 'unit'): void {
+  settingsInitialTab.value = initialTab === 'automation' && !showInternalTools.value ? 'unit' : initialTab
+  settingsDialogVisible.value = true
+}
+
+async function resolveBudgetProjectCodesFromPortal(): Promise<BudgetProjectCodeResult> {
+  activeModuleKey.value = 'integration'
+  hasVisitedIntegrationModule.value = true
+  await nextTick()
+  const page = integratedPortalPageRef.value
+  if (!page) {
+    return { ok: false, message: '一体化系统页面尚未加载，请稍后再试' }
+  }
+  return page.resolveBudgetProjectCodesFromPortal()
+}
+
 const worksheetOptions = computed(() =>
   (summary.value?.worksheets ?? []).map((item) => ({
     worksheetId: item.worksheetId,
@@ -1171,11 +1291,16 @@ onMounted(() => {
   void loadSummary()
   void loadWorkflows()
   void refreshImportWatcher().then(() => promptPendingMasterSyncs())
+  void refreshExchangeStatus()
   importWatcherTimer = setInterval(() => {
     // 窗口不可见时暂停轮询，节省资源
     if (document.visibilityState === 'hidden') return
     if (!importWatcherLoading.value) void refreshImportWatcher()
   }, 5000)
+  exchangeStatusTimer = setInterval(() => {
+    if (document.visibilityState === 'hidden') return
+    void refreshExchangeStatus()
+  }, 10000)
   // 注册"切换到一体化对接"回调，供 MonthlyPayrollPage 推送队列跳转用
   setSwitchToIntegration(() => {
     activeModuleKey.value = 'integration'
@@ -1185,7 +1310,12 @@ onMounted(() => {
 onUnmounted(() => {
   setSwitchToIntegration(null)
   if (importWatcherTimer) clearInterval(importWatcherTimer)
+  if (exchangeStatusTimer) clearInterval(exchangeStatusTimer)
   clearRecordsLoadingTimer()
+})
+
+watch(isLicenseValid, (valid) => {
+  if (valid) void refreshExchangeStatus()
 })
 </script>
 
@@ -1320,8 +1450,14 @@ onUnmounted(() => {
             <el-icon><Upload /></el-icon>
           </button>
         </el-tooltip>
+        <el-tooltip v-if="showInternalTools" content="一体化 Key 采集" placement="bottom">
+          <button class="md-tool-btn" @click="openSettings('automation')">
+            <el-icon><Tools /></el-icon>
+            <span>采集助手</span>
+          </button>
+        </el-tooltip>
         <el-tooltip content="设置 / 备份" placement="bottom">
-          <button class="md-icon-btn" @click="settingsDialogVisible = true">
+          <button class="md-icon-btn" @click="openSettings()">
             <el-icon><Setting /></el-icon>
           </button>
         </el-tooltip>
@@ -1351,6 +1487,7 @@ onUnmounted(() => {
       </div>
 
       <IntegratedPortalPage
+        ref="integratedPortalPageRef"
         v-if="hasVisitedIntegrationModule"
         v-show="activeModuleKey === 'integration'"
       />
@@ -1628,7 +1765,7 @@ onUnmounted(() => {
           <el-button :loading="licenseLoading" @click="claimTrialFromSavedUnitSettings(true)">
             自动开通试用
           </el-button>
-          <el-button @click="settingsDialogVisible = true">
+          <el-button @click="openSettings()">
             单位设置
           </el-button>
         </div>
@@ -1648,6 +1785,8 @@ onUnmounted(() => {
     v-model="settingsDialogVisible"
     :import-watcher="importWatcher"
     :database-path="summary?.databasePath ?? ''"
+    :initial-tab="settingsInitialTab"
+    :resolve-budget-project-codes="resolveBudgetProjectCodesFromPortal"
     @changed="onSettingsChanged"
     @open-worksheet="openSettingsWorksheet"
   />
@@ -2046,6 +2185,33 @@ onUnmounted(() => {
 }
 
 .md-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.md-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+
+.md-tool-btn .el-icon {
+  font-size: 15px;
+}
+
+.md-tool-btn:hover {
   background: rgba(255, 255, 255, 0.18);
   color: #ffffff;
 }

@@ -56,8 +56,30 @@ export async function writeUnitSettings(settings: UnitSettings): Promise<UnitSet
   const database = await getDatabase()
   const lockState = await getUnitSettingsLockState()
   if (lockState.locked) {
-    const tableNames = lockState.tables.slice(0, 3).map((item) => item.name).join('、')
-    throw new Error(`系统已有业务数据（${tableNames}等），不能重新填写单位信息`)
+    const current = await readUnitSettings()
+    const allowedLockedKeys = new Set<keyof UnitSettings>(['budgetActiveCode', 'budgetRetiredCode'])
+    const keys = Object.keys(defaultUnitSettings) as Array<keyof UnitSettings>
+    const changedLockedKey = keys.find((key) => {
+      if (allowedLockedKeys.has(key)) return false
+      return JSON.stringify(current[key] ?? '') !== JSON.stringify(settings[key] ?? '')
+    })
+    if (changedLockedKey) {
+      const tableNames = lockState.tables.slice(0, 3).map((item) => item.name).join('、')
+      const suffix = lockState.tables.length > 3 ? '等' : ''
+      throw new Error(`系统已有业务数据（${tableNames}${suffix}），只能修改在职/退休预算项目编码`)
+    }
+    const merged: UnitSettings = {
+      ...current,
+      budgetActiveCode: settings.budgetActiveCode,
+      budgetRetiredCode: settings.budgetRetiredCode
+    }
+    await run(
+      database,
+      `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+      [STORAGE_KEY, JSON.stringify(merged)]
+    )
+    return merged
   }
   const merged: UnitSettings = { ...defaultUnitSettings, ...settings }
   await run(

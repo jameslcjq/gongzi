@@ -4,8 +4,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, DocumentChecked, FolderOpened, Printer, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import {
   pendingPushQueue,
+  pendingPushAutomation,
   pushInProgress,
   requestSwitchToIntegration,
+  type PushQueueAutomation,
   type PushStep
 } from '../integration/insurancePushQueue'
 import { appendPushLogLine } from '../integration/pushLogger'
@@ -32,7 +34,9 @@ import {
 } from '../monthly-payroll/reportPresentation'
 import type {
   ImportWatcherStatus,
+  ExchangePackagePreview,
   MonthlyPayrollDataSourceMode,
+  MonthlyPayrollExchangeStatus,
   MonthlyPayrollSettings,
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
@@ -75,6 +79,9 @@ const switchingSourceVersionId = ref<number | null>(null)
 const selectedReportRunId = ref<number | null>(null)
 const archivingId = ref<number | null>(null)
 const cancelingMonthCloseId = ref<number | null>(null)
+const buildingExchangePackageId = ref<number | null>(null)
+const buildingExchangeReceiptId = ref<number | null>(null)
+const importingExchangePackage = ref(false)
 const printers = ref<PrinterSummary[]>([])
 const printSettings = ref<MonthlyPayrollPrintSettings>({
   reportPrinterName: '',
@@ -203,6 +210,104 @@ async function openHistoryFile(path: string | null) {
   if (err) ElMessage.error(`无法打开：${err}`)
 }
 
+async function buildExchangePackageForRun(row: MonthlyPayrollRun): Promise<void> {
+  if (row.archivedAt || row.isOutdated) {
+    ElMessage.warning('已月结或已过期记录不能生成内网业务包')
+    return
+  }
+  buildingExchangePackageId.value = row.id
+  try {
+    const result = await window.salaryApi.buildMonthlyPayrollExchangePackage(row.id)
+    ElMessage.success(result.copiedToMedia ? `已生成并复制到摆渡目录：${result.packageId}` : `已生成内网业务包：${result.packageId}`)
+    if (result.warnings.length > 0) {
+      await ElMessageBox.alert(result.warnings.join('\n'), '业务包生成提醒', {
+        type: 'warning',
+        confirmButtonText: '知道了'
+      })
+    }
+    await refreshHistory({ autoOpenCurrentMonth: true })
+    await window.salaryApi.openLocalPath((result.mediaPath || result.packagePath).replace(/[\\/][^\\/]*$/, ''))
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '生成内网业务包失败')
+  } finally {
+    buildingExchangePackageId.value = null
+  }
+}
+
+async function buildExchangeReceiptForRun(row: MonthlyPayrollRun): Promise<void> {
+  if (!row.archivedAt) {
+    ElMessage.warning('请先完成月结后再生成回执')
+    return
+  }
+  buildingExchangeReceiptId.value = row.id
+  try {
+    const result = await window.salaryApi.buildMonthlyPayrollExchangeReceipt(row.id)
+    ElMessage.success(result.copiedToMedia ? `已生成并复制回执到摆渡目录：${result.receiptId}` : `已生成内网执行回执：${result.receiptId}`)
+    if (result.warnings.length > 0) {
+      await ElMessageBox.alert(result.warnings.join('\n'), '回执生成提醒', {
+        type: 'warning',
+        confirmButtonText: '知道了'
+      })
+    }
+    await refreshHistory({ autoOpenCurrentMonth: true })
+    await window.salaryApi.openLocalPath((result.mediaPath || result.receiptPath).replace(/[\\/][^\\/]*$/, ''))
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '生成内网执行回执失败')
+  } finally {
+    buildingExchangeReceiptId.value = null
+  }
+}
+
+async function chooseAndImportExchangePackage(): Promise<void> {
+  importingExchangePackage.value = true
+  try {
+    const picked = await window.salaryApi.chooseExchangePackage()
+    if (!picked) return
+
+    const preview = await window.salaryApi.previewExchangePackage(picked.filePath)
+    const message = formatExchangePreviewMessage(preview)
+    await ElMessageBox.confirm(
+      `${message}\n\n确认导入后，会把包内文件解压到本机工资数据目录，并生成一条待一体化执行的工资报账记录。`,
+      '导入内网业务包',
+      {
+        type: preview.ok ? 'warning' : 'error',
+        confirmButtonText: preview.ok ? '确认导入' : '关闭',
+        cancelButtonText: '取消',
+        showCancelButton: preview.ok
+      }
+    )
+    if (!preview.ok) return
+
+    const imported = await window.salaryApi.importMonthlyPayrollExchangePackage(picked.filePath)
+    ElMessage.success(imported.message)
+    await refreshHistory({ autoOpenCurrentMonth: true })
+  } catch (error) {
+    if (error === 'cancel') return
+    ElMessage.error(error instanceof Error ? error.message : '导入内网业务包失败')
+  } finally {
+    importingExchangePackage.value = false
+  }
+}
+
+function formatExchangePreviewMessage(preview: ExchangePackagePreview): string {
+  const manifest = preview.manifest
+  const unit = [manifest?.unitCode, manifest?.unitName].filter(Boolean).join(' ') || '单位未知'
+  const period = manifest?.year && manifest?.month ? `${manifest.year}年${manifest.month}月` : '年月未知'
+  const packageId = manifest?.packageId || '包号未知'
+  const checksum = preview.ok
+    ? `校验通过：${preview.checksumSummary.matched}/${preview.checksumSummary.declared}`
+    : `校验异常：缺失 ${preview.checksumSummary.missing}，不一致 ${preview.checksumSummary.mismatched}，未声明 ${preview.checksumSummary.unchecked}`
+  const details = [...preview.errors, ...preview.warnings].filter(Boolean)
+  return [
+    `文件：${preview.fileName}`,
+    `单位：${unit}`,
+    `年月：${period}`,
+    `包号：${packageId}`,
+    checksum,
+    details.length ? `问题：${details.slice(0, 5).join('；')}` : ''
+  ].filter(Boolean).join('\n')
+}
+
 const pushingInsuranceRunId = ref<number | null>(null)
 const pushingVoucherRunId = ref<number | null>(null)
 const pushingSalaryRunId = ref<number | null>(null)
@@ -239,7 +344,12 @@ function canPushAll(row: MonthlyPayrollRun): boolean {
   return pushTargetsForRow(row).length > 0
 }
 
-function enqueueIntegratedPush(steps: PushStep[], stepHints: string[], label: string): void {
+function enqueueIntegratedPush(
+  steps: PushStep[],
+  stepHints: string[],
+  label: string,
+  automation?: PushQueueAutomation
+): void {
   if (!steps.length) {
     ElMessage.warning('没有可推送的文件')
     return
@@ -258,6 +368,7 @@ function enqueueIntegratedPush(steps: PushStep[], stepHints: string[], label: st
   requestSwitchToIntegration()
   const queuedSteps = steps.slice()
   window.setTimeout(() => {
+    pendingPushAutomation.value = automation ?? null
     pendingPushQueue.value = queuedSteps
   }, 600)
 }
@@ -356,10 +467,15 @@ async function pushAllToIntegrated(row: MonthlyPayrollRun): Promise<void> {
     const label = historyPushLabel(row)
     const steps: PushStep[] = []
     const stepHints: string[] = []
-    await appendSalaryPushSteps(row, label, steps, stepHints)
     await appendInsurancePushStep(row, label, steps, stepHints)
+    await appendSalaryPushSteps(row, label, steps, stepHints)
     await appendVoucherPushStep(row, label, steps, stepHints)
-    enqueueIntegratedPush(steps, stepHints, '全部推送')
+    enqueueIntegratedPush(steps, stepHints, '全部推送', {
+      mode: 'full-auto',
+      label,
+      runId: row.id,
+      month: row.month
+    })
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : String(error))
   } finally {
@@ -620,6 +736,23 @@ function pushStatusTagType(
   if (status === 'success') return 'success'
   if (status === 'queued' || status === 'needs-repush') return 'warning'
   if (status === 'failed') return 'danger'
+  return 'info'
+}
+
+function exchangeStatusText(status: MonthlyPayrollExchangeStatus | null): string {
+  if (status === 'package-built') return '包已生成'
+  if (status === 'copied-to-media') return '包已摆渡'
+  if (status === 'receipt-received') return '内网已归档'
+  if (status === 'receipt-error') return '回执异常'
+  return ''
+}
+
+function exchangeStatusTagType(
+  status: MonthlyPayrollExchangeStatus | null
+): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'receipt-received') return 'success'
+  if (status === 'copied-to-media') return 'warning'
+  if (status === 'receipt-error') return 'danger'
   return 'info'
 }
 
@@ -1481,6 +1614,11 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
         <el-tag v-if="isSelectedMonthArchived" type="info" effect="plain">{{ selectedMonthDisplay }}已月结</el-tag>
         <el-button :icon="Refresh" :loading="loading" @click="emit('refresh')">刷新检测</el-button>
         <el-button
+          :icon="FolderOpened"
+          :loading="importingExchangePackage"
+          @click="chooseAndImportExchangePackage"
+        >导入内网业务包</el-button>
+        <el-button
           type="primary"
           :icon="VideoPlay"
           :loading="running"
@@ -1720,6 +1858,22 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
                   @click="pushSalaryImportsToIntegrated(row)"
                 >推送工资</el-button>
                 <el-button
+                  v-if="!row.archivedAt && !row.isOutdated"
+                  size="small"
+                  text
+                  type="warning"
+                  :loading="buildingExchangePackageId === row.id"
+                  @click="buildExchangePackageForRun(row)"
+                >生成内网包</el-button>
+                <el-button
+                  v-if="row.archivedAt"
+                  size="small"
+                  text
+                  type="warning"
+                  :loading="buildingExchangeReceiptId === row.id"
+                  @click="buildExchangeReceiptForRun(row)"
+                >生成回执</el-button>
+                <el-button
                   v-if="row.archiveDir"
                   size="small"
                   text
@@ -1780,11 +1934,18 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
         <el-table-column label="退休房补实发" width="140" align="right">
           <template #default="{ row }">{{ formatMoney(row.retiredHousingActualPay) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="140">
           <template #default="{ row }">
             <div class="status-tags">
               <el-tag :type="row.archivedAt ? 'info' : row.isOutdated ? 'warning' : 'success'" effect="plain">
                 {{ row.archivedAt ? '已月结' : row.isOutdated ? '已过期' : '可处理' }}
+              </el-tag>
+              <el-tag
+                v-if="row.exchangePackageStatus"
+                :type="exchangeStatusTagType(row.exchangePackageStatus)"
+                effect="plain"
+              >
+                {{ exchangeStatusText(row.exchangePackageStatus) }}
               </el-tag>
             </div>
           </template>

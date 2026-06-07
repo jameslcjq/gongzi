@@ -5,21 +5,27 @@
  * 事件先缓冲在每个 frame 的 window.__exportRecorder.events，
  * 宿主每隔 1-2 秒通过 drain 脚本捞回来合并。
  */
-export function buildRecorderInstallScript(): string {
+export function buildRecorderInstallScript(sessionId = ''): string {
+  const encodedSessionId = JSON.stringify(sessionId)
   return `
 ;(function installRecorder() {
-  if (window.__exportRecorderInstalled) return { ok: true, alreadyInstalled: true, frameUrl: location.href }
-  window.__exportRecorderInstalled = true
-  window.__exportRecorder = { events: [], startedAt: Date.now() }
+  const sessionId = ${encodedSessionId}
+  const now = Date.now()
+  window.__exportRecorder = window.__exportRecorder || { events: [], startedAt: now, lastNavigationUrl: '', sessionId: '' }
+  if (sessionId && window.__exportRecorder.sessionId !== sessionId) {
+    window.__exportRecorder.events = []
+    window.__exportRecorder.startedAt = now
+    window.__exportRecorder.lastNavigationUrl = ''
+    window.__exportRecorder.sessionId = sessionId
+  }
 
   const MAX_PREVIEW = 4000
   const MAX_BUF = 8000
-  const startedAt = Date.now()
 
   function push(kind, data) {
     try {
       const ev = Object.assign(
-        { t: Date.now() - startedAt, frameUrl: location.href, kind: kind },
+        { t: Date.now() - (window.__exportRecorder.startedAt || now), frameUrl: location.href, kind: kind },
         data
       )
       window.__exportRecorder.events.push(ev)
@@ -28,6 +34,23 @@ export function buildRecorderInstallScript(): string {
       }
     } catch (e) {}
   }
+
+  function pushNavigationOnce() {
+    try {
+      if (window.__exportRecorder.lastNavigationUrl === location.href) return
+      window.__exportRecorder.lastNavigationUrl = location.href
+      push('navigation', {
+        url: location.href,
+        title: document.title || ''
+      })
+    } catch (e) {}
+  }
+
+  if (window.__exportRecorderInstalled) {
+    pushNavigationOnce()
+    return { ok: true, alreadyInstalled: true, frameUrl: location.href }
+  }
+  window.__exportRecorderInstalled = true
 
   // -------- fetch ----------
   if (window.fetch) {
@@ -112,7 +135,16 @@ export function buildRecorderInstallScript(): string {
     }
   } catch (e) {}
 
-  // -------- click ----------
+  // -------- user actions ----------
+  function toElement(target) {
+    try {
+      if (!target) return null
+      if (target.nodeType === 1) return target
+      if (target.parentElement) return target.parentElement
+    } catch (e) {}
+    return null
+  }
+
   function buildSelector(el) {
     try {
       if (!el || el.nodeType !== 1) return ''
@@ -140,25 +172,105 @@ export function buildRecorderInstallScript(): string {
     }
   }
 
-  document.addEventListener(
-    'click',
-    function (ev) {
-      try {
-        const el = ev.target
-        if (!el || el.nodeType !== 1) return
-        const txt = (el.innerText || el.textContent || '').trim().slice(0, 120)
-        push('click', {
-          selector: buildSelector(el),
-          text: txt,
-          tagName: el.tagName
-        })
-      } catch (e) {}
-    },
-    true
-  )
+  function elementText(el) {
+    try {
+      return (el.innerText || el.textContent || '').trim().slice(0, 120)
+    } catch (e) {
+      return ''
+    }
+  }
+
+  function elementValue(el) {
+    try {
+      if (!el) return undefined
+      const tag = String(el.tagName || '').toUpperCase()
+      const type = String(el.type || '').toLowerCase()
+      if (type === 'password') return '<password>'
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        return String(el.value || '').slice(0, 500)
+      }
+    } catch (e) {}
+    return undefined
+  }
+
+  function pushElementEvent(kind, ev, extra) {
+    try {
+      const el = toElement(ev && ev.target)
+      if (!el) return
+      push(kind, Object.assign({
+        selector: buildSelector(el),
+        text: elementText(el),
+        tagName: el.tagName,
+        id: el.id || '',
+        name: el.name || '',
+        value: elementValue(el)
+      }, extra || {}))
+    } catch (e) {}
+  }
+
+  document.addEventListener('click', function (ev) {
+    pushElementEvent('click', ev)
+  }, true)
+
+  document.addEventListener('pointerdown', function (ev) {
+    pushElementEvent('pointerdown', ev, {
+      button: ev.button,
+      clientX: ev.clientX,
+      clientY: ev.clientY
+    })
+  }, true)
+
+  document.addEventListener('pointerup', function (ev) {
+    pushElementEvent('pointerup', ev, {
+      button: ev.button,
+      clientX: ev.clientX,
+      clientY: ev.clientY
+    })
+  }, true)
+
+  document.addEventListener('input', function (ev) {
+    pushElementEvent('input', ev)
+  }, true)
+
+  document.addEventListener('change', function (ev) {
+    pushElementEvent('change', ev)
+  }, true)
+
+  document.addEventListener('submit', function (ev) {
+    pushElementEvent('submit', ev)
+  }, true)
+
+  document.addEventListener('keydown', function (ev) {
+    if (!ev || (ev.key !== 'Enter' && ev.key !== 'Tab')) return
+    pushElementEvent('keydown', ev, { key: ev.key })
+  }, true)
+
+  document.addEventListener('focusin', function (ev) {
+    pushElementEvent('focusin', ev)
+  }, true)
+
+  document.addEventListener('dblclick', function (ev) {
+    pushElementEvent('dblclick', ev)
+  }, true)
+
+  window.addEventListener('hashchange', function () {
+    push('navigation', {
+      url: location.href,
+      title: document.title || '',
+      source: 'hashchange'
+    })
+  }, true)
+
+  window.addEventListener('popstate', function () {
+    push('navigation', {
+      url: location.href,
+      title: document.title || '',
+      source: 'popstate'
+    })
+  }, true)
 
   // -------- 页面跳转 ----------
-  push('navigation', { url: location.href })
+  pushNavigationOnce()
 
   return { ok: true, alreadyInstalled: false, frameUrl: location.href }
 })();
@@ -177,12 +289,12 @@ export function buildRecorderDrainScript(): string {
 `
 }
 
-/** 卸载（清空 + 标记未安装；不能真的移除 fetch/XHR 的 hook，重新装会幂等跳过） */
+/** 卸载（清空事件；不能真的移除 fetch/XHR 的 hook，重新装会复用现有钩子） */
 export function buildRecorderStopScript(): string {
   return `
 ;(function stopRecorder() {
   if (window.__exportRecorder) window.__exportRecorder.events = []
-  // 钩子保留，避免重复安装；下次开始仍生效（已安装的脚本判断为已安装）
+  // 钩子保留，避免重复安装；下次开始会复用钩子并重新写入当前页面导航。
   return { ok: true }
 })();
 `

@@ -13,6 +13,16 @@ export const importFolder = process.env.PAYROLL_IMPORT_ROOT || join(laojiuRoot, 
 export const outputRoot = process.env.PAYROLL_OUTPUT_ROOT || join(dataRoot, '工资数据')
 export const tempRoot = process.env.PAYROLL_TEMP_ROOT || join(dataRoot, 'temp')
 export const archiveRoot = outputRoot
+export const exchangeRoot =
+  process.env.PAYROLL_EXCHANGE_ROOT || join(laojiuRoot, '交换包', '工资系统')
+export const exchangeInboxFolder = join(exchangeRoot, 'inbox')
+export const exchangeImportedFolder = join(exchangeRoot, 'imported')
+export const exchangeFailedFolder = join(exchangeRoot, 'failed')
+export const exchangeQuarantineFolder = join(exchangeRoot, 'quarantine')
+export const exchangeOutboxFolder = join(exchangeRoot, 'outbox')
+export const exchangeTempFolder = join(exchangeRoot, 'temp')
+export const automationDebugRoot =
+  process.env.PAYROLL_AUTOMATION_DEBUG_ROOT || join(dataRoot, 'debug', 'automation')
 
 export function getDataPath(...segments: string[]): string {
   return join(dataRoot, ...segments)
@@ -32,6 +42,10 @@ export function getOutputPath(...segments: string[]): string {
 
 export function getTempPath(...segments: string[]): string {
   return join(tempRoot, ...segments)
+}
+
+export function getExchangePath(...segments: string[]): string {
+  return join(exchangeRoot, ...segments)
 }
 
 export function getMonthlyOutputPath(...segments: string[]): string {
@@ -57,6 +71,14 @@ export function ensureBusinessFolders(): void {
     importFolder,
     outputRoot,
     tempRoot,
+    exchangeRoot,
+    exchangeInboxFolder,
+    exchangeImportedFolder,
+    exchangeFailedFolder,
+    exchangeQuarantineFolder,
+    exchangeOutboxFolder,
+    exchangeTempFolder,
+    automationDebugRoot,
     getImportPath('imported'),
     getImportPath('failed'),
     getImportPath('templates')

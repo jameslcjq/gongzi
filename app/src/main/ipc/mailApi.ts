@@ -1,12 +1,15 @@
-import { ipcMain, dialog, shell } from 'electron'
+import { dialog, shell } from 'electron'
 import * as accountService from '../services/mail/mailAccountService'
 import * as ruleService from '../services/mail/mailRuleService'
 import * as imapService from '../services/mail/mailImapService'
 import * as logService from '../services/mail/downloadLogService'
 import * as recordService from '../services/mail/downloadRecordService'
+import { createLicensedIpcMain } from './appApi'
 import type { MailAccountView, MailDownloadRule, MailDownloadLog, MailDownloadRecord, MailCheckProgress } from '../../shared/types'
 
 export function registerMailIpc(): void {
+  const ipcMain = createLicensedIpcMain()
+
   // --- 邮箱账号 ---
   ipcMain.handle('mail:account-list', async (): Promise<MailAccountView[]> => {
     return accountService.listMailAccounts()

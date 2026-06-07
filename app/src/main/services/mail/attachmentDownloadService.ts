@@ -122,7 +122,7 @@ export async function processAttachmentsFromMessage(params: ProcessParams): Prom
       const saveDir = params.targetDirBase
       mkdirSync(saveDir, { recursive: true })
 
-      const desiredName = buildFileName(params.fromAddress, params.subject, safeName)
+      const desiredName = safeName
       const finalPath = resolveConflict(saveDir, desiredName)
 
       // Save attachment
@@ -261,7 +261,7 @@ export async function processAttachmentsFromParsed(params: ParsedParams): Promis
       const saveDir = params.targetDirBase
       mkdirSync(saveDir, { recursive: true })
 
-      const desiredName = buildFileName(params.fromAddress, params.subject, safeName)
+      const desiredName = safeName
       const finalPath = resolveConflict(saveDir, desiredName)
 
       if (attachment.content instanceof Readable) {
@@ -322,13 +322,6 @@ function parseExtensionFilter(filter?: string): string[] {
 function sanitizeFilename(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim()
   return cleaned || 'unnamed_attachment'
-}
-
-function buildFileName(fromAddr: string, subject: string, originalName: string): string {
-  const fromShort = fromAddr.split('@')[0] || fromAddr
-  const safeSubject = sanitizeFilename(subject).slice(0, 30)
-  const safeFrom = sanitizeFilename(fromShort).slice(0, 15)
-  return `${safeFrom}_${safeSubject}_${originalName}`
 }
 
 function formatDateFolder(dateStr: string): string {

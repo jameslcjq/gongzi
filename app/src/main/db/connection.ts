@@ -341,6 +341,11 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       insurance_pushed_at TEXT,
       voucher_pushed_at TEXT,
       salary_pushed_at TEXT,
+      exchange_package_id TEXT,
+      exchange_package_status TEXT,
+      exchange_receipt_id TEXT,
+      exchange_receipt_at TEXT,
+      exchange_receipt_path TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -366,6 +371,28 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_monthly_payroll_source_versions_ym
       ON monthly_payroll_source_versions (year DESC, month DESC, kind, status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS exchange_packages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      package_id TEXT NOT NULL UNIQUE,
+      package_sha256 TEXT NOT NULL,
+      unit_code TEXT,
+      unit_name TEXT,
+      year INTEGER,
+      month INTEGER,
+      business_type TEXT,
+      status TEXT NOT NULL,
+      source_path TEXT,
+      local_path TEXT,
+      manifest_json TEXT,
+      imported_run_id INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      error_message TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_exchange_packages_ym
+      ON exchange_packages (year DESC, month DESC, status, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS import_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -570,7 +597,12 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'salary_push_status', definition: 'TEXT NOT NULL DEFAULT \'not-pushed\'' },
     { name: 'insurance_pushed_at', definition: 'TEXT' },
     { name: 'voucher_pushed_at', definition: 'TEXT' },
-    { name: 'salary_pushed_at', definition: 'TEXT' }
+    { name: 'salary_pushed_at', definition: 'TEXT' },
+    { name: 'exchange_package_id', definition: 'TEXT' },
+    { name: 'exchange_package_status', definition: 'TEXT' },
+    { name: 'exchange_receipt_id', definition: 'TEXT' },
+    { name: 'exchange_receipt_at', definition: 'TEXT' },
+    { name: 'exchange_receipt_path', definition: 'TEXT' }
   ])
   if (addedMonthlyPayrollColumns.includes('voucher_push_status')) {
     await exec(

@@ -77,7 +77,7 @@ export async function generatePerformancePayrollFromHistory(
 
   const unit = await readUnitSettings()
   const saltype = pickPerformanceSaltype(unit.salaryExportSaltypes)
-  const portalSession = session.fromPartition('persist:integrated-portal')
+  const portalSession = session.fromPartition(integratedPortalPartition(unit.unitImportCode, '0101'))
 
   await preheatHistoryContext(portalSession)
   const agencies = await loadHistoryAgencies(portalSession)
@@ -91,6 +91,11 @@ export async function generatePerformancePayrollFromHistory(
     first,
     second
   })
+}
+
+function integratedPortalPartition(unitCode: string, suffix: '0101' | '0201'): string {
+  const normalizedUnit = String(unitCode || '').replace(/\D/g, '').slice(0, 6) || 'unit'
+  return `persist:integrated-portal-${normalizedUnit}-${suffix}`
 }
 
 export async function generatePerformancePayrollFromLocal(

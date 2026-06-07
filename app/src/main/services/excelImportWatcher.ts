@@ -1,8 +1,8 @@
-import { dialog, shell } from 'electron'
+import { shell } from 'electron'
 import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
-import { all, get, getDatabase, run } from '../db/connection'
+import { all, getDatabase, run } from '../db/connection'
 import type {
   AnnualAdjustmentDetectedFiles,
   ExcelImportLog,
@@ -12,7 +12,7 @@ import type {
 import { commitExcelImport } from './excelImport'
 import { inferWorksheet } from './worksheetInference'
 import { isPersonnelExpensePlanWorkbook } from './budget/personnelExpensePlanPrefill'
-import { getDataPath, importFolder } from '../config/paths'
+import { importFolder } from '../config/paths'
 
 const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
@@ -24,8 +24,7 @@ function enqueueImport<T>(task: () => Promise<T>): Promise<T> {
   importQueue = next.catch(() => undefined)
   return next
 }
-const preferredImportFolder = importFolder
-const importFolderSettingKey = 'excel_import_folder'
+const fixedImportFolder = importFolder
 
 let watcher: FSWatcher | undefined
 let folderPath = ''
@@ -36,16 +35,11 @@ let running = false
  * 用于 will-download 等必须同步获取的场景（异步获取会让保存对话框先弹出来）。
  */
 export function getCachedImportFolder(): string {
-  return folderPath || preferredImportFolder || resolveDefaultFolder()
+  return folderPath || resolveDefaultFolder()
 }
 
-export async function startExcelImportWatcher(customFolderPath?: string): Promise<ImportWatcherStatus> {
-  if (customFolderPath) {
-    folderPath = customFolderPath
-    await persistImportFolder(folderPath)
-  } else if (!folderPath) {
-    folderPath = (await readPersistedImportFolder()) || resolveDefaultFolder()
-  }
+export async function startExcelImportWatcher(_customFolderPath?: string): Promise<ImportWatcherStatus> {
+  folderPath = resolveDefaultFolder()
 
   ensureImportFolders(folderPath)
 
@@ -87,7 +81,7 @@ export async function stopExcelImportWatcher(): Promise<ImportWatcherStatus> {
 
 export async function getImportWatcherStatus(): Promise<ImportWatcherStatus> {
   if (!folderPath) {
-    folderPath = (await readPersistedImportFolder()) || resolveDefaultFolder()
+    folderPath = resolveDefaultFolder()
   }
   ensureImportFolders(folderPath)
 
@@ -110,7 +104,7 @@ export async function clearImportWatcherLogs(): Promise<ImportWatcherStatus> {
 
 export async function openImportWatcherFolder(): Promise<ImportWatcherStatus> {
   if (!folderPath) {
-    folderPath = (await readPersistedImportFolder()) || resolveDefaultFolder()
+    folderPath = resolveDefaultFolder()
   }
   ensureImportFolders(folderPath)
   await shell.openPath(folderPath)
@@ -118,16 +112,7 @@ export async function openImportWatcherFolder(): Promise<ImportWatcherStatus> {
 }
 
 export async function chooseImportWatcherFolder(): Promise<ImportWatcherStatus> {
-  const result = await dialog.showOpenDialog({
-    title: '选择 Excel 自动导入文件夹',
-    properties: ['openDirectory', 'createDirectory']
-  })
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return getImportWatcherStatus()
-  }
-
-  return startExcelImportWatcher(result.filePaths[0])
+  return openImportWatcherFolder()
 }
 
 async function readRecentImportLogs(): Promise<ExcelImportLog[]> {
@@ -265,10 +250,8 @@ function ensureImportFolders(path: string): void {
 }
 
 function resolveDefaultFolder(): string {
-  if (canUseFolder(preferredImportFolder)) {
-    return preferredImportFolder
-  }
-  return getDataPath('excel-import')
+  if (canUseFolder(fixedImportFolder)) return fixedImportFolder
+  return fixedImportFolder
 }
 
 function canUseFolder(path: string): boolean {
@@ -277,37 +260,6 @@ function canUseFolder(path: string): boolean {
     return true
   } catch {
     return false
-  }
-}
-
-async function readPersistedImportFolder(): Promise<string | undefined> {
-  try {
-    const database = await getDatabase()
-    const row = await get<{ value: string | null }>(
-      database,
-      `SELECT value FROM app_settings WHERE key = ?`,
-      [importFolderSettingKey]
-    )
-    const value = row?.value || undefined
-    return value
-  } catch {
-    return undefined
-  }
-}
-
-async function persistImportFolder(value: string): Promise<void> {
-  try {
-    const database = await getDatabase()
-    await run(
-      database,
-      `
-        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-      `,
-      [importFolderSettingKey, value]
-    )
-  } catch {
-    // best-effort
   }
 }
 

@@ -8,6 +8,9 @@ dist-electron/
 build/
 out/
 release/
+app/native/
+tools/**/bin/
+tools/**/obj/
 *.tsbuildinfo
 
 # Logs

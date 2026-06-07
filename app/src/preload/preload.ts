@@ -6,6 +6,15 @@ import type {
   ConsistencyAuditApplyResult,
   ConsistencyAuditIssue,
   ConsistencyAuditResult,
+  ExchangePackageBuildResult,
+  ExchangePackageImportResult,
+  ExchangePackagePreview,
+  ExchangeReceiptBuildResult,
+  ExchangeReceiptImportResult,
+  ExchangeStatus,
+  AutomationCaptureResult,
+  AutomationHelperStatus,
+  AutomationKeySwitchResult,
   ImportBatchSummary,
   ImportPreview,
   ImportWatcherStatus,
@@ -116,6 +125,18 @@ const salaryApi = {
     issues: ConsistencyAuditIssue[]
   ): Promise<ConsistencyAuditApplyResult> =>
     ipcRenderer.invoke('consistency-audit:apply', direction, issues),
+  getAutomationHelperStatus: (): Promise<AutomationHelperStatus> =>
+    ipcRenderer.invoke('automation:helper-status'),
+  collectIntegrationLoginKey: (): Promise<AutomationCaptureResult> =>
+    ipcRenderer.invoke('automation:collect-login-key'),
+  switchIntegrationLoginKey: (
+    keyText: string,
+    index?: number,
+    options?: { pin?: string; confirm?: boolean }
+  ): Promise<AutomationKeySwitchResult> =>
+    ipcRenderer.invoke('automation:switch-login-key', { keyText, index, ...options }),
+  openAutomationDebugFolder: (): Promise<string> =>
+    ipcRenderer.invoke('automation:open-debug-folder'),
 
   getImportWatcherStatus: (): Promise<ImportWatcherStatus> =>
     ipcRenderer.invoke('import-watcher:get-status'),
@@ -125,6 +146,28 @@ const salaryApi = {
     ipcRenderer.invoke('import-watcher:open-folder'),
   clearImportWatcherLogs: (): Promise<ImportWatcherStatus> =>
     ipcRenderer.invoke('import-watcher:clear-logs'),
+  getExchangeStatus: (): Promise<ExchangeStatus> =>
+    ipcRenderer.invoke('exchange:get-status'),
+  scanExchangeMedia: (): Promise<ExchangeStatus> =>
+    ipcRenderer.invoke('exchange:scan-media'),
+  openExchangeInbox: (): Promise<string> =>
+    ipcRenderer.invoke('exchange:open-inbox'),
+  openExchangeOutbox: (): Promise<string> =>
+    ipcRenderer.invoke('exchange:open-outbox'),
+  chooseExchangePackage: (): Promise<{ filePath: string; fileName: string } | null> =>
+    ipcRenderer.invoke('exchange:choose-package'),
+  previewExchangePackage: (filePath: string): Promise<ExchangePackagePreview> =>
+    ipcRenderer.invoke('exchange:preview-package', filePath),
+  previewExchangeReceipt: (filePath: string): Promise<ExchangePackagePreview> =>
+    ipcRenderer.invoke('exchange:preview-receipt', filePath),
+  buildMonthlyPayrollExchangePackage: (runId: number): Promise<ExchangePackageBuildResult> =>
+    ipcRenderer.invoke('exchange:build-monthly-package', runId),
+  importMonthlyPayrollExchangePackage: (filePath: string): Promise<ExchangePackageImportResult> =>
+    ipcRenderer.invoke('exchange:import-monthly-package', filePath),
+  buildMonthlyPayrollExchangeReceipt: (runId: number): Promise<ExchangeReceiptBuildResult> =>
+    ipcRenderer.invoke('exchange:build-receipt', runId),
+  importMonthlyPayrollExchangeReceipt: (filePath: string): Promise<ExchangeReceiptImportResult> =>
+    ipcRenderer.invoke('exchange:import-receipt', filePath),
   getPersonnelExpensePlanPrefill: (options?: { archive?: boolean }): Promise<PersonnelExpensePlanPrefillResult> =>
     ipcRenderer.invoke('personnel-expense-plan:prefill', options),
   getSalaryQuotaMatchLocalSummary: (): Promise<SalaryQuotaMatchLocalSummary> =>
@@ -179,6 +222,19 @@ const salaryApi = {
       webContentsId,
       ...options
     }),
+  startPortalNativeRecording: (
+    sessionId: string,
+    webContentsIds: number[]
+  ): Promise<{ ok: true; attached: number; tracked: number } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('integration:native-recorder-start', { sessionId, webContentsIds }),
+  drainPortalNativeRecording: (
+    sessionId: string
+  ): Promise<{ ok: true; events: Array<Record<string, unknown>> }> =>
+    ipcRenderer.invoke('integration:native-recorder-drain', { sessionId }),
+  stopPortalNativeRecording: (
+    sessionId: string
+  ): Promise<{ ok: true; events: Array<Record<string, unknown>> }> =>
+    ipcRenderer.invoke('integration:native-recorder-stop', { sessionId }),
   savePortalDomRecord: (
     payload: unknown
   ): Promise<{ ok: true; filePath: string } | { ok: false; reason: string }> =>

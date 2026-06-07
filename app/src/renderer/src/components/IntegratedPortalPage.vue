@@ -18,13 +18,25 @@ import {
   buildSalaryPlanInputScript
 } from '../integration/salaryPlanInputScript'
 import { buildAutoVoucherEntryScript } from '../integration/autoVoucherEntryScript'
+import {
+  buildBudgetProjectCodeScript,
+  type BudgetProjectCodeResult
+} from '../integration/budgetProjectCodeScript'
 import { buildSalaryQuotaMatchScript } from '../integration/salaryQuotaMatchScript'
+import { buildSalarySendReviewScript } from '../integration/salarySendReviewScript'
 import { buildSalarySystemImportScript } from '../integration/salarySystemImportScript'
 // 预算 xls 改成被动模式：用户在内网手动点导出，文件按"人员信息"名字拦截 → 预览确认后入库
 import { buildPushInsuranceScript } from '../integration/pushInsuranceScript'
 import { buildPushVoucherScript } from '../integration/pushVoucherScript'
-import { pendingPushQueue, pushInProgress, type PushStep } from '../integration/insurancePushQueue'
+import {
+  pendingPushAutomation,
+  pendingPushQueue,
+  pushInProgress,
+  type PushQueueAutomation,
+  type PushStep
+} from '../integration/insurancePushQueue'
 import { appendPushLogLine, openPushLogFolder } from '../integration/pushLogger'
+import { internalToolsEnabled } from '../internalToolsMode'
 import { buildPortalDiagnosticsScript } from '../integration/portalDiagnosticsScript'
 import {
   buildIntegrationPushPreflightScript,
@@ -36,9 +48,15 @@ import {
   type IntegrationModuleNavigationResult,
   type IntegrationModuleTarget
 } from '../integration/integrationModuleNavigationScript'
-import type { BudgetImportResult, MonthlyPayrollPushStatus } from '@shared/types'
+import type {
+  BudgetImportResult,
+  MonthlyPayrollPushStatus,
+  SalaryQuotaMatchLocalSummary,
+  UnitSettings
+} from '@shared/types'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
+const showInternalTools = internalToolsEnabled
 
 type SalaryExportFile = {
   filename: string
@@ -86,6 +104,39 @@ type Tab = {
   title: string
   url: string
   loading: boolean
+  partition: string
+  keySuffix?: PortalKeySuffix
+  keyRole?: string
+  keySerial?: string
+  fixedKey?: boolean
+}
+
+type PortalKeySuffix = '0101' | '0201'
+
+const businessKeySuffix: PortalKeySuffix = '0101'
+const reviewKeySuffix: PortalKeySuffix = '0201'
+const portalUnitCode = ref('')
+
+function normalizePortalUnitCode(value?: string): string {
+  const digits = String(value || '').replace(/\D/g, '')
+  return digits.length > 6 ? digits.slice(0, 6) : digits
+}
+
+function portalKeySerial(suffix: PortalKeySuffix): string {
+  return portalUnitCode.value ? `${portalUnitCode.value}-${suffix}` : suffix
+}
+
+function portalPartition(suffix: PortalKeySuffix): string {
+  const unit = portalUnitCode.value || 'unit'
+  return `persist:integrated-portal-${unit}-${suffix}`
+}
+
+function portalKeyRole(suffix: PortalKeySuffix): string {
+  return suffix === businessKeySuffix ? '业务操作' : '审核'
+}
+
+function portalKeyTitle(suffix: PortalKeySuffix): string {
+  return `${portalKeyRole(suffix)} ${portalKeySerial(suffix)}`
 }
 
 const webviewMap = new Map<string, PortalWebview>()
@@ -102,9 +153,27 @@ function nextTabId(): string {
   return `tab-${Date.now().toString(36)}-${tabSeq}`
 }
 
-const tabs = ref<Tab[]>([
-  { id: nextTabId(), title: '一体化系统', url: portalUrl, loading: true }
-])
+function buildPortalKeyTab(suffix: PortalKeySuffix): Tab {
+  return {
+    id: nextTabId(),
+    title: portalKeyTitle(suffix),
+    url: portalUrl,
+    loading: true,
+    partition: portalPartition(suffix),
+    keySuffix: suffix,
+    keyRole: portalKeyRole(suffix),
+    keySerial: portalKeySerial(suffix),
+    fixedKey: true
+  }
+}
+
+function buildPortalKeyTabs(activeSuffix: PortalKeySuffix = businessKeySuffix): Tab[] {
+  const suffixes: PortalKeySuffix[] =
+    activeSuffix === reviewKeySuffix ? [businessKeySuffix, reviewKeySuffix] : [businessKeySuffix]
+  return suffixes.map((suffix) => buildPortalKeyTab(suffix))
+}
+
+const tabs = ref<Tab[]>(buildPortalKeyTabs())
 const activeTabId = ref<string>(tabs.value[0].id)
 const salaryExporting = ref(false)
 // 预算 xls 改成被动模式：不再有 toolbar 按钮、不模拟点击、不自动跳转。
@@ -116,6 +185,43 @@ const activeTab = computed<Tab | undefined>(() =>
 )
 function activeWebview(): PortalWebview | undefined {
   return webviewMap.get(activeTabId.value)
+}
+
+function isBusinessPartition(partition?: string): boolean {
+  return partition === portalPartition(businessKeySuffix)
+}
+
+function findPortalKeyTabId(suffix: PortalKeySuffix): string | null {
+  return tabs.value.find((tab) => tab.keySuffix === suffix)?.id || null
+}
+
+function openPortalKeyTab(suffix: PortalKeySuffix, makeActive = true): string {
+  const existing = findPortalKeyTabId(suffix)
+  if (existing) {
+    if (makeActive) activeTabId.value = existing
+    return existing
+  }
+  const tab = buildPortalKeyTab(suffix)
+  tabs.value.push(tab)
+  if (makeActive) activeTabId.value = tab.id
+  return tab.id
+}
+
+async function ensurePortalKeyWebview(
+  suffix: PortalKeySuffix,
+  maxWait = 30000
+): Promise<PortalWebview | undefined> {
+  let tabId = findPortalKeyTabId(suffix)
+  if (!tabId) {
+    tabId = openPortalKeyTab(suffix, true)
+  }
+  if (!tabId) return undefined
+  activateTab(tabId)
+  return waitForWebview(tabId, maxWait)
+}
+
+async function ensureBusinessWebview(maxWait = 30000): Promise<PortalWebview | undefined> {
+  return ensurePortalKeyWebview(businessKeySuffix, maxWait)
 }
 
 async function waitForWebview(tabId: string, maxWait = 30000): Promise<PortalWebview | undefined> {
@@ -156,24 +262,42 @@ function activateTab(id: string): void {
   if (findTabById(id)) activeTabId.value = id
 }
 
-function openNewTab(url: string, makeActive = true): string {
+function openNewTab(
+  url: string,
+  makeActive = true,
+  options: { partition?: string; title?: string; fixedKey?: boolean } = {}
+): string {
   const id = nextTabId()
-  tabs.value.push({ id, title: '新页签', url, loading: true })
+  tabs.value.push({
+    id,
+    title: options.title || '新页签',
+    url,
+    loading: true,
+    partition: options.partition || activeTab.value?.partition || portalPartition('0101'),
+    fixedKey: options.fixedKey
+  })
   if (makeActive) activeTabId.value = id
   return id
+}
+
+function resetToPortalKeyTabs(activeSuffix: PortalKeySuffix = '0101'): void {
+  webviewMap.clear()
+  tabs.value = buildPortalKeyTabs(activeSuffix)
+  const active = tabs.value.find((tab) => tab.keySuffix === activeSuffix) || tabs.value[0]
+  activeTabId.value = active.id
 }
 
 function closeTab(id: string): void {
   const idx = tabs.value.findIndex((t) => t.id === id)
   if (idx < 0) return
+  if (tabs.value[idx].fixedKey) return
   webviewMap.delete(id)
   for (const target of ['budget', 'accounting'] as const) {
     if (pushTabIds[target] === id) delete pushTabIds[target]
   }
   if (tabs.value.length === 1) {
-    // 不能没有标签 —— 重置成首页
-    tabs.value = [{ id: nextTabId(), title: '一体化系统', url: portalUrl, loading: true }]
-    activeTabId.value = tabs.value[0].id
+    // 不能没有标签，回到默认 0101 业务操作登录页。
+    resetToPortalKeyTabs()
     return
   }
   tabs.value.splice(idx, 1)
@@ -184,7 +308,40 @@ function closeTab(id: string): void {
 }
 
 function openHomeTab(): void {
-  openNewTab(portalUrl)
+  openNewTab(portalUrl, true, { partition: activeTab.value?.partition })
+}
+
+async function loadPortalUnitSettings(): Promise<void> {
+  let settings: UnitSettings | null = null
+  try {
+    settings = await window.salaryApi.getUnitSettings()
+  } catch (error) {
+    console.warn('读取单位设置失败，继续使用通用 Key 标签', error)
+  }
+  const nextCode = normalizePortalUnitCode(settings?.unitImportCode)
+  if (!nextCode || nextCode === portalUnitCode.value) {
+    refreshFixedKeyTabTitles()
+    return
+  }
+
+  const activeSuffix = activeTab.value?.keySuffix || '0101'
+  const onlyFixedKeyTabs = tabs.value.every((tab) => tab.fixedKey)
+  portalUnitCode.value = nextCode
+  if (onlyFixedKeyTabs) {
+    resetToPortalKeyTabs(activeSuffix)
+  } else {
+    refreshFixedKeyTabTitles()
+  }
+}
+
+function refreshFixedKeyTabTitles(): void {
+  for (const tab of tabs.value) {
+    if (!tab.fixedKey || !tab.keySuffix) continue
+    tab.keySerial = portalKeySerial(tab.keySuffix)
+    tab.keyRole = portalKeyRole(tab.keySuffix)
+    tab.title = portalKeyTitle(tab.keySuffix)
+    tab.partition = portalPartition(tab.keySuffix)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +353,6 @@ function openHomeTab(): void {
 // 兼容：万一某些版本/路径还是触发了 @new-window，也把它接住
 function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
   event.preventDefault?.()
-  void tabId
   if (shouldSuppressPopupTab()) {
     if (event.url && event.url !== 'about:blank') {
       logPush(currentPushRunId, 'info', '准备', `已拦截推送中弹出的新窗口（避免开一堆标签）：${String(event.url).slice(0, 100)}`)
@@ -204,7 +360,7 @@ function onNewWindow(tabId: string, event: WebviewNewWindowEvent): void {
     return
   }
   if (event.url && event.url !== 'about:blank') {
-    openNewTab(event.url)
+    openNewTab(event.url, true, { partition: findTabById(tabId)?.partition })
   }
 }
 
@@ -373,6 +529,10 @@ const MODULE_TARGET_TIMEOUT_MS = 90000
 const RETRY_DELAY_MS = 5000
 const MAX_STEP_ATTEMPTS = 3
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: number | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -393,21 +553,26 @@ async function waitForWebviewReady(wv: PortalWebview, timeoutMs = 60000): Promis
       await withTimeout(wv.executeJavaScript('1'), 3000, 'probe')
       return true
     } catch {
-      await new Promise((r) => window.setTimeout(r, 800))
+      await sleep(800)
     }
   }
   return false
 }
 
-async function execStepScript(wv: PortalWebview, code: string, label: string): Promise<unknown> {
+async function execStepScript(
+  wv: PortalWebview,
+  code: string,
+  label: string,
+  timeoutMs = PUSH_SCRIPT_TIMEOUT_MS
+): Promise<unknown> {
   // 先确保页面就绪，避免在页面跳转/重载途中注入而直接失败
   if (!(await waitForWebviewReady(wv, 60000))) {
     throw new Error(`${label}：一体化页面未就绪（webview 仍在加载/跳转），已停止本步`)
   }
   return withTimeout(
     wv.executeJavaScript(code),
-    PUSH_SCRIPT_TIMEOUT_MS,
-    `${label}脚本执行超时（${Math.round(PUSH_SCRIPT_TIMEOUT_MS / 1000)}s，可能页面发生跳转导致上下文丢失），已停止本步`
+    timeoutMs,
+    `${label}脚本执行超时（${Math.round(timeoutMs / 1000)}s，可能页面发生跳转导致上下文丢失），已停止本步`
   )
 }
 
@@ -521,7 +686,7 @@ function moduleTabTitle(target: IntegrationModuleTarget): string {
 }
 
 function tabLooksLikeModule(tab: Tab, target: IntegrationModuleTarget): boolean {
-  return (tab.title || '') === moduleTabTitle(target)
+  return isBusinessPartition(tab.partition) && (tab.title || '') === moduleTabTitle(target)
 }
 
 function findModuleTabId(target: IntegrationModuleTarget): string | null {
@@ -582,11 +747,11 @@ async function ensureModuleTarget(
 
 async function webviewForPushStep(step: PushStep): Promise<PortalWebview | undefined> {
   const target = moduleTargetForStep(step)
-  if (!target) return waitForActiveWebview()
+  if (!target) return ensureBusinessWebview(45000)
 
   let tabId = findModuleTabId(target)
   if (!tabId) {
-    tabId = openNewTab(portalUrl, true)
+    tabId = openNewTab(portalUrl, true, { partition: portalPartition(businessKeySuffix), title: moduleTabTitle(target) })
     pushTabIds[target] = tabId
   } else {
     pushTabIds[target] = tabId
@@ -673,6 +838,191 @@ async function runPushPreflight(wv: PortalWebview, steps: PushStep[]): Promise<b
   return false
 }
 
+async function readAutomationUnit(): Promise<{ code: string; name: string }> {
+  const unit = await window.salaryApi.getUnitSettings()
+  return {
+    code: (unit.unitImportCode || '').trim(),
+    name: (unit.unitFullName || '').trim()
+  }
+}
+
+async function runAutomationEntryStep(
+  wv: PortalWebview,
+  runId: number,
+  sourceSteps: PushStep[]
+): Promise<void> {
+  if (!sourceSteps.some((step) => step.kind === 'insurance')) {
+    throw new Error('本次全部推送没有保险数据，不能进入“自动录入保险数据”步骤。')
+  }
+
+  pushCurrentLabel.value = '自动录入'
+  logPush(runId, 'info', '自动录入准备', '打开“直接支付外部数据”页面（页内 iframe 直达），准备接手自动录入')
+
+  // 沿用推送同款“页内 iframe 直达”打开目标页，不再走门户菜单导航：
+  // SmartFin 门户点“预算执行→集中支付”只会狂弹被拦截的新窗口、找不到“集中支付”而失败（见 630.log）；
+  // 而保险推送已在该 iframe 内用同一 menuid 成功写库，证明 iframe 上下文可用，自动录入也能在其中完成。
+  // 用可见 iframe（visibleFrame）便于用户观察；drainAllPortalFrames 会扫到该 iframe 并在其中启动自动录入。
+  const openResult = (await execStepScript(
+    wv,
+    buildPushInsuranceScript([], { openOnly: true, forceReload: true, visibleFrame: true }),
+    '打开直接支付外部数据',
+    180000
+  )) as { ok?: boolean; reason?: string; trace?: string[]; traceText?: string } | undefined
+  maybeLogStepTrace(runId, '自动录入准备', openResult?.trace, openResult?.traceText)
+  if (!openResult?.ok) {
+    throw new Error(openResult?.reason || '未能打开“直接支付外部数据”页面')
+  }
+
+  logPush(runId, 'info', '自动录入', '开始自动录入保险数据')
+  // 跨 frame 扫描偶发“命中 0 个”（直达 iframe 的 easyui 表格还没初始化好，自检窗口扑空）。
+  // 这种 noFrameHit 情况下脚本没处理任何数据，重试是安全的：等几秒让表格渲染好再扫一次，最多 3 次。
+  let result = await runAutoVoucherEntryInTargetFrame(wv, runId)
+  maybeLogStepTrace(runId, '自动录入', result?.trace, result?.traceText)
+  for (let attempt = 2; result && result.ok === false && result.noFrameHit && attempt <= 3; attempt++) {
+    logPush(runId, 'warn', '自动录入', `未命中列表页，${Math.round(RETRY_DELAY_MS / 1000)} 秒后自动第 ${attempt} 次扫描（等表格渲染好）…`)
+    await sleep(RETRY_DELAY_MS)
+    result = await runAutoVoucherEntryInTargetFrame(wv, runId)
+    maybeLogStepTrace(runId, '自动录入', result?.trace, result?.traceText)
+  }
+
+  if (!result?.ok) {
+    throw new Error(`自动录入失败：${result?.message || '未知错误'}`)
+  }
+  const saved = Number(result.savedCount || 0)
+  const skipped = Number(result.skippedCount || 0)
+  if (saved <= 0) {
+    throw new Error('自动录入没有保存任何数据，已停止自动送审。')
+  }
+  if (skipped > 0) {
+    throw new Error(`自动录入存在 ${skipped} 条跳过数据，已停止自动送审，请人工复核。`)
+  }
+
+  logPush(runId, 'ok', '自动录入', `自动录入完成：保存 ${saved} 次，跳过 ${skipped} 条`)
+  ElMessage.success(`自动录入完成：保存 ${saved} 次`)
+}
+
+async function runAutoVoucherEntryInTargetFrame(
+  wv: PortalWebview,
+  runId: number
+): Promise<AutoVoucherEntryResult | undefined> {
+  const frameScript = buildAutoVoucherEntryScript({
+    autoStart: true,
+    autoStartTargetOnly: true,
+    showPageButton: false,
+    requireRows: true,
+    maxWaitTime: 120000
+  })
+
+  let webContentsId: number | null = null
+  try {
+    webContentsId = wv.getWebContentsId()
+  } catch (error) {
+    logPush(runId, 'warn', '自动录入', `获取页面 frame 信息失败，回退到顶层执行：${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  if (webContentsId !== null && typeof window.salaryApi.drainAllPortalFrames === 'function') {
+    const drained = await window.salaryApi.drainAllPortalFrames(webContentsId, frameScript)
+    if (!drained.ok) {
+      logPush(runId, 'warn', '自动录入', `跨 frame 启动失败，回退到顶层执行：${drained.reason}`)
+    } else {
+      const values = (drained.results as PortalFrameScriptResult[])
+        .map((item: PortalFrameScriptResult): { frameUrl: string; value: AutoVoucherEntryFrameResult | null } => ({
+          frameUrl: item.frameUrl,
+          value: asAutoVoucherEntryFrameResult(item.value)
+        }))
+        .filter((item: { frameUrl: string; value: AutoVoucherEntryFrameResult | null }): item is { frameUrl: string; value: AutoVoucherEntryFrameResult } => Boolean(item.value))
+      const started = values.filter((item: { frameUrl: string; value: AutoVoucherEntryFrameResult }) => !item.value.skipped)
+      logPush(runId, 'info', '自动录入', `跨 frame 扫描 ${drained.results.length} 个页面，命中 ${started.length} 个直接支付列表页`)
+
+      if (started.length > 0) {
+        const chosen = started.find((item: { frameUrl: string; value: AutoVoucherEntryFrameResult }) => item.value.ok) ?? started[0]
+        if (chosen.frameUrl) logPush(runId, 'info', '自动录入', `自动录入执行页面：${chosen.frameUrl}`)
+        return chosen.value
+      }
+
+      const hints = values
+        .map((item: { frameUrl: string; value: AutoVoucherEntryFrameResult }) => item.value.frameHref || item.frameUrl)
+        .filter(Boolean)
+        .slice(0, 5)
+        .join('；')
+      if (hints) logPush(runId, 'warn', '自动录入', `未命中直接支付列表页，已扫描页面：${hints}`)
+      return {
+        ok: false,
+        noFrameHit: true,
+        message: '已打开“直接支付外部数据”，但自动录入没有在任何 frame 中命中直接支付列表页。请刷新该页后重试。'
+      }
+    }
+  }
+
+  return (await execStepScript(
+    wv,
+    buildAutoVoucherEntryScript({
+      autoStart: true,
+      showPageButton: false,
+      requireRows: true,
+      maxWaitTime: 120000
+    }),
+    '自动录入',
+    600000
+  )) as AutoVoucherEntryResult | undefined
+}
+
+async function runAutomationSendReviewStep(
+  wv: PortalWebview,
+  runId: number,
+  automation: PushQueueAutomation
+): Promise<void> {
+  pushCurrentLabel.value = '自动送审'
+  logPush(runId, 'info', '自动送审', '读取系统设置单位和当月历史报表，准备自动匹配送审单位')
+
+  const [localSummary, unit] = await Promise.all([
+    window.salaryApi.getSalaryQuotaMatchLocalSummary(),
+    readAutomationUnit()
+  ])
+  if (!unit.code) {
+    throw new Error('系统设置中未配置单位编码，已停止自动送审。')
+  }
+
+  const result = (await execStepScript(
+    wv,
+    buildSalarySendReviewScript({
+      localSummary,
+      unit,
+      month: automation.month,
+      autoStart: true,
+      headless: true,
+      showPageButton: false,
+      suppressAlert: true
+    }),
+    '自动送审',
+    300000
+  )) as SalarySendReviewResult | undefined
+  maybeLogStepTrace(runId, '自动送审', result?.trace, result?.traceText)
+
+  if (!result?.ok) {
+    throw new Error(`自动送审失败：${result?.message || '未知错误'}`)
+  }
+
+  logPush(runId, 'ok', '自动送审', result.message || '自动送审完成')
+  ElMessage.success('自动送审完成')
+}
+
+async function runFullAutomationAfterPush(
+  wv: PortalWebview,
+  runId: number,
+  automation: PushQueueAutomation,
+  sourceSteps: PushStep[]
+): Promise<void> {
+  logPush(runId, 'info', '流水线', `${automation.label}：推送已全部成功，开始后续自动录入和自动送审`)
+
+  await runAutomationEntryStep(wv, runId, sourceSteps)
+  pushCompletedSteps.value += 1
+  await new Promise((r) => window.setTimeout(r, 1200))
+
+  await runAutomationSendReviewStep(wv, runId, automation)
+  pushCompletedSteps.value += 1
+}
+
 async function processPushQueue(): Promise<void> {
   // 推送串行执行；某一步失败则跳过该步、继续推其余，最后统一汇总成功/失败。
   if (processingPushQueue.value) return
@@ -683,17 +1033,31 @@ async function processPushQueue(): Promise<void> {
   currentPushRunId = runId
   try {
     const queuedSteps = pendingPushQueue.value.slice()
-    pushTotalSteps.value = queuedSteps.length
+    const automation = pendingPushAutomation.value
+    const isFullAutomation = automation?.mode === 'full-auto'
+    const automationExtraSteps = isFullAutomation ? 2 : 0
+    pushTotalSteps.value = queuedSteps.length + automationExtraSteps
     pushCompletedSteps.value = 0
     pushCurrentLabel.value = '启动中…'
-    logPush(runId, 'info', '准备', `推送开始：共 ${queuedSteps.length} 步`)
-    ElMessage.info(`一体化推送开始：共 ${queuedSteps.length} 步`)
+    logPush(
+      runId,
+      'info',
+      '准备',
+      isFullAutomation
+        ? `全自动流水线开始：推送 ${queuedSteps.length} 步 + 自动录入 + 自动送审`
+        : `推送开始：共 ${queuedSteps.length} 步`
+    )
+    ElMessage.info(
+      isFullAutomation
+        ? `全自动流水线开始：推送 ${queuedSteps.length} 步后自动录入、自动送审`
+        : `一体化推送开始：共 ${queuedSteps.length} 步`
+    )
 
-    logPush(runId, 'info', '等待页面', '等待一体化 webview 就绪 …')
-    const wv = await waitForActiveWebview(45000)
+    logPush(runId, 'info', '等待页面', '等待 0101 业务操作 webview 就绪 …')
+    const wv = await ensureBusinessWebview(45000)
     if (!wv) {
-      logPush(runId, 'err', '等待页面', '一体化 webview 尚未就绪，推送任务已停止，请重新触发')
-      ElMessage.error('一体化 webview 尚未就绪，推送任务已停止，请重新触发')
+      logPush(runId, 'err', '等待页面', '0101 业务操作 webview 尚未就绪，推送任务已停止，请重新触发')
+      ElMessage.error('0101 业务操作 webview 尚未就绪，推送任务已停止，请重新触发')
       pendingPushQueue.value = []
       return
     }
@@ -709,8 +1073,17 @@ async function processPushQueue(): Promise<void> {
       logPush(runId, 'info', '等待页面', `当前页面：${state.url || '未知'}`)
     }
 
+    if (isFullAutomation && !(await runPushPreflight(wv, queuedSteps))) {
+      const msg = '推送前检测未通过，流水线已停止'
+      logPush(runId, 'err', '停止', msg)
+      ElMessage.error(msg)
+      pendingPushQueue.value = []
+      return
+    }
+
     const succeeded: string[] = []
     const failed: { name: string; msg: string }[] = []
+    let stoppedMessage = ''
     while (pendingPushQueue.value.length > 0) {
       const step = pendingPushQueue.value.shift() as PushStep
       const name = stepKindLabel(step)
@@ -757,8 +1130,15 @@ async function processPushQueue(): Promise<void> {
         await markPushStatus(step, 'failed')
         const msg = error instanceof Error ? error.message : String(error)
         failed.push({ name, msg })
-        // 改为"跳过失败项、继续推其余"：不清空队列、不中断，最后统一汇总
-        logPush(runId, 'err', '失败', `${name}：推送失败，已跳过并继续推其余：${msg}`)
+        stoppedMessage = isFullAutomation ? `${name}：推送失败，流水线已停止：${msg}` : ''
+        logPush(
+          runId,
+          'err',
+          '失败',
+          isFullAutomation
+            ? stoppedMessage
+            : `${name}：推送失败，已跳过并继续推其余：${msg}`
+        )
         // 失败时自动抓取门户结构快照（只读），便于在看不到内网页面时定位菜单/iframe 布局
         try {
           if (await waitForWebviewReady(wv, 15000)) {
@@ -779,10 +1159,43 @@ async function processPushQueue(): Promise<void> {
             `抓取门户结构失败：${diagError instanceof Error ? diagError.message : String(diagError)}`
           )
         }
+        if (isFullAutomation) {
+          pendingPushQueue.value = []
+          break
+        }
       }
       pushCompletedSteps.value++
       // 步骤间隔，让浮窗状态可读
       await new Promise((r) => window.setTimeout(r, 1200))
+    }
+    if (stoppedMessage) {
+      await ElMessageBox.alert(stoppedMessage, '全自动流水线停止', {
+        type: 'error',
+        confirmButtonText: '知道了'
+      })
+      return
+    }
+    if (isFullAutomation && automation) {
+      try {
+        await runFullAutomationAfterPush(wv, runId, automation, queuedSteps)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        logPush(runId, 'err', '停止', `全自动流水线停止：${msg}`)
+        await ElMessageBox.alert(msg, '全自动流水线停止', {
+          type: 'error',
+          confirmButtonText: '知道了'
+        })
+        return
+      }
+      logPush(runId, 'ok', '完成', '全自动流水线完成：推送、自动录入、自动送审全部成功')
+      ElMessage.success('全自动流水线完成')
+      // 全流程（含自动送审）成功结束后，打开并切到 0201 审核标签页，供用户登录后审核。
+      // openPortalKeyTab 会复用已存在的 0201 标签（没有则新建到登录页）；这是宿主主动开标签，
+      // 不是 webview 弹窗，不受推送期间的 suppressPopupsUntil 影响。
+      openPortalKeyTab(reviewKeySuffix, true)
+      logPush(runId, 'info', '完成', '已打开 0201 审核标签页，请用审核 Key 登录后审核')
+      ElMessage.info('已切换到 0201 审核标签页，请登录后审核')
+      return
     }
     // 汇总：跳过失败项、继续推其余后，统一报告成功/失败
     if (failed.length === 0) {
@@ -811,6 +1224,7 @@ async function processPushQueue(): Promise<void> {
   } finally {
     processingPushQueue.value = false
     pushInProgress.value = false
+    pendingPushAutomation.value = null
     // 再宽限 8 秒，拦住推送收尾后才迟到弹出的窗口
     suppressPopupsUntil = Date.now() + 8000
   }
@@ -881,19 +1295,37 @@ function formatBudgetImportSummary(result: BudgetImportResult, committed: boolea
     .join('\n')
 }
 
+async function mountRecorderDevTools(): Promise<void> {
+  if (stopRecorderDevTools || !showInternalTools.value) return
+  await nextTick()
+  const actions = document.querySelector<HTMLElement>('.portal-actions')
+  if (!actions || !showInternalTools.value || stopRecorderDevTools) return
+  const mod = await import('../integration/recorderDevTools')
+  if (!showInternalTools.value || stopRecorderDevTools) return
+  stopRecorderDevTools = mod.mountPortalRecorderDevTools({
+    target: actions,
+    activeWebview,
+    webviews: () => Array.from(webviewMap.values()),
+    api: window.salaryApi
+  })
+}
+
+function unmountRecorderDevTools(): void {
+  if (!stopRecorderDevTools) return
+  stopRecorderDevTools()
+  stopRecorderDevTools = null
+}
+
 onMounted(() => {
-  if (import.meta.env.DEV) {
-    void nextTick(async () => {
-      const actions = document.querySelector<HTMLElement>('.portal-actions')
-      if (!actions) return
-      const mod = await import('../integration/recorderDevTools')
-      stopRecorderDevTools = mod.mountPortalRecorderDevTools({
-        target: actions,
-        activeWebview,
-        api: window.salaryApi
-      })
-    })
-  }
+  void loadPortalUnitSettings()
+  if (showInternalTools.value) void mountRecorderDevTools()
+  watch(
+    showInternalTools,
+    (enabled) => {
+      if (enabled) void mountRecorderDevTools()
+      else unmountRecorderDevTools()
+    }
+  )
   if (pendingPushQueue.value.length > 0) {
     void nextTick(() => {
       window.setTimeout(() => void processPushQueue(), 800)
@@ -925,10 +1357,13 @@ onMounted(() => {
     if (!payload?.url || payload.url === 'about:blank') return
     // 找出请求来源的 tab（仅用于调试日志，开新标签时本身和来源无关）
     let sourceTabTitle = ''
+    let sourcePartition = activeTab.value?.partition
     for (const [id, wv] of webviewMap.entries()) {
       try {
         if (wv.getWebContentsId() === payload.sourceWebContentsId) {
-          sourceTabTitle = findTabById(id)?.title || ''
+          const sourceTab = findTabById(id)
+          sourceTabTitle = sourceTab?.title || ''
+          sourcePartition = sourceTab?.partition || sourcePartition
           break
         }
       } catch {}
@@ -942,7 +1377,7 @@ onMounted(() => {
       sourceTabTitle || payload.sourceWebContentsId,
       payload.url
     )
-    openNewTab(payload.url)
+    openNewTab(payload.url, true, { partition: sourcePartition })
   })
 })
 onBeforeUnmount(() => {
@@ -955,8 +1390,7 @@ onBeforeUnmount(() => {
     stopDownloadDoneListener = null
   }
   if (stopRecorderDevTools) {
-    stopRecorderDevTools()
-    stopRecorderDevTools = null
+    unmountRecorderDevTools()
   }
 })
 
@@ -971,7 +1405,7 @@ function onDomReady(tabId: string): void {
     } catch {}
     try {
       const title = wv.getTitle?.()
-      if (title) t.title = title
+      if (title && !t.fixedKey) t.title = title
     } catch {}
   }
   void installPortalAutomationScripts(tabId)
@@ -991,6 +1425,8 @@ function onConsoleMessage(event: { message?: string } | undefined): void {
   if (raw.startsWith('[insurance-push]')) label = '保险'
   else if (raw.startsWith('[voucher-push]')) label = '凭证'
   else if (raw.startsWith('[salary-system-import]')) label = '工资'
+  else if (raw.startsWith('[auto-voucher-entry]')) label = '自动录入'
+  else if (raw.startsWith('[salary-send-review]')) label = '自动送审'
   else return
   const text = raw.replace(/^\[[^\]]+\]\s*/, '').trim()
   if (!text) return
@@ -1011,7 +1447,7 @@ function onPageTitleUpdated(
   event: { title?: string } | undefined
 ): void {
   const t = findTabById(tabId)
-  if (t && event?.title) t.title = event.title
+  if (t && event?.title && !t.fixedKey) t.title = event.title
 }
 
 function onDidNavigate(tabId: string, event: { url?: string } | undefined): void {
@@ -1052,9 +1488,9 @@ async function openExternal(): Promise<void> {
 }
 
 async function openSalaryPlanInput(): Promise<void> {
-  const wv = activeWebview()
+  const wv = await ensureBusinessWebview(15000)
   if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
+    ElMessage.warning('0101 业务操作页面尚未就绪')
     return
   }
 
@@ -1099,38 +1535,70 @@ type SalarySystemImportResult =
     }
   | { ok: false; message?: string; trace?: string[]; traceText?: string }
 
+type AutoVoucherEntryResult =
+  | { ok: true; message?: string; savedCount?: number; skippedCount?: number; trace?: string[]; traceText?: string }
+  | { ok: false; message?: string; savedCount?: number; skippedCount?: number; noFrameHit?: boolean; trace?: string[]; traceText?: string }
+
+type AutoVoucherEntryFrameResult = AutoVoucherEntryResult & {
+  skipped?: boolean
+  frameHref?: string
+}
+
+type PortalFrameScriptResult = {
+  frameUrl: string
+  value: unknown
+}
+
+function asAutoVoucherEntryFrameResult(value: unknown): AutoVoucherEntryFrameResult | null {
+  if (!value || typeof value !== 'object') return null
+  const maybe = value as { ok?: unknown }
+  if (maybe.ok !== true && maybe.ok !== false) return null
+  return value as AutoVoucherEntryFrameResult
+}
+
+type SalarySendReviewResult =
+  | {
+      ok: true
+      message?: string
+      batch001Total?: number
+      batch002Total?: number
+      trace?: string[]
+      traceText?: string
+    }
+  | { ok: false; message?: string; trace?: string[]; traceText?: string }
+
 // ---------------------------------------------------------------------------
 // 一体化页面脚本注入（跨 frame）
 // ---------------------------------------------------------------------------
 async function installPortalAutomationScripts(tabId: string): Promise<void> {
+  const tab = findTabById(tabId)
+  if (tab && !isBusinessPartition(tab.partition)) return
   const wv = webviewMap.get(tabId)
   if (!wv) return
 
-  let salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false })
-  try {
-    const localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
-    salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
-  } catch (error) {
-    console.warn('额度匹配本地汇总读取失败，使用默认脚本配置', error)
-    salaryQuotaMatchScript = buildSalaryQuotaMatchScript({
-      autoStart: false,
-      localSummary: {
-        ok: false,
-        activeOtherOneTotal: 0,
-        activeBasicPerformanceTotal: 0,
-        activeHousingTotal: 0,
-        activeAllowanceTotal: 0,
-        retiredHousingTotal: 0,
-        retiredBackpayTotal: 0,
-        retiredActualPayTotal: 0,
-        otherActualPayTotal: 0,
-        actualPayTotal: 0,
-        traffic002Total: 0,
-        message: error instanceof Error ? error.message : String(error)
-      }
-    })
+  let localSummary: SalaryQuotaMatchLocalSummary = {
+    ok: false,
+    activeOtherOneTotal: 0,
+    activeBasicPerformanceTotal: 0,
+    activeHousingTotal: 0,
+    activeAllowanceTotal: 0,
+    retiredHousingTotal: 0,
+    retiredBackpayTotal: 0,
+    retiredActualPayTotal: 0,
+    otherActualPayTotal: 0,
+    actualPayTotal: 0,
+    traffic002Total: 0,
+    message: '尚未读取本地工资汇总'
   }
-
+  try {
+    localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
+  } catch (error) {
+    console.warn('本地工资汇总读取失败，使用默认脚本配置', error)
+    localSummary = {
+      ...localSummary,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
   let planUnit = { name: '', code: '' }
   try {
     const unit = await window.salaryApi.getUnitSettings()
@@ -1138,6 +1606,11 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
   } catch (error) {
     console.warn('读取单位设置失败，人员经费录入暂不按单位过滤', error)
   }
+  const salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
+  const salarySendReviewScript = buildSalarySendReviewScript({
+    localSummary,
+    unit: planUnit
+  })
   let salaryPlanInputScript = buildSalaryPlanInputScript({ showPageButton: true, unit: planUnit })
   try {
     const prefill = await window.salaryApi.getPersonnelExpensePlanPrefill({ archive: false })
@@ -1150,6 +1623,7 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
     { name: '凭证按钮', code: buildVoucherMergeScript({ autoStart: false }) },
     { name: '自动录入', code: buildAutoVoucherEntryScript({ autoStart: false }) },
     { name: '额度匹配', code: salaryQuotaMatchScript },
+    { name: '自动送审', code: salarySendReviewScript },
     { name: '人员经费录入', code: salaryPlanInputScript }
   ]
 
@@ -1189,34 +1663,24 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
 // 工资导出
 // ---------------------------------------------------------------------------
 async function exportSalary(): Promise<void> {
-  const wv = activeWebview()
+  const wv = await ensureBusinessWebview(15000)
   if (!wv) {
-    ElMessage.warning('一体化页面尚未就绪')
+    ElMessage.warning('0101 业务操作页面尚未就绪')
     return
   }
   if (salaryExporting.value) return
   salaryExporting.value = true
 
-  // 读单位设置里的工资类别 + 单位名（用于过滤多单位场景）
-  type SaltypeInput = { saltype_id: string; saltype_name: string; onlyFirstBatch?: boolean }
-  let saltypes: SaltypeInput[] = []
+  // 读单位名/编码用于过滤多单位场景；工资类别由脚本运行时自动发现。
   let filterUnitName = ''
   let filterUnitCode = ''
   try {
     const unit = await window.salaryApi.getUnitSettings()
-    saltypes = ((unit.salaryExportSaltypes || []) as SaltypeInput[]).filter(
-      (s) => s.saltype_id && s.saltype_name
-    )
     filterUnitName = (unit.unitFullName || '').trim()
     filterUnitCode = (unit.unitImportCode || '').trim()
   } catch (error) {
     salaryExporting.value = false
     ElMessage.error(`读取单位设置失败：${error instanceof Error ? error.message : String(error)}`)
-    return
-  }
-  if (!saltypes.length) {
-    salaryExporting.value = false
-    ElMessage.warning('未配置任何工资类别，请到系统设置 → 单位信息 → 一体化工资导出维护')
     return
   }
 
@@ -1225,7 +1689,7 @@ async function exportSalary(): Promise<void> {
   let result: SalaryExportScriptResult | null = null
   try {
     result = (await wv.executeJavaScript(
-      buildSalaryExportScript({ saltypes, filterUnitName, filterUnitCode })
+      buildSalaryExportScript({ filterUnitName, filterUnitCode })
     )) as SalaryExportScriptResult
   } catch (error) {
     salaryExporting.value = false
@@ -1303,6 +1767,33 @@ async function exportSalary(): Promise<void> {
   salaryExporting.value = false
 }
 
+async function resolveBudgetProjectCodesFromPortal(): Promise<BudgetProjectCodeResult> {
+  await loadPortalUnitSettings()
+  const wv = await ensureBusinessWebview(30000)
+  if (!wv) {
+    return { ok: false, message: '0101 业务操作页面尚未就绪，请先打开“一体化系统”页签' }
+  }
+  try {
+    if (!(await waitForWebviewReady(wv, 10000))) {
+      return { ok: false, message: '0101 业务操作页面还在加载，请稍后重试' }
+    }
+    return (await withTimeout(
+      wv.executeJavaScript(buildBudgetProjectCodeScript()),
+      20000,
+      '读取预算项目编码超时，请确认 0101 账号已登录'
+    )) as BudgetProjectCodeResult
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : '读取预算项目编码失败'
+    }
+  }
+}
+
+defineExpose({
+  resolveBudgetProjectCodesFromPortal
+})
+
 void nextTick(() => {
   // 占位：触发渲染后建立 ref 映射
 })
@@ -1321,8 +1812,8 @@ void nextTick(() => {
           @click="exportSalary"
           >导出工资</el-button
         >
-        <el-button :icon="Link" @click="openExternal">外部浏览器</el-button>
-        <el-button @click="revealPushLogFolder">推送日志</el-button>
+        <el-button v-if="showInternalTools" :icon="Link" @click="openExternal">外部浏览器</el-button>
+        <el-button v-if="showInternalTools" @click="revealPushLogFolder">推送日志</el-button>
       </div>
     </header>
 
@@ -1336,8 +1827,10 @@ void nextTick(() => {
         @click="activateTab(tab.id)"
       >
         <span v-if="tab.loading" class="portal-tab-spin" />
+        <span v-if="tab.keyRole" class="portal-tab-key">{{ tab.keyRole }}</span>
         <span class="portal-tab-title">{{ tab.title || '加载中…' }}</span>
         <button
+          v-if="!tab.fixedKey"
           class="portal-tab-close"
           title="关闭标签"
           @click.stop="closeTab(tab.id)"
@@ -1358,7 +1851,7 @@ void nextTick(() => {
         class="portal-webview"
         :class="{ active: tab.id === activeTabId }"
         :src="tab.url"
-        partition="persist:integrated-portal"
+        :partition="tab.partition"
         allowpopups
         @dom-ready="onDomReady(tab.id)"
         @console-message="onConsoleMessage($event)"
@@ -1495,6 +1988,16 @@ void nextTick(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+}
+
+.portal-tab-key {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(64, 158, 255, 0.12);
+  color: #1d63b7;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .portal-tab-spin {

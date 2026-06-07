@@ -11,7 +11,7 @@ type PortalWebview = HTMLElement & {
 type RecordingEvent = {
   t: number
   frameUrl: string
-  kind: 'fetch' | 'xhr' | 'click' | 'navigation'
+  kind: string
   screenshotPath?: string
   screenshotFileName?: string
   screenshotError?: string
@@ -54,14 +54,31 @@ type RecorderApi = {
     fileName: string
     folder: string
   } | { ok: false; reason: string }>
+  startPortalNativeRecording: (
+    sessionId: string,
+    webContentsIds: number[]
+  ) => Promise<{ ok: true; attached: number; tracked: number } | { ok: false; reason: string }>
+  drainPortalNativeRecording: (
+    sessionId: string
+  ) => Promise<{ ok: true; events: Array<Record<string, unknown>> }>
+  stopPortalNativeRecording: (
+    sessionId: string
+  ) => Promise<{ ok: true; events: Array<Record<string, unknown>> }>
 }
+
+const FRAME_SCRIPT_TIMEOUT_MS = 5000
+const NATIVE_RECORDER_TIMEOUT_MS = 3000
+const SCREENSHOT_TIMEOUT_MS = 3500
+const EVENT_SCREENSHOT_LIMIT_PER_DRAIN = 3
 
 export function mountPortalRecorderDevTools(options: {
   target: HTMLElement
   activeWebview: () => PortalWebview | undefined
+  webviews?: () => PortalWebview[]
   api: RecorderApi
 }): () => void {
   let recording = false
+  let stopping = false
   let recordingStart = 0
   let events: RecordingEvent[] = []
   let pollTimer: number | null = null
@@ -73,6 +90,9 @@ export function mountPortalRecorderDevTools(options: {
   let initialScreenshot: ScreenshotMeta | undefined
   let finalScreenshot: ScreenshotMeta | undefined
   let screenshotFailures: Array<{ sequence: number; kind: string; reason: string }> = []
+  let lastTargetCount = 0
+  let lastInstalledFrameCount = 0
+  let lastNativeTrackedCount = 0
 
   const startBtn = createButton('开始录制')
   startBtn.style.borderColor = '#dc2626'
@@ -89,61 +109,67 @@ export function mountPortalRecorderDevTools(options: {
   options.target.appendChild(stopBtn)
 
   function updateButtons(): void {
-    startBtn.style.display = recording ? 'none' : ''
-    stopBtn.style.display = recording ? '' : 'none'
-    stopBtn.textContent = `停止录制（${events.length} 条 / ${screenshotCount} 图）`
+    const active = recording || stopping
+    startBtn.style.display = active ? 'none' : ''
+    startBtn.disabled = active
+    stopBtn.style.display = active ? '' : 'none'
+    stopBtn.disabled = stopping
+    stopBtn.style.cursor = stopping ? 'wait' : 'pointer'
+    stopBtn.style.opacity = stopping ? '0.78' : '1'
+    stopBtn.textContent = stopping
+      ? `正在停止…（${events.length} 条 / ${screenshotCount} 图）`
+      : `停止录制（${events.length} 条 / ${screenshotCount} 图 / ${lastInstalledFrameCount} frame / ${lastNativeTrackedCount} 原始）`
   }
 
   async function startRecording(): Promise<void> {
-    if (recording) return
-    const webview = options.activeWebview()
-    if (!webview) {
+    if (recording || stopping) return
+    const targets = listTargetWebviews()
+    if (!targets.length) {
       window.alert('一体化页面尚未就绪')
       return
     }
-    const webContentsId = webview.getWebContentsId()
-    const installRes = await options.api.execInAllPortalFrames(
-      webContentsId,
-      buildRecorderInstallScript()
-    )
-    if (!installRes.ok) {
-      window.alert('录制安装失败：' + (installRes.reason || '未知错误'))
+    sessionId = `一体化录制-${formatLocalTimestamp(new Date())}`
+    const nativeRes = await startNativeRecording(targets)
+    const installRes = await installRecorderIntoTargets(targets, buildRecorderInstallScript(sessionId))
+    if (!installRes.ok || installRes.frameCount <= 0) {
+      window.alert(
+        '录制安装失败：' +
+          (installRes.reason || '没有成功注入到门户页面，请等页面加载完成后再试')
+      )
       return
     }
 
     recording = true
     events = []
     recordingStart = Date.now()
-    sessionId = `一体化录制-${formatLocalTimestamp(new Date())}`
     screenshotSeq = 0
     screenshotCount = 0
     screenshotFolder = ''
     initialScreenshot = undefined
     finalScreenshot = undefined
     screenshotFailures = []
+    lastTargetCount = targets.length
+    lastInstalledFrameCount = installRes.frameCount
+    lastNativeTrackedCount = nativeRes.tracked
     updateButtons()
-    initialScreenshot = await captureScreenshot(webContentsId, 'start')
+    initialScreenshot = await captureScreenshot(targets[0].getWebContentsId(), 'start')
     updateButtons()
 
     const drainCode = buildRecorderDrainScript()
-    const installCode = buildRecorderInstallScript()
+    const installCode = buildRecorderInstallScript(sessionId)
     pollTimer = window.setInterval(async () => {
       if (!recording || draining) return
-      const current = options.activeWebview()
-      if (!current) return
-      const currentWebContentsId = current.getWebContentsId()
+      const currentTargets = listTargetWebviews()
+      if (!currentTargets.length) return
       draining = true
       try {
-        try {
-          await options.api.execInAllPortalFrames(currentWebContentsId, installCode)
-        } catch {}
-        try {
-          const res = await options.api.drainAllPortalFrames(currentWebContentsId, drainCode)
-          if (res.ok) {
-            const added = appendEvents(res.results)
-            await captureScreenshotsForEvents(currentWebContentsId, added)
-          }
-        } catch {}
+        const native = await startNativeRecording(currentTargets)
+        const install = await installRecorderIntoTargets(currentTargets, installCode)
+        lastTargetCount = currentTargets.length
+        if (install.frameCount > 0) lastInstalledFrameCount = install.frameCount
+        if (native.tracked > 0) lastNativeTrackedCount = native.tracked
+        await drainRecorderTargets(currentTargets, drainCode)
+        appendNativeEvents(await drainNativeRecording())
       } finally {
         draining = false
         updateButtons()
@@ -152,28 +178,33 @@ export function mountPortalRecorderDevTools(options: {
   }
 
   async function stopRecording(): Promise<void> {
+    if (stopping) return
     if (!recording) return
     recording = false
+    stopping = true
+    updateButtons()
     if (pollTimer !== null) {
       window.clearInterval(pollTimer)
       pollTimer = null
     }
 
-    const webview = options.activeWebview()
-    if (webview) {
-      try {
-        const webContentsId = webview.getWebContentsId()
-        const res = await options.api.drainAllPortalFrames(webContentsId, buildRecorderDrainScript())
-        if (res.ok) {
-          const added = appendEvents(res.results)
-          await captureScreenshotsForEvents(webContentsId, added)
-        }
-        finalScreenshot = await captureScreenshot(webContentsId, 'stop')
-        await options.api.execInAllPortalFrames(webContentsId, buildRecorderStopScript())
-      } catch {}
+    try {
+      const targets = listTargetWebviews()
+      if (targets.length) {
+        await drainRecorderTargets(targets, buildRecorderDrainScript(), {
+          captureEventScreenshots: false
+        })
+        finalScreenshot = await captureScreenshot(targets[0].getWebContentsId(), 'stop')
+        await stopRecorderTargets(targets, buildRecorderStopScript())
+      }
+      if (sessionId) {
+        appendNativeEvents(await stopNativeRecording())
+      }
+    } finally {
+      stopping = false
+      updateButtons()
     }
 
-    updateButtons()
     if (!events.length && screenshotCount === 0) {
       window.alert('录制已停止，但没有捕获到事件')
       return
@@ -198,6 +229,11 @@ export function mountPortalRecorderDevTools(options: {
         final: finalScreenshot,
         failures: screenshotFailures
       },
+      recorder: {
+        targetWebviews: lastTargetCount,
+        installedFrames: lastInstalledFrameCount,
+        nativeTrackedWebviews: lastNativeTrackedCount
+      },
       events
     }
     const save = await options.api.savePortalRecording(
@@ -208,6 +244,154 @@ export function mountPortalRecorderDevTools(options: {
       window.alert(`录制已保存：${save.path}（${summary.totalEvents} 条事件，${screenshotCount} 张截图）`)
     } else if (!save.canceled) {
       window.alert('保存失败：' + (save.reason || '未知错误'))
+    }
+  }
+
+  function listTargetWebviews(): PortalWebview[] {
+    const candidates = [options.activeWebview(), ...(options.webviews?.() || [])]
+    const seen = new Set<number>()
+    const result: PortalWebview[] = []
+    for (const webview of candidates) {
+      if (!webview) continue
+      try {
+        const id = webview.getWebContentsId()
+        if (seen.has(id)) continue
+        seen.add(id)
+        result.push(webview)
+      } catch {}
+    }
+    return result
+  }
+
+  async function startNativeRecording(
+    targets: PortalWebview[]
+  ): Promise<{ attached: number; tracked: number }> {
+    if (!sessionId) return { attached: 0, tracked: 0 }
+    const ids: number[] = []
+    for (const webview of targets) {
+      try {
+        ids.push(webview.getWebContentsId())
+      } catch {}
+    }
+    if (!ids.length) return { attached: 0, tracked: 0 }
+    try {
+      const res = await withTimeout(
+        options.api.startPortalNativeRecording(sessionId, ids),
+        NATIVE_RECORDER_TIMEOUT_MS,
+        { ok: false, reason: '原始录制启动超时' }
+      )
+      if (!res.ok) return { attached: 0, tracked: lastNativeTrackedCount }
+      return { attached: res.attached, tracked: res.tracked }
+    } catch {
+      return { attached: 0, tracked: lastNativeTrackedCount }
+    }
+  }
+
+  async function drainNativeRecording(): Promise<Array<Record<string, unknown>>> {
+    if (!sessionId) return []
+    try {
+      return (
+        await withTimeout(options.api.drainPortalNativeRecording(sessionId), NATIVE_RECORDER_TIMEOUT_MS, {
+          ok: true,
+          events: []
+        })
+      ).events || []
+    } catch {
+      return []
+    }
+  }
+
+  async function stopNativeRecording(): Promise<Array<Record<string, unknown>>> {
+    if (!sessionId) return []
+    try {
+      return (
+        await withTimeout(options.api.stopPortalNativeRecording(sessionId), NATIVE_RECORDER_TIMEOUT_MS, {
+          ok: true,
+          events: []
+        })
+      ).events || []
+    } catch {
+      return []
+    }
+  }
+
+  async function installRecorderIntoTargets(
+    targets: PortalWebview[],
+    code: string
+  ): Promise<{ ok: boolean; frameCount: number; reason?: string }> {
+    let frameCount = 0
+    const errors: string[] = []
+    await Promise.all(
+      targets.map(async (webview) => {
+        try {
+          const res = await withTimeout(
+            options.api.execInAllPortalFrames(webview.getWebContentsId(), code),
+            FRAME_SCRIPT_TIMEOUT_MS,
+            { ok: false, count: 0, reason: 'frame 脚本安装超时' }
+          )
+          if (res.ok) frameCount += res.count || 0
+          else errors.push(res.reason || '未知错误')
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : String(error))
+        }
+      })
+    )
+    return {
+      ok: frameCount > 0 || errors.length === 0,
+      frameCount,
+      reason: errors[0]
+    }
+  }
+
+  async function drainRecorderTargets(
+    targets: PortalWebview[],
+    code: string,
+    optionsOverride: { captureEventScreenshots?: boolean } = {}
+  ): Promise<void> {
+    await Promise.all(
+      targets.map(async (webview) => {
+        try {
+          const webContentsId = webview.getWebContentsId()
+          const res = await withTimeout(
+            options.api.drainAllPortalFrames(webContentsId, code),
+            FRAME_SCRIPT_TIMEOUT_MS,
+            { ok: false, results: [], reason: 'frame 事件捞取超时' }
+          )
+          if (!res.ok) return
+          const added = appendEvents(res.results)
+          if (optionsOverride.captureEventScreenshots !== false) {
+            await captureScreenshotsForEvents(
+              webContentsId,
+              added,
+              EVENT_SCREENSHOT_LIMIT_PER_DRAIN
+            )
+          }
+        } catch {}
+      })
+    )
+  }
+
+  async function stopRecorderTargets(targets: PortalWebview[], code: string): Promise<void> {
+    await Promise.all(
+      targets.map(async (webview) => {
+        try {
+          await withTimeout(
+            options.api.execInAllPortalFrames(webview.getWebContentsId(), code),
+            FRAME_SCRIPT_TIMEOUT_MS,
+            { ok: false, count: 0, reason: 'frame 录制停止超时' }
+          )
+        } catch {}
+      })
+    )
+  }
+
+  function appendNativeEvents(nextEvents: Array<Record<string, unknown>>): void {
+    for (const event of nextEvents || []) {
+      events.push({
+        frameUrl: String(event.url || ''),
+        ...event,
+        kind: String(event.kind || 'native')
+      } as RecordingEvent)
     }
   }
 
@@ -227,10 +411,14 @@ export function mountPortalRecorderDevTools(options: {
 
   async function captureScreenshotsForEvents(
     webContentsId: number,
-    nextEvents: RecordingEvent[]
+    nextEvents: RecordingEvent[],
+    maxScreenshots: number
   ): Promise<void> {
+    let attempts = 0
     for (const event of nextEvents) {
       if (!shouldCaptureEventScreenshot(event)) continue
+      if (attempts >= maxScreenshots) return
+      attempts += 1
       const shot = await captureScreenshot(webContentsId, event.kind)
       if (shot) {
         event.screenshotPath = shot.path
@@ -249,11 +437,15 @@ export function mountPortalRecorderDevTools(options: {
   ): Promise<ScreenshotMeta | undefined> {
     const sequence = ++screenshotSeq
     try {
-      const res = await options.api.capturePortalRecordingScreenshot(webContentsId, {
-        sessionId: sessionId || '一体化录制',
-        sequence,
-        kind
-      })
+      const res = await withTimeout(
+        options.api.capturePortalRecordingScreenshot(webContentsId, {
+          sessionId: sessionId || '一体化录制',
+          sequence,
+          kind
+        }),
+        SCREENSHOT_TIMEOUT_MS,
+        { ok: false, reason: '截图超时' }
+      )
       if (!res.ok) {
         screenshotFailures.push({ sequence, kind, reason: res.reason || '未知错误' })
         return undefined
@@ -285,6 +477,16 @@ export function mountPortalRecorderDevTools(options: {
     startBtn.remove()
     stopBtn.remove()
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timeoutId: number | undefined
+  const timeout = new Promise<T>((resolve) => {
+    timeoutId = window.setTimeout(() => resolve(fallback), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+  })
 }
 
 function createButton(text: string): HTMLButtonElement {

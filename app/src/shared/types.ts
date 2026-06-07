@@ -213,6 +213,242 @@ export type ImportWatcherStatus = {
   annualAdjustment?: AnnualAdjustmentDetectedFiles
 }
 
+export type ExchangePackageKind = 'monthly-package' | 'receipt'
+
+export type ExchangePackageLocation =
+  | 'local-inbox'
+  | 'local-outbox'
+  | 'media-outbox'
+  | 'media-receipt'
+  | 'media-root'
+
+export type ExchangePackageFileSummary = {
+  filePath: string
+  fileName: string
+  kind: ExchangePackageKind
+  location: ExchangePackageLocation
+  size: number
+  modifiedAt: string
+  stable: boolean
+}
+
+export type ExchangeMediaSummary = {
+  driveRoot: string
+  markerPath?: string
+  mediaId?: string
+  displayName?: string
+  outboxPath?: string
+  receiptPath?: string
+  packageCount: number
+  receiptCount: number
+}
+
+export type ExchangeStatus = {
+  paths: {
+    root: string
+    inbox: string
+    imported: string
+    failed: string
+    quarantine: string
+    outbox: string
+    temp: string
+  }
+  localInboxPackages: ExchangePackageFileSummary[]
+  localOutboxPackages: ExchangePackageFileSummary[]
+  mediaPackages: ExchangePackageFileSummary[]
+  media: ExchangeMediaSummary[]
+  warnings: string[]
+  syncMessages?: string[]
+  lastScannedAt: string
+}
+
+export type ExchangePackageManifestSummary = {
+  format?: string
+  version?: number | string
+  packageId?: string
+  receiptId?: string
+  originalPackageId?: string
+  appName?: string
+  appVersion?: string
+  createdAt?: string
+  businessType?: string
+  unitCode?: string
+  unitName?: string
+  year?: number
+  month?: number
+  contains?: Record<string, unknown>
+  sourceFiles?: Array<{
+    kind?: string
+    originalName?: string
+    sha256?: string
+  }>
+}
+
+export type ExchangePackageChecksumFile = {
+  path: string
+  declaredSha256?: string
+  actualSha256?: string
+  size?: number
+  ok?: boolean
+  error?: string
+}
+
+export type ExchangePackagePreview = {
+  ok: boolean
+  filePath: string
+  fileName: string
+  size: number
+  packageSha256: string
+  manifest?: ExchangePackageManifestSummary
+  checksumSummary: {
+    declared: number
+    matched: number
+    missing: number
+    mismatched: number
+    unchecked: number
+  }
+  files: ExchangePackageChecksumFile[]
+  warnings: string[]
+  errors: string[]
+}
+
+export type ExchangePackageBuildResult = {
+  ok: boolean
+  packageId: string
+  packagePath: string
+  packageSha256: string
+  copiedToMedia?: boolean
+  mediaPath?: string
+  copiedFiles: number
+  warnings: string[]
+}
+
+export type ExchangePackageImportResult = {
+  ok: boolean
+  packageId: string
+  runId?: number
+  extractDir: string
+  importedFiles: number
+  warnings: string[]
+  message: string
+}
+
+export type ExchangeReceiptBuildResult = {
+  ok: boolean
+  receiptId: string
+  receiptPath: string
+  receiptSha256: string
+  originalPackageId?: string
+  copiedToMedia?: boolean
+  mediaPath?: string
+  warnings: string[]
+}
+
+export type ExchangeReceiptImportResult = {
+  ok: boolean
+  receiptId: string
+  originalPackageId?: string
+  runId?: number
+  receiptPath: string
+  warnings: string[]
+  message: string
+}
+
+export type AutomationRectSummary = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+export type AutomationWindowSummary = {
+  hwnd: string
+  title: string
+  className: string
+  processId: number
+  processName: string
+  isVisible: boolean
+  isForeground: boolean
+  rect: AutomationRectSummary
+  score?: number
+  observedAfterMs?: number
+}
+
+export type AutomationControlSummary = {
+  controlType: string
+  localizedControlType?: string
+  name?: string
+  automationId?: string
+  className?: string
+  boundingRectangle?: AutomationRectSummary
+  patterns: string[]
+  score?: number
+  items?: string[]
+}
+
+export type AutomationKeyCandidateSummary = {
+  text: string
+  index: number
+  controlType: string
+  source: string
+  isSelected?: boolean | null
+  patterns: string[]
+  roleGuess: 'operator' | 'reviewer' | 'unknown' | string
+  score: number
+}
+
+export type AutomationHelperStatus = {
+  available: boolean
+  helperPath?: string
+  debugRoot: string
+  message?: string
+}
+
+export type AutomationCaptureResult = {
+  ok: boolean
+  scenario?: string
+  phase?: string
+  reason?: string
+  captureDir?: string
+  diagnosticZipPath?: string
+  matchedWindow?: AutomationWindowSummary | null
+  combos?: AutomationControlSummary[]
+  keyCandidates?: AutomationKeyCandidateSummary[]
+  buttons?: AutomationControlSummary[]
+  comboCount?: number
+  keyCandidateCount?: number
+  buttonCount?: number
+  screenshots?: {
+    window?: string | null
+    expanded?: string | null
+    fullscreen?: string | null
+  }
+  warnings: string[]
+  errors: string[]
+}
+
+export type AutomationKeySwitchResult = {
+  ok: boolean
+  command?: string
+  phase?: string
+  reason?: string
+  requestedKey?: string
+  requestedIndex?: number | null
+  selectedIndex?: number
+  selectedText?: string
+  method?: string
+  pinFilled?: boolean
+  confirmed?: boolean
+  matchedWindow?: AutomationWindowSummary | null
+  beforeCurrentKey?: string
+  afterCurrentKey?: string
+  availableKeys?: string[]
+  combos?: AutomationControlSummary[]
+  keyCandidates?: AutomationKeyCandidateSummary[]
+  warnings: string[]
+  errors: string[]
+}
+
 export type MonthlyPayrollDetectedFiles = {
   salaryWorkbookPath?: string
   salaryWorkbookName?: string
@@ -378,7 +614,7 @@ export type UnitSettings = {
   housingPayeeName: string
   housingPayeeBank: string
   housingPayeeAccount: string
-  /** 一键导出工资时要遍历的"工资类别"列表（批次自动发现） */
+  /** 历史兼容字段；一体化工资导出已改为运行时自动探测工资类别 */
   salaryExportSaltypes?: SalaryExportSaltype[]
 }
 
@@ -440,8 +676,19 @@ export type MonthlyPayrollRun = {
   insurancePushedAt: string | null
   voucherPushedAt: string | null
   salaryPushedAt: string | null
+  exchangePackageId: string | null
+  exchangePackageStatus: MonthlyPayrollExchangeStatus | null
+  exchangeReceiptId: string | null
+  exchangeReceiptAt: string | null
+  exchangeReceiptPath: string | null
   createdAt: string
 }
+
+export type MonthlyPayrollExchangeStatus =
+  | 'package-built'
+  | 'copied-to-media'
+  | 'receipt-received'
+  | 'receipt-error'
 
 export type MonthlyPayrollPushTarget = 'insurance' | 'voucher' | 'salary'
 

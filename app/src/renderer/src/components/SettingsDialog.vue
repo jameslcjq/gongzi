@@ -1,21 +1,31 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsistencyAuditPage from './ConsistencyAuditPage.vue'
 import MailAttachmentPage from './MailAttachmentPage.vue'
+import {
+  internalToolsEnabled,
+  setInternalToolsEnabled,
+  unlockInternalTools
+} from '../internalToolsMode'
+import type { BudgetProjectCodeResult } from '../integration/budgetProjectCodeScript'
 import type {
   BackupSummary,
   ImportWatcherStatus,
   RecycleBinBatch,
-  SalaryExportSaltype,
   UnitSettings,
   UnitSettingsLockState
 } from '@shared/types'
+
+const showInternalTools = internalToolsEnabled
+const AutomationDiagnosticsPage = defineAsyncComponent(() => import('./AutomationDiagnosticsPage.vue'))
 
 const props = defineProps<{
   modelValue: boolean
   importWatcher: ImportWatcherStatus | null
   databasePath: string
+  initialTab?: string
+  resolveBudgetProjectCodes?: () => Promise<BudgetProjectCodeResult>
 }>()
 
 const emit = defineEmits<{
@@ -34,12 +44,6 @@ const recycleRestoringId = ref<number | null>(null)
 const activeTab = ref('unit')
 const appVersion = ref('dev')
 
-const defaultSalaryExportSaltypes: SalaryExportSaltype[] = [
-  { saltype_id: '2', saltype_name: '002事业' },
-  // 内网下拉 "006事业退休" 的真实 saltypeid 实测为 5
-  { saltype_id: '5', saltype_name: '事业退休' }
-]
-
 const unitForm = reactive<UnitSettings>({
   unitFullName: '',
   unitImportCode: '',
@@ -55,46 +59,46 @@ const unitForm = reactive<UnitSettings>({
   housingPayeeName: '',
   housingPayeeBank: '',
   housingPayeeAccount: '',
-  salaryExportSaltypes: defaultSalaryExportSaltypes.map((t) => ({ ...t }))
+  salaryExportSaltypes: []
 })
 const unitSaving = ref(false)
 const schoolLookupLoading = ref(false)
+const budgetProjectResolving = ref(false)
 const unitSettingsLock = ref<UnitSettingsLockState>({
   locked: false,
   rowCount: 0,
   tables: []
 })
 
+function normalizeSettingsTab(tab?: string): string {
+  if (tab === 'automation' && !showInternalTools.value) return 'unit'
+  return tab || 'unit'
+}
+
 const unitLockMessage = computed(() => {
   if (!unitSettingsLock.value.locked) return ''
   const tableNames = unitSettingsLock.value.tables.slice(0, 3).map((item) => item.name).join('、')
   const suffix = unitSettingsLock.value.tables.length > 3 ? '等' : ''
-  return `系统已有业务数据（${tableNames}${suffix}，共 ${unitSettingsLock.value.rowCount} 行），单位信息已锁定。清空业务数据后才可重新填写。`
+  return `系统已有业务数据（${tableNames}${suffix}，共 ${unitSettingsLock.value.rowCount} 行），单位基础信息已锁定；在职/退休预算项目编码仍可修改。`
 })
-
-function addSalaryExportSaltype(): void {
-  if (!unitForm.salaryExportSaltypes) unitForm.salaryExportSaltypes = []
-  unitForm.salaryExportSaltypes.push({ saltype_id: '', saltype_name: '' })
-}
-
-function removeSalaryExportSaltype(index: number): void {
-  if (!unitForm.salaryExportSaltypes) return
-  unitForm.salaryExportSaltypes.splice(index, 1)
-}
-
-function resetSalaryExportSaltypes(): void {
-  unitForm.salaryExportSaltypes = defaultSalaryExportSaltypes.map((t) => ({ ...t }))
-}
 
 watch(
   () => props.modelValue,
   (visible) => {
     if (visible) {
+      activeTab.value = normalizeSettingsTab(props.initialTab)
       void refreshBackups()
       void refreshRecycleBin()
       void loadUnitSettings()
       void loadAppVersion()
     }
+  }
+)
+
+watch(
+  () => props.initialTab,
+  (tab) => {
+    if (props.modelValue && tab) activeTab.value = normalizeSettingsTab(tab)
   }
 )
 
@@ -113,25 +117,27 @@ async function loadUnitSettings() {
   ])
   unitSettingsLock.value = lockState
   Object.assign(unitForm, settings)
-  if (!unitForm.salaryExportSaltypes || !unitForm.salaryExportSaltypes.length) {
-    unitForm.salaryExportSaltypes = defaultSalaryExportSaltypes.map((t) => ({ ...t }))
-  }
 }
 
-async function saveUnitSettings() {
-  if (unitSettingsLock.value.locked) {
-    ElMessage.warning('系统已有业务数据，不能重新填写单位信息')
-    return
-  }
+async function saveUnitSettings(successMessage?: string): Promise<boolean> {
   unitSaving.value = true
   try {
     const next = await window.salaryApi.setUnitSettings(buildUnitSettingsPayload())
     Object.assign(unitForm, next)
-    const trial = await claimTrialAfterUnitSave(next)
-    ElMessage.success(trial ? '单位设置已保存，试用授权已自动开通' : '单位设置已保存')
+    const trial = unitSettingsLock.value.locked ? false : await claimTrialAfterUnitSave(next)
+    ElMessage.success(
+      successMessage ||
+      (trial
+        ? '单位设置已保存，试用授权已自动开通'
+        : unitSettingsLock.value.locked
+          ? '预算项目编码已保存'
+          : '单位设置已保存')
+    )
     emit('changed')
+    return true
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
+    return false
   } finally {
     unitSaving.value = false
   }
@@ -203,6 +209,33 @@ async function applySchoolLookupByCode() {
     ElMessage.error(error instanceof Error ? error.message : '匹配学校对照表失败')
   } finally {
     schoolLookupLoading.value = false
+  }
+}
+
+async function autofillBudgetProjectCodes() {
+  if (!props.resolveBudgetProjectCodes) {
+    ElMessage.warning('一体化系统页面尚未加载')
+    return
+  }
+  budgetProjectResolving.value = true
+  try {
+    const result = await props.resolveBudgetProjectCodes()
+    if (!result.ok) {
+      const names = result.availableNames?.length
+        ? `；可用项目：${result.availableNames.slice(0, 12).join('、')}`
+        : ''
+      ElMessage.error(`${result.message}${names}`)
+      return
+    }
+    unitForm.budgetActiveCode = result.activeCode
+    unitForm.budgetRetiredCode = result.retiredCode
+    await saveUnitSettings(
+      `已填入并保存：${result.activeName} ${result.activeCode}；${result.retiredName} ${result.retiredCode}`
+    )
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '自动填入预算项目编码失败')
+  } finally {
+    budgetProjectResolving.value = false
   }
 }
 
@@ -286,11 +319,6 @@ async function restoreRecycleBatch(row: RecycleBinBatch) {
   }
 }
 
-async function chooseImportFolder() {
-  await window.salaryApi.chooseImportWatcherFolder()
-  emit('changed')
-}
-
 async function wipeAll() {
   try {
     await ElMessageBox.confirm(
@@ -339,6 +367,42 @@ async function wipeAll() {
   }
 }
 
+async function toggleInternalTools(): Promise<void> {
+  if (showInternalTools.value) {
+    try {
+      await ElMessageBox.confirm(
+        '关闭后将隐藏采集助手、录制工具、外部浏览器和推送日志入口。',
+        '关闭诊断模式',
+        {
+          type: 'warning',
+          confirmButtonText: '关闭',
+          cancelButtonText: '取消'
+        }
+      )
+    } catch {
+      return
+    }
+    setInternalToolsEnabled(false)
+    if (activeTab.value === 'automation') activeTab.value = 'unit'
+    ElMessage.success('诊断模式已关闭')
+    return
+  }
+
+  try {
+    const { value } = await ElMessageBox.prompt('请输入开发调试密码', '开启诊断模式', {
+      inputType: 'password',
+      inputPlaceholder: '密码',
+      confirmButtonText: '开启',
+      cancelButtonText: '取消'
+    })
+    if (unlockInternalTools(String(value || ''))) {
+      ElMessage.success('诊断模式已开启')
+    } else {
+      ElMessage.error('密码不正确')
+    }
+  } catch {}
+}
+
 async function openImportFolder() {
   await window.salaryApi.openImportWatcherFolder()
 }
@@ -384,54 +448,95 @@ function formatSize(bytes: number): string {
           <h4>单位信息</h4>
           <p v-if="unitSettingsLock.locked" class="unit-lock-tip">{{ unitLockMessage }}</p>
           <p v-else>影响月度工资报账生成的单位名称、会计科目编码等。修改后下次生成报表立即生效。</p>
-          <el-form :model="unitForm" label-width="140px" label-position="right" size="small" :disabled="unitSettingsLock.locked">
+          <el-form :model="unitForm" label-width="140px" label-position="right" size="small">
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="预算单位编码">
                   <el-input
                     v-model="unitForm.unitImportCode"
                     placeholder="如：019052"
+                    :disabled="unitSettingsLock.locked"
                     @change="applySchoolLookupByCode"
                   >
                     <template #append>
-                      <el-button :loading="schoolLookupLoading" @click="applySchoolLookupByCode">匹配</el-button>
+                      <el-button
+                        :loading="schoolLookupLoading"
+                        :disabled="unitSettingsLock.locked"
+                        @click="applySchoolLookupByCode"
+                      >匹配</el-button>
                     </template>
                   </el-input>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="单位全称">
-                  <el-input v-model="unitForm.unitFullName" placeholder="如：沭阳县扎下中心小学" />
+                  <el-input
+                    v-model="unitForm.unitFullName"
+                    placeholder="如：沭阳县扎下中心小学"
+                    :disabled="unitSettingsLock.locked"
+                  />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="支出功能分类编码">
-                  <el-input v-model="unitForm.functionCode" placeholder="如：2050202" />
+                  <el-input
+                    v-model="unitForm.functionCode"
+                    placeholder="如：2050202"
+                    :disabled="unitSettingsLock.locked"
+                  />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="支出功能分类名称">
-                  <el-input v-model="unitForm.schoolLevel" placeholder="如：小学教育 / 初中教育" />
+                  <el-input
+                    v-model="unitForm.schoolLevel"
+                    placeholder="如：小学教育 / 初中教育"
+                    :disabled="unitSettingsLock.locked"
+                  />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="在职预算项目编码">
-                  <el-input v-model="unitForm.budgetActiveCode" placeholder="对应模板中 工资!D25" />
+                  <el-input v-model="unitForm.budgetActiveCode" placeholder="对应模板中 工资!D25">
+                    <template #append>
+                      <el-button
+                        :loading="budgetProjectResolving"
+                        :disabled="unitSaving"
+                        @click="autofillBudgetProjectCodes"
+                      >自动填入</el-button>
+                    </template>
+                  </el-input>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="退休预算项目编码">
-                  <el-input v-model="unitForm.budgetRetiredCode" placeholder="对应模板中 工资!D26" />
+                  <el-input v-model="unitForm.budgetRetiredCode" placeholder="对应模板中 工资!D26">
+                    <template #append>
+                      <el-button
+                        :loading="budgetProjectResolving"
+                        :disabled="unitSaving"
+                        @click="autofillBudgetProjectCodes"
+                      >自动填入</el-button>
+                    </template>
+                  </el-input>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="退休功能分类编码">
-                  <el-input v-model="unitForm.retiredFunctionCode" placeholder="如：2210202" />
+                  <el-input
+                    v-model="unitForm.retiredFunctionCode"
+                    placeholder="如：2210202"
+                    :disabled="unitSettingsLock.locked"
+                  />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="退休功能分类名称">
-                  <el-input v-model="unitForm.retiredFunctionName" placeholder="如：退休提租补贴" />
+                  <el-input
+                    v-model="unitForm.retiredFunctionName"
+                    placeholder="如：退休提租补贴"
+                    :disabled="unitSettingsLock.locked"
+                  />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -439,17 +544,21 @@ function formatSize(bytes: number): string {
             <el-row :gutter="12">
               <el-col :span="24">
                 <el-form-item label="账户名称">
-                  <el-input v-model="unitForm.socialPayeeName" placeholder="如：沭阳县会计核算中心代扣代缴专户" />
+                  <el-input
+                    v-model="unitForm.socialPayeeName"
+                    placeholder="如：沭阳县会计核算中心代扣代缴专户"
+                    :disabled="unitSettingsLock.locked"
+                  />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="开户行">
-                  <el-input v-model="unitForm.socialPayeeBank" />
+                  <el-input v-model="unitForm.socialPayeeBank" :disabled="unitSettingsLock.locked" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="账号">
-                  <el-input v-model="unitForm.socialPayeeAccount" />
+                  <el-input v-model="unitForm.socialPayeeAccount" :disabled="unitSettingsLock.locked" />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -457,68 +566,26 @@ function formatSize(bytes: number): string {
             <el-row :gutter="12">
               <el-col :span="24">
                 <el-form-item label="账户名称">
-                  <el-input v-model="unitForm.housingPayeeName" />
+                  <el-input v-model="unitForm.housingPayeeName" :disabled="unitSettingsLock.locked" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="开户行">
-                  <el-input v-model="unitForm.housingPayeeBank" />
+                  <el-input v-model="unitForm.housingPayeeBank" :disabled="unitSettingsLock.locked" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="账号">
-                  <el-input v-model="unitForm.housingPayeeAccount" />
+                  <el-input v-model="unitForm.housingPayeeAccount" :disabled="unitSettingsLock.locked" />
                 </el-form-item>
               </el-col>
             </el-row>
-
-            <h4 style="margin-top: 24px">一体化工资导出 - 工资类别</h4>
-            <p>
-              点"导出工资"时，对每个工资类别 × 当前单位真实批次（自动从一体化拉取）的组合都尝试导出，没数据/无配置的组合自动跳过。<br />
-              提示：saltype_id 是数据库 ID，不是下拉显示的 001/002 编号 —— 实测 002事业 = 2，006事业退休 = 5。
-            </p>
-            <el-table
-              :data="unitForm.salaryExportSaltypes || []"
-              border
-              size="small"
-              style="margin-bottom: 12px"
-            >
-              <el-table-column label="saltype_id" width="140">
-                <template #default="{ row }">
-                  <el-input v-model="row.saltype_id" placeholder="如：2" size="small" />
-                </template>
-              </el-table-column>
-              <el-table-column label="工资类别名称（用于文件名）" min-width="240">
-                <template #default="{ row }">
-                  <el-input v-model="row.saltype_name" placeholder="如：002事业" size="small" />
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="90" fixed="right">
-                <template #default="{ $index }">
-                  <el-button
-                    type="danger"
-                    size="small"
-                    text
-                    @click="removeSalaryExportSaltype($index)"
-                    >删除</el-button
-                  >
-                </template>
-              </el-table-column>
-            </el-table>
-            <div style="margin-bottom: 16px">
-              <el-button size="small" @click="addSalaryExportSaltype">+ 新增一行</el-button>
-              <el-button size="small" @click="resetSalaryExportSaltypes">恢复默认</el-button>
-              <span style="margin-left: 12px; color: var(--text-3); font-size: 12px">
-                批次列表运行时自动发现，不用配置。
-              </span>
-            </div>
 
             <div>
               <el-button
                 type="primary"
                 :loading="unitSaving"
-                :disabled="unitSettingsLock.locked"
-                @click="saveUnitSettings"
+                @click="saveUnitSettings()"
               >保存单位信息</el-button>
             </div>
           </el-form>
@@ -593,11 +660,10 @@ function formatSize(bytes: number): string {
 
       <el-tab-pane label="导入目录" name="import">
         <div class="settings-section">
-          <h4>Excel 自动导入文件夹</h4>
+          <h4>Excel 自动导入固定文件夹</h4>
           <p>{{ importWatcher?.folderPath || '未配置' }}</p>
           <p>模板文件夹：{{ importWatcher?.templateFolderPath || '-' }}</p>
           <div>
-            <el-button @click="chooseImportFolder">更换目录</el-button>
             <el-button @click="openImportFolder">打开目录</el-button>
           </div>
         </div>
@@ -618,6 +684,10 @@ function formatSize(bytes: number): string {
 
       <el-tab-pane label="邮件附件" name="mail">
         <MailAttachmentPage />
+      </el-tab-pane>
+
+      <el-tab-pane v-if="showInternalTools" label="采集助手" name="automation">
+        <component :is="AutomationDiagnosticsPage" />
       </el-tab-pane>
 
       <el-tab-pane label="关于" name="about">
@@ -656,6 +726,21 @@ function formatSize(bytes: number): string {
           <p>清空后不可恢复，先建一份备份再操作。四张基础对照表会保留。</p>
           <div>
             <el-button type="danger" :loading="wiping" @click="wipeAll">一键清空所有数据</el-button>
+          </div>
+        </div>
+        <div class="settings-section diagnostic-section">
+          <h4>诊断模式</h4>
+          <p>
+            {{
+              showInternalTools
+                ? '已开启：显示采集助手、录制工具、外部浏览器和推送日志入口。'
+                : '默认隐藏内部调试入口，需要到现场采集或排查时输入密码开启。'
+            }}
+          </p>
+          <div>
+            <el-button :type="showInternalTools ? 'warning' : 'primary'" @click="toggleInternalTools">
+              {{ showInternalTools ? '关闭诊断模式' : '开启诊断模式' }}
+            </el-button>
           </div>
         </div>
       </el-tab-pane>
@@ -705,6 +790,14 @@ function formatSize(bytes: number): string {
   border: 1px solid var(--danger);
   border-radius: var(--radius);
   background: var(--danger-soft);
+}
+
+.diagnostic-section {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #d7e7ff;
+  border-radius: var(--radius);
+  background: #f7fbff;
 }
 
 .settings-audit-pane {

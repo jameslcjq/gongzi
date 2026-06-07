@@ -1,4 +1,4 @@
-import { app, ipcMain as electronIpcMain, shell, type IpcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain as electronIpcMain, shell, type IpcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { getDatabase, getDatabasePath, run } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
 import { createBackup, listBackups, restoreBackup } from '../services/backup'
@@ -17,6 +17,19 @@ import {
   openImportWatcherFolder,
   startExcelImportWatcher
 } from '../services/excelImportWatcher'
+import { getExchangeStatus } from '../services/exchange/exchangeStatus'
+import {
+  chooseExchangePackageFile,
+  previewExchangePackage,
+  previewExchangeReceipt
+} from '../services/exchange/exchangePackagePreview'
+import {
+  buildMonthlyPayrollExchangePackage,
+  buildMonthlyPayrollExchangeReceipt,
+  importMonthlyPayrollExchangePackage,
+  importMonthlyPayrollExchangeReceipt,
+  syncExchangeMedia
+} from '../services/exchange/exchangePackageService'
 import {
   deletePivotConfig,
   detectIdCardField,
@@ -84,6 +97,12 @@ import {
   restoreRecycleBinBatch
 } from '../services/operationLog'
 import { getCachedLicenseStatus } from '../services/licenseService'
+import {
+  collectIntegrationLoginKey,
+  getAutomationHelperStatus,
+  openAutomationDebugFolder,
+  switchIntegrationLoginKey
+} from '../services/automation/automationHelper'
 import { getPersonnelStatusViews } from '../services/personnelStatus'
 import { exportWorksheetToExcel } from '../services/worksheetExport'
 import { saveWorksheetFields } from '../services/worksheetFields'
@@ -180,6 +199,14 @@ import type {
   AnnualAdjustmentFilePick,
   AnnualAdjustmentPreview,
   AnnualAdjustmentPreviewInput,
+  ExchangeStatus,
+  ExchangePackagePreview,
+  ExchangePackageBuildResult,
+  ExchangePackageImportResult,
+  ExchangeReceiptBuildResult,
+  ExchangeReceiptImportResult,
+  AutomationCaptureResult,
+  AutomationHelperStatus,
   PerformancePayrollGenerateInput,
   PerformancePayrollGenerateResult,
   PerformancePayrollHistoryGenerateInput,
@@ -202,6 +229,12 @@ const LICENSE_FREE_CHANNELS = new Set([
   'import-watcher:choose-folder',
   'import-watcher:open-folder',
   'import-watcher:clear-logs',
+  'integration:capture-recording-screenshot',
+  'integration:drain-all-frames',
+  'integration:exec-in-all-frames',
+  'integration:native-recorder-start',
+  'integration:native-recorder-drain',
+  'integration:native-recorder-stop',
   'integration:save-recording',
   'portal-recorder:save',
   'salary-quota-match:local-summary',
@@ -220,7 +253,7 @@ async function assertLicenseForChannel(channel: string): Promise<void> {
   throw new Error(status.message || '授权无效，请先完成授权校验')
 }
 
-function createLicensedIpcMain(): Pick<IpcMain, 'handle'> {
+export function createLicensedIpcMain(): Pick<IpcMain, 'handle'> {
   return {
     handle(channel, listener) {
       electronIpcMain.handle(channel, async (event, ...args) => {
@@ -233,6 +266,191 @@ function createLicensedIpcMain(): Pick<IpcMain, 'handle'> {
 
 function sanitizeRecordingPathSegment(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 80) || 'recording'
+}
+
+type NativeRecorderEvent = {
+  t: number
+  kind: string
+  webContentsId: number
+  url?: string
+  title?: string
+  [key: string]: unknown
+}
+
+type NativeRecorderSession = {
+  sessionId: string
+  startedAt: number
+  events: NativeRecorderEvent[]
+  detachByWebContentsId: Map<number, () => void>
+}
+
+const nativeRecorderSessions = new Map<string, NativeRecorderSession>()
+
+function nativeRecorderEventBase(session: NativeRecorderSession, wc: WebContents): NativeRecorderEvent {
+  let url = ''
+  let title = ''
+  try {
+    url = wc.getURL()
+  } catch {}
+  try {
+    title = wc.getTitle()
+  } catch {}
+  return {
+    t: Date.now() - session.startedAt,
+    kind: 'native',
+    webContentsId: wc.id,
+    url,
+    title
+  }
+}
+
+function pushNativeRecorderEvent(
+  session: NativeRecorderSession,
+  wc: WebContents,
+  kind: string,
+  data: Record<string, unknown> = {}
+): void {
+  if (wc.isDestroyed()) return
+  session.events.push({
+    ...nativeRecorderEventBase(session, wc),
+    kind,
+    ...data
+  })
+  if (session.events.length > 12000) {
+    session.events = session.events.slice(-6000)
+  }
+}
+
+function sanitizeNativeInput(input: Record<string, unknown>): Record<string, unknown> {
+  const key = typeof input.key === 'string' ? input.key : undefined
+  return {
+    type: input.type,
+    key: key && key.length === 1 ? '<char>' : key,
+    code: input.code,
+    button: input.button,
+    x: input.x,
+    y: input.y,
+    globalX: input.globalX,
+    globalY: input.globalY,
+    modifiers: input.modifiers
+  }
+}
+
+function attachNativeRecorderToWebContents(
+  session: NativeRecorderSession,
+  wc: WebContents
+): boolean {
+  if (wc.isDestroyed() || session.detachByWebContentsId.has(wc.id)) return false
+
+  const inputListener = (_event: unknown, input: Record<string, unknown>): void => {
+    pushNativeRecorderEvent(session, wc, 'native-input', sanitizeNativeInput(input))
+  }
+  const beforeInputListener = (_event: unknown, input: Record<string, unknown>): void => {
+    const type = String(input.type || '')
+    if (!/^key/i.test(type)) return
+    pushNativeRecorderEvent(session, wc, 'native-before-input', sanitizeNativeInput(input))
+  }
+  const startNavigationListener = (details: Record<string, unknown>): void => {
+    pushNativeRecorderEvent(session, wc, 'native-navigation-start', {
+      navigationUrl: details.url,
+      isMainFrame: details.isMainFrame,
+      frameProcessId: details.frameProcessId,
+      frameRoutingId: details.frameRoutingId
+    })
+  }
+  const navigateListener = (_event: unknown, url: string): void => {
+    pushNativeRecorderEvent(session, wc, 'native-navigation', { navigationUrl: url })
+  }
+  const navigateInPageListener = (_event: unknown, url: string, isMainFrame: boolean): void => {
+    pushNativeRecorderEvent(session, wc, 'native-navigation-in-page', { navigationUrl: url, isMainFrame })
+  }
+  const frameNavigateListener = (
+    _event: unknown,
+    url: string,
+    httpResponseCode: number,
+    httpStatusText: string,
+    isMainFrame: boolean,
+    frameProcessId: number,
+    frameRoutingId: number
+  ): void => {
+    pushNativeRecorderEvent(session, wc, 'native-frame-navigation', {
+      navigationUrl: url,
+      httpResponseCode,
+      httpStatusText,
+      isMainFrame,
+      frameProcessId,
+      frameRoutingId
+    })
+  }
+  const frameLoadListener = (
+    _event: unknown,
+    isMainFrame: boolean,
+    frameProcessId: number,
+    frameRoutingId: number
+  ): void => {
+    pushNativeRecorderEvent(session, wc, 'native-frame-load', {
+      isMainFrame,
+      frameProcessId,
+      frameRoutingId
+    })
+  }
+  const titleListener = (_event: unknown, title: string): void => {
+    pushNativeRecorderEvent(session, wc, 'native-title', { title })
+  }
+  const destroyedListener = (): void => {
+    pushNativeRecorderEvent(session, wc, 'native-destroyed')
+    session.detachByWebContentsId.delete(wc.id)
+  }
+
+  const wcAny = wc as WebContents & {
+    on(event: string, listener: (...args: any[]) => void): WebContents
+    off(event: string, listener: (...args: any[]) => void): WebContents
+  }
+  wcAny.on('input-event', inputListener)
+  wcAny.on('before-input-event', beforeInputListener)
+  wcAny.on('did-start-navigation', startNavigationListener)
+  wcAny.on('did-navigate', navigateListener)
+  wcAny.on('did-navigate-in-page', navigateInPageListener)
+  wcAny.on('did-frame-navigate', frameNavigateListener)
+  wcAny.on('did-frame-finish-load', frameLoadListener)
+  wcAny.on('page-title-updated', titleListener)
+  wcAny.on('destroyed', destroyedListener)
+
+  session.detachByWebContentsId.set(wc.id, () => {
+    wcAny.off('input-event', inputListener)
+    wcAny.off('before-input-event', beforeInputListener)
+    wcAny.off('did-start-navigation', startNavigationListener)
+    wcAny.off('did-navigate', navigateListener)
+    wcAny.off('did-navigate-in-page', navigateInPageListener)
+    wcAny.off('did-frame-navigate', frameNavigateListener)
+    wcAny.off('did-frame-finish-load', frameLoadListener)
+    wcAny.off('page-title-updated', titleListener)
+    wcAny.off('destroyed', destroyedListener)
+  })
+
+  pushNativeRecorderEvent(session, wc, 'native-attached')
+  return true
+}
+
+function drainNativeRecorderSession(sessionId: string): NativeRecorderEvent[] {
+  const session = nativeRecorderSessions.get(sessionId)
+  if (!session) return []
+  const events = session.events
+  session.events = []
+  return events
+}
+
+function stopNativeRecorderSession(sessionId: string): NativeRecorderEvent[] {
+  const session = nativeRecorderSessions.get(sessionId)
+  if (!session) return []
+  const events = drainNativeRecorderSession(sessionId)
+  for (const detach of session.detachByWebContentsId.values()) {
+    try {
+      detach()
+    } catch {}
+  }
+  nativeRecorderSessions.delete(sessionId)
+  return events
 }
 
 // 人员经费录入：只保留"单位设置"里配置的那个单位的核对表行（系统有多个单位时，避免录到别的单位）。
@@ -302,6 +520,22 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('app:list-workflows', (): WorkflowDefinition[] => listWorkflows())
 
+  ipcMain.handle('automation:helper-status', (): AutomationHelperStatus => {
+    return getAutomationHelperStatus()
+  })
+
+  ipcMain.handle('automation:collect-login-key', (): Promise<AutomationCaptureResult> => {
+    return collectIntegrationLoginKey()
+  })
+
+  ipcMain.handle('automation:switch-login-key', (_event, input: { keyText?: string; index?: number; pin?: string; confirm?: boolean }) => {
+    return switchIntegrationLoginKey(input ?? {})
+  })
+
+  ipcMain.handle('automation:open-debug-folder', (): Promise<string> => {
+    return openAutomationDebugFolder()
+  })
+
   ipcMain.handle('consistency-audit:run', (): Promise<ConsistencyAuditResult> => {
     return runConsistencyAudit()
   })
@@ -331,6 +565,50 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('import-watcher:clear-logs', (): Promise<ImportWatcherStatus> => {
     return clearImportWatcherLogs()
+  })
+
+  ipcMain.handle('exchange:get-status', (): ExchangeStatus => {
+    return getExchangeStatus()
+  })
+
+  ipcMain.handle('exchange:scan-media', (): Promise<ExchangeStatus> => {
+    return syncExchangeMedia()
+  })
+
+  ipcMain.handle('exchange:open-inbox', async (): Promise<string> => {
+    return shell.openPath(getExchangeStatus().paths.inbox)
+  })
+
+  ipcMain.handle('exchange:open-outbox', async (): Promise<string> => {
+    return shell.openPath(getExchangeStatus().paths.outbox)
+  })
+
+  ipcMain.handle('exchange:choose-package', (): Promise<{ filePath: string; fileName: string } | null> => {
+    return chooseExchangePackageFile()
+  })
+
+  ipcMain.handle('exchange:preview-package', (_event, filePath: string): Promise<ExchangePackagePreview> => {
+    return previewExchangePackage(filePath)
+  })
+
+  ipcMain.handle('exchange:preview-receipt', (_event, filePath: string): Promise<ExchangePackagePreview> => {
+    return previewExchangeReceipt(filePath)
+  })
+
+  ipcMain.handle('exchange:build-monthly-package', (_event, runId: number): Promise<ExchangePackageBuildResult> => {
+    return buildMonthlyPayrollExchangePackage(runId)
+  })
+
+  ipcMain.handle('exchange:import-monthly-package', (_event, filePath: string): Promise<ExchangePackageImportResult> => {
+    return importMonthlyPayrollExchangePackage(filePath)
+  })
+
+  ipcMain.handle('exchange:build-receipt', (_event, runId: number): Promise<ExchangeReceiptBuildResult> => {
+    return buildMonthlyPayrollExchangeReceipt(runId)
+  })
+
+  ipcMain.handle('exchange:import-receipt', (_event, filePath: string): Promise<ExchangeReceiptImportResult> => {
+    return importMonthlyPayrollExchangeReceipt(filePath)
   })
 
   ipcMain.handle(
@@ -485,6 +763,54 @@ export function registerAppIpc(): void {
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : String(error) }
       }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:native-recorder-start',
+    async (
+      _event,
+      payload: { sessionId: string; webContentsIds: number[] }
+    ): Promise<{ ok: true; attached: number; tracked: number } | { ok: false; reason: string }> => {
+      try {
+        const { webContents } = await import('electron')
+        const sessionId = sanitizeRecordingPathSegment(payload.sessionId || '一体化录制')
+        let session = nativeRecorderSessions.get(sessionId)
+        if (!session) {
+          session = {
+            sessionId,
+            startedAt: Date.now(),
+            events: [],
+            detachByWebContentsId: new Map()
+          }
+          nativeRecorderSessions.set(sessionId, session)
+        }
+
+        let attached = 0
+        const ids = Array.from(new Set((payload.webContentsIds || []).filter(Number.isFinite)))
+        for (const id of ids) {
+          const wc = webContents.fromId(id)
+          if (!wc || wc.isDestroyed()) continue
+          if (attachNativeRecorderToWebContents(session, wc)) attached += 1
+        }
+        return { ok: true, attached, tracked: session.detachByWebContentsId.size }
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:native-recorder-drain',
+    (_event, payload: { sessionId: string }): { ok: true; events: NativeRecorderEvent[] } => {
+      return { ok: true, events: drainNativeRecorderSession(sanitizeRecordingPathSegment(payload.sessionId || '一体化录制')) }
+    }
+  )
+
+  ipcMain.handle(
+    'integration:native-recorder-stop',
+    (_event, payload: { sessionId: string }): { ok: true; events: NativeRecorderEvent[] } => {
+      return { ok: true, events: stopNativeRecorderSession(sanitizeRecordingPathSegment(payload.sessionId || '一体化录制')) }
     }
   )
 

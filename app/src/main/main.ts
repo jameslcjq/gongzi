@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, type Session, type DownloadItem } from 'electron'
+import { app, BrowserWindow, type Session, type DownloadItem } from 'electron'
 import { mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDatabase } from './db/connection'
@@ -6,6 +6,7 @@ import { registerAppIpc } from './ipc/appApi'
 import { registerLicenseIpc } from './ipc/licenseApi'
 import { registerMailIpc } from './ipc/mailApi'
 import { startAutoCheck } from './services/mail/mailImapService'
+import { getCachedLicenseStatus } from './services/licenseService'
 import { appDisplayName, ensureBusinessFolders, ensureImportFolderDesktopShortcut } from './config/paths'
 import {
   getCachedImportFolder,
@@ -156,15 +157,7 @@ function createWindow(): void {
     installDownloadInterception(guestWebContents.session, host)
   })
 
-  // 也给已存在的 partition session 预先挂一次（覆盖热重载情况）
-  try {
-    installDownloadInterception(
-      session.fromPartition('persist:integrated-portal'),
-      mainWindow
-    )
-  } catch (error) {
-    console.warn('预挂载 integrated-portal session 下载拦截失败', error)
-  }
+  // 下载拦截在每个 webview attach 后按其独立 partition 安装。
 }
 
 app.whenReady().then(async () => {
@@ -195,7 +188,14 @@ app.whenReady().then(async () => {
 
   // 启动后 5 秒自动检测邮件附件
   setTimeout(() => {
-    startAutoCheck(30).catch((error) => {
+    ;(async () => {
+      const licenseStatus = await getCachedLicenseStatus()
+      if (!licenseStatus.valid) {
+        console.info('邮件自动检测已跳过：授权未通过')
+        return
+      }
+      await startAutoCheck(30)
+    })().catch((error) => {
       console.error('邮件自动检测失败', error)
     })
   }, 5000)

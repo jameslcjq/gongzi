@@ -5,6 +5,7 @@ import { listMailRules } from './mailRuleService'
 import type { MailDownloadRule } from './mailRuleService'
 import { processAttachmentsFromParsed } from './attachmentDownloadService'
 import { appendMailLog } from './downloadLogService'
+import { importFolder } from '../../config/paths'
 import type { MailCheckProgress } from '../../../shared/types'
 
 let abortController: AbortController | null = null
@@ -209,8 +210,8 @@ export async function connectAndSearch(
           continue
         }
 
-        // Extract and save attachments — hardcoded download dir
-        const downloadDir = 'D:\\laojiu\\工资导入'
+        // Extract and save attachments to the fixed product import folder.
+        const downloadDir = importFolder
         const attachmentResult = await processAttachmentsFromParsed({
           accountId: account.id!,
           messageUid: uid,

@@ -9,6 +9,7 @@ import { getPeriodOutputPath } from '../../config/paths'
 import type {
   MonthlyPayrollArchiveResult,
   MonthlyPayrollDataSourceMode,
+  MonthlyPayrollExchangeStatus,
   MonthlyPayrollPushStatus,
   MonthlyPayrollPushTarget,
   MonthlyPayrollReportResult,
@@ -40,6 +41,11 @@ export type MonthlyPayrollRunInput = Omit<
   | 'insurancePushedAt'
   | 'voucherPushedAt'
   | 'salaryPushedAt'
+  | 'exchangePackageId'
+  | 'exchangePackageStatus'
+  | 'exchangeReceiptId'
+  | 'exchangeReceiptAt'
+  | 'exchangeReceiptPath'
 >
 
 const monthCloseAdjustmentWorksheetNames = ['在职工资', '退休工资', '其他工资'] as const
@@ -154,6 +160,8 @@ export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
       is_outdated, outdated_at, outdated_reason,
       insurance_push_status, voucher_push_status, salary_push_status,
       insurance_pushed_at, voucher_pushed_at, salary_pushed_at,
+      exchange_package_id, exchange_package_status, exchange_receipt_id,
+      exchange_receipt_at, exchange_receipt_path,
       created_at
      FROM monthly_payroll_runs ORDER BY created_at DESC`
   )
@@ -781,8 +789,25 @@ function mapRunRow(row: Record<string, unknown>): MonthlyPayrollRun {
     insurancePushedAt: (row.insurance_pushed_at as string) ?? null,
     voucherPushedAt: (row.voucher_pushed_at as string) ?? null,
     salaryPushedAt: (row.salary_pushed_at as string) ?? null,
+    exchangePackageId: (row.exchange_package_id as string) ?? null,
+    exchangePackageStatus: normalizeMonthlyPayrollExchangeStatus(row.exchange_package_status),
+    exchangeReceiptId: (row.exchange_receipt_id as string) ?? null,
+    exchangeReceiptAt: (row.exchange_receipt_at as string) ?? null,
+    exchangeReceiptPath: (row.exchange_receipt_path as string) ?? null,
     createdAt: String(row.created_at ?? '')
   }
+}
+
+function normalizeMonthlyPayrollExchangeStatus(value: unknown): MonthlyPayrollExchangeStatus | null {
+  if (
+    value === 'package-built' ||
+    value === 'copied-to-media' ||
+    value === 'receipt-received' ||
+    value === 'receipt-error'
+  ) {
+    return value
+  }
+  return null
 }
 
 function normalizeMonthlyPayrollPushStatus(value: unknown): MonthlyPayrollPushStatus {

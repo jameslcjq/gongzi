@@ -1,26 +1,33 @@
 type AutoVoucherEntryScriptOptions = {
   autoStart?: boolean
+  autoStartTargetOnly?: boolean
   showPageButton?: boolean
+  requireRows?: boolean
+  maxWaitTime?: number
 }
 
 export function buildAutoVoucherEntryScript(
   options: AutoVoucherEntryScriptOptions = {}
 ): string {
   const autoStart = options.autoStart ?? false
+  const autoStartTargetOnly = options.autoStartTargetOnly ?? false
   const showPageButton = options.showPageButton ?? true
+  const requireRows = options.requireRows ?? false
+  const maxWaitTime = Number.isFinite(options.maxWaitTime) ? Number(options.maxWaitTime) : 30000
 
   return `
 ;(function installAutoVoucherEntry() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
+  var AUTO_START_TARGET_ONLY = ${autoStartTargetOnly ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260529-auto-voucher-entry-exclude-salary-payment'
+  var REQUIRE_ROWS = ${requireRows ? 'true' : 'false'}
+  var VERSION = '20260607-auto-voucher-entry-frame-target'
   var BTN_ID = 'auto-voucher-entry-btn'
   var STATUS_ID = 'auto-voucher-entry-status'
   var STORE_KEY = 'autoVoucherEntryState'
 
-  if (window.__autoVoucherEntry && window.__autoVoucherEntry.version === VERSION) {
+  if (window.__autoVoucherEntry && window.__autoVoucherEntry.version === VERSION && !AUTO_START) {
     window.__autoVoucherEntry.injectButton()
-    if (AUTO_START) return window.__autoVoucherEntry.startBatchProcess(0)
     return { ok: true, message: 'installed' }
   }
 
@@ -30,11 +37,14 @@ export function buildAutoVoucherEntryScript(
   }
 
   var DEFAULT_CONFIG = {
-    maxWaitTime: 30000,
+    maxWaitTime: ${maxWaitTime},
     saveWaitTime: 300000,
     listAmountField: 'pay_rmn_amt',
+    listAmountFields: ['pay_rmn_amt', 'pay_amt', 'pay_apply_amt', 'pay_app_amt', 'amount', 'amt'],
     subjectField: 'dep_bgt_eco_code_name',
+    subjectFields: ['dep_bgt_eco_code_name', 'dep_bgt_eco_name', 'dep_bgt_eco_code', 'depBgtEcoCodeName'],
     availableAmountField: 'pay_available_amt',
+    availableAmountFields: ['pay_available_amt', 'available_amt', 'canuse_amt', 'useable_amt', 'balance_amt', 'remain_amt'],
     govPurchaseText: '不是政府采购',
     govPurchaseFields: ['is_gov_pur_pay', 'gov_pur_code_name', 'gov_pur_pay', 'gov_pur']
   }
@@ -273,6 +283,15 @@ export function buildAutoVoucherEntryScript(
     return null
   }
 
+  // 列表页用页内 iframe 直达打开时，往往不会像走门户菜单那样自动触发查询，导致网格停在"暂无数据"。
+  // 列表为空时主动点一次“查询”（精确匹配，避开“查询规则/查询条件”），把刚导入的数据 load 出来。
+  function triggerListQuery(doc) {
+    if (!doc) return false
+    var btn = findExactButton(doc, '查询') || findExactButton(doc, '刷新')
+    if (btn && clickElement(btn)) return true
+    return false
+  }
+
   function isSalaryPaymentPage(doc) {
     if (!doc) return false
     try {
@@ -301,6 +320,79 @@ export function buildAutoVoucherEntryScript(
     return compactText(titleNode ? titleNode.getAttribute('title') : (cell.innerText || cell.textContent || ''))
   }
 
+  function fieldExists(doc, field) {
+    if (!doc || !field) return false
+    return !!doc.querySelector('[field="' + String(field).replace(/"/g, '\\\\"') + '"]')
+  }
+
+  function asArray(value, fallback) {
+    if (Array.isArray(value) && value.length) return value
+    return fallback || []
+  }
+
+  function findFieldByHeader(doc, candidates, labels) {
+    if (!doc) return ''
+    var fields = asArray(candidates, [])
+    for (var i = 0; i < fields.length; i++) {
+      if (fieldExists(doc, fields[i])) return fields[i]
+    }
+
+    var wantedLabels = asArray(labels, []).map(normalizeText).filter(Boolean)
+    var headers = Array.prototype.slice.call(
+      doc.querySelectorAll('.datagrid-header [field], .datagrid-htable [field], .datagrid-view [field]')
+    )
+    for (var h = 0; h < headers.length; h++) {
+      var node = headers[h]
+      var field = node.getAttribute('field')
+      if (!field || field === 'ck') continue
+      var text = normalizeText(node.innerText || node.textContent || node.getAttribute('title') || '')
+      if (!text) continue
+      for (var l = 0; l < wantedLabels.length; l++) {
+        if (text.indexOf(wantedLabels[l]) >= 0 || wantedLabels[l].indexOf(text) >= 0) {
+          return field
+        }
+      }
+    }
+    return ''
+  }
+
+  function resolveSubjectField(doc) {
+    return findFieldByHeader(
+      doc,
+      asArray(CONFIG.subjectFields, [CONFIG.subjectField]),
+      ['部门支出经济分类', '支出经济分类', '部门经济分类']
+    ) || CONFIG.subjectField
+  }
+
+  function resolveListAmountField(doc) {
+    return findFieldByHeader(
+      doc,
+      asArray(CONFIG.listAmountFields, [CONFIG.listAmountField]),
+      ['金额', '支付金额', '申请金额']
+    ) || CONFIG.listAmountField
+  }
+
+  function resolveAvailableAmountField(doc) {
+    return findFieldByHeader(
+      doc,
+      asArray(CONFIG.availableAmountFields, [CONFIG.availableAmountField]),
+      ['可用金额', '可用额度', '可用余额', '余额']
+    ) || CONFIG.availableAmountField
+  }
+
+  function isDirectPayExternalListDoc(doc) {
+    if (!doc) return false
+    try {
+      var href = doc.location && doc.location.href ? doc.location.href : ''
+      if (href.indexOf('/pay-voucher-web/record/templateslist.html') >= 0) return true
+    } catch (error) {}
+    var text = normalizeText(doc.body ? (doc.body.innerText || doc.body.textContent || '') : '')
+    return text.indexOf('导入批次号') >= 0 &&
+      text.indexOf('预算单位') >= 0 &&
+      text.indexOf('预算项目') >= 0 &&
+      !!findExactButton(doc, '生成')
+  }
+
   function rowIndex(row, fallback) {
     if (!row) return fallback
     var attr = row.getAttribute('datagrid-row-index')
@@ -314,7 +406,7 @@ export function buildAutoVoucherEntryScript(
     return fallback
   }
 
-  function getListRowPairs(doc) {
+  function getListRowPairs(doc, subjectField) {
     if (!doc) return []
     var leftRows = Array.prototype.slice.call(
       doc.querySelectorAll('.datagrid-view1 .datagrid-btable tr[id*="grid_datagrid-row"]:not([id*="quota-grid"]):not([id*="import-grid"])')
@@ -324,7 +416,7 @@ export function buildAutoVoucherEntryScript(
     var rightRows = Array.prototype.slice.call(
       doc.querySelectorAll('.datagrid-view2 .datagrid-btable tr[id*="grid_datagrid-row"]:not([id*="quota-grid"]):not([id*="import-grid"])')
     ).filter(function (row) {
-      return isVisible(row) && row.querySelector('[field="' + CONFIG.subjectField + '"]')
+      return isVisible(row) && row.querySelector('[field="' + String(subjectField || CONFIG.subjectField).replace(/"/g, '\\\\"') + '"]')
     })
     var rightByIndex = {}
     rightRows.forEach(function (row, i) {
@@ -343,12 +435,12 @@ export function buildAutoVoucherEntryScript(
     })
   }
 
-  function getQuotaRowPairs(doc) {
+  function getQuotaRowPairs(doc, subjectField) {
     if (!doc) return []
     var rightRows = Array.prototype.slice.call(
       doc.querySelectorAll('tr[id*="quota-grid_datagrid-row-r2-2"], tr[id*="quota-grid"][id*="-r2-2"], .datagrid-view2 .datagrid-btable tr[id*="quota-grid"]')
     ).filter(function (row) {
-      return isVisible(row) && row.querySelector('[field="' + CONFIG.subjectField + '"]')
+      return isVisible(row) && row.querySelector('[field="' + String(subjectField || CONFIG.subjectField).replace(/"/g, '\\\\"') + '"]')
     })
     var leftRows = Array.prototype.slice.call(
       doc.querySelectorAll('tr[id*="quota-grid_datagrid-row-r2-1"], tr[id*="quota-grid"][id*="-r2-1"], .datagrid-view1 .datagrid-btable tr[id*="quota-grid"]')
@@ -370,36 +462,53 @@ export function buildAutoVoucherEntryScript(
     })
   }
 
-  function getListSignature(pairs) {
+  function getListSignature(pairs, subjectField, amountField) {
     return pairs.slice(0, 6).map(function (pair) {
       return [
-        getCellText(pair.rightRow, CONFIG.subjectField),
-        getCellText(pair.rightRow, CONFIG.listAmountField)
+        getCellText(pair.rightRow, subjectField || CONFIG.subjectField),
+        getCellText(pair.rightRow, amountField || CONFIG.listAmountField)
       ].join('|')
     }).join('||')
+  }
+
+  function getListPageFromDoc(doc) {
+    if (!doc) return null
+    if (isSalaryPaymentPage(doc)) return null
+    if (!doc.querySelector('.datagrid-view1')) return null
+    var generateBtn = findExactButton(doc, '生成')
+    if (!generateBtn) return null
+    var returnBtn = findButton(doc, '返回')
+    var subjectField = resolveSubjectField(doc)
+    var amountField = resolveListAmountField(doc)
+    var quotaPairs = getQuotaRowPairs(doc, subjectField)
+    if (returnBtn || quotaPairs.length > 0) return null
+    if (!fieldExists(doc, subjectField)) {
+      return null
+    }
+    if (!fieldExists(doc, amountField) && !isDirectPayExternalListDoc(doc)) {
+      return null
+    }
+    return {
+      doc: doc,
+      pairs: getListRowPairs(doc, subjectField),
+      generateBtn: generateBtn,
+      subjectField: subjectField,
+      amountField: amountField
+    }
+  }
+
+  function getCurrentFrameListPage() {
+    if (!isDocVisible(document)) return null
+    return getListPageFromDoc(document)
   }
 
   function getListPage() {
     var docs = getReachableDocs()
     var fallback = null
     for (var i = 0; i < docs.length; i++) {
-      var doc = docs[i]
-      if (isSalaryPaymentPage(doc)) continue
-      if (!doc.querySelector('.datagrid-view1')) continue
-      var generateBtn = findExactButton(doc, '生成')
-      if (!generateBtn) continue
-      var returnBtn = findButton(doc, '返回')
-      var quotaPairs = getQuotaRowPairs(doc)
-      if (returnBtn || quotaPairs.length > 0) continue
-      if (
-        !doc.querySelector('[field="' + CONFIG.subjectField + '"]') ||
-        !doc.querySelector('[field="' + CONFIG.listAmountField + '"]')
-      ) {
-        continue
-      }
-      var pairs = getListRowPairs(doc)
-      var page = { doc: doc, pairs: pairs, generateBtn: generateBtn }
-      if (pairs.length > 0) return page
+      var page = getListPageFromDoc(docs[i])
+      if (!page) continue
+      if (page.pairs.length > 0) return page
       if (!fallback) fallback = page
     }
     return fallback
@@ -408,10 +517,19 @@ export function buildAutoVoucherEntryScript(
   function getMatchPage() {
     var docs = getReachableDocs()
     for (var i = 0; i < docs.length; i++) {
-      var quotaPairs = getQuotaRowPairs(docs[i])
+      var subjectField = resolveSubjectField(docs[i])
+      var quotaPairs = getQuotaRowPairs(docs[i], subjectField)
       if (!quotaPairs.length) continue
       var returnBtn = findButton(docs[i], '返回')
-      if (returnBtn) return { doc: docs[i], quotaPairs: quotaPairs, returnBtn: returnBtn }
+      if (returnBtn) {
+        return {
+          doc: docs[i],
+          quotaPairs: quotaPairs,
+          returnBtn: returnBtn,
+          subjectField: subjectField,
+          availableAmountField: resolveAvailableAmountField(docs[i])
+        }
+      }
     }
     return null
   }
@@ -434,11 +552,18 @@ export function buildAutoVoucherEntryScript(
     return false
   }
 
-  async function waitForListPage(maxWait) {
+  async function waitForListPage(maxWait, alreadyWorked) {
     status('等待直接支付列表页...')
     var start = Date.now()
     var lastLog = 0
     var emptySeenAt = 0
+    var lastQueryAt = 0
+    // 空列表的处理分两种情形：
+    // ① 已经录入/跳过过至少一条（alreadyWorked）后再遇到空列表 = 数据已全部处理完，快速返回空页面，
+    //    交上层凭 savedCount>0 判成功——这是“全做成功却被误报失败”的根因修复，绝不能再死等返回 null。
+    // ② 还没处理过就空（首次进列表）：直达 iframe 常不会自动查询，主动点“查询”load 数据，并多等一会儿
+    //    （require 模式 20s）；到点仍空再返回空页面，让上层报准确的“列表为空”，而不是误导性的“无法进入列表页”。
+    var emptyGrace = alreadyWorked ? 1200 : (REQUIRE_ROWS ? 20000 : 2500)
     while (Date.now() - start < (maxWait || CONFIG.maxWaitTime)) {
       var page = getListPage()
       if (page) {
@@ -452,7 +577,16 @@ export function buildAutoVoucherEntryScript(
           return fresh || page
         }
         if (!emptySeenAt) emptySeenAt = Date.now()
-        if (Date.now() - emptySeenAt > 2500) return page
+        // 仅“首次进列表就空”才主动点“查询”：先给自动加载 1.5s，仍空则点（节流，每 4s 一次）。
+        // 已处理过后的空表是正常清空，不再点查询、也不久等。
+        if (!alreadyWorked && Date.now() - emptySeenAt > 1500 && Date.now() - lastQueryAt > 4000) {
+          if (triggerListQuery(page.doc)) {
+            console.log('[auto-voucher-entry] 列表为空，已点击“查询”触发加载')
+          }
+          lastQueryAt = Date.now()
+        }
+        // 空表等待封顶：超过 emptyGrace 仍为空，返回空页面（交给上层判定，不再返回 null）。
+        if (Date.now() - emptySeenAt > emptyGrace) return page
       } else {
         emptySeenAt = 0
       }
@@ -489,7 +623,7 @@ export function buildAutoVoucherEntryScript(
     return null
   }
 
-  async function waitForListAfterSave(beforeSignature, beforeCount) {
+  async function waitForListAfterSave(beforeSignature, beforeCount, subjectField, amountField) {
     var start = Date.now()
     var firstListAt = 0
     var emptySeenAt = 0
@@ -512,7 +646,11 @@ export function buildAutoVoucherEntryScript(
           if (Date.now() - emptySeenAt > 2500) return page
         } else {
           emptySeenAt = 0
-          var signature = getListSignature(page.pairs)
+          var signature = getListSignature(
+            page.pairs,
+            page.subjectField || subjectField,
+            page.amountField || amountField
+          )
           if (signature !== beforeSignature || page.pairs.length !== beforeCount) {
             await sleep(400)
             return getListPage() || page
@@ -605,12 +743,23 @@ export function buildAutoVoucherEntryScript(
     try {
       status('开始自动录入，从 Index ' + currentIndex + ' 开始')
       while (true) {
-        var listPage = await waitForListPage()
+        // 已经保存/跳过过至少一条后，空列表 = 全部处理完，让 waitForListPage 快速返回空页面判成功，
+        // 不再因 require 模式死等超时返回 null 而把成功误报成失败。
+        var listPage = await waitForListPage(undefined, savedCount > 0 || skippedCount > 0)
         if (!listPage) throw new Error('无法进入直接支付列表页')
 
         var pairs = listPage.pairs
         if (pairs.length === 0 || currentIndex >= pairs.length) {
           getStore().removeItem(STORE_KEY)
+          if (REQUIRE_ROWS && savedCount === 0 && skippedCount === 0) {
+            status('自动录入停止：直接支付外部数据列表为空，未找到刚导入的保险数据。', 'err')
+            return {
+              ok: false,
+              message: '直接支付外部数据列表为空，未找到刚导入的保险数据。请确认导入日志或刷新直接支付外部数据页面后重试。',
+              savedCount: savedCount,
+              skippedCount: skippedCount
+            }
+          }
           status('处理完成。成功保存 ' + savedCount + ' 次，跳过 ' + skippedCount + ' 条。', 'ok')
           clearStatusLater(8000)
           return { ok: true, savedCount: savedCount, skippedCount: skippedCount }
@@ -619,14 +768,17 @@ export function buildAutoVoucherEntryScript(
         clearListChecks(listPage.doc)
         await sleep(220)
 
-        pairs = (getListPage() || listPage).pairs
+        listPage = getListPage() || listPage
+        pairs = listPage.pairs
+        var subjectField = listPage.subjectField || CONFIG.subjectField
+        var amountField = listPage.amountField || CONFIG.listAmountField
         var targetPair = pairs[currentIndex]
         if (!targetPair) {
           currentIndex = 0
           continue
         }
 
-        var targetSubject = getCellText(targetPair.rightRow, CONFIG.subjectField)
+        var targetSubject = getCellText(targetPair.rightRow, subjectField)
         if (!targetSubject) {
           skippedCount += 1
           currentIndex += 1
@@ -634,7 +786,7 @@ export function buildAutoVoucherEntryScript(
           continue
         }
 
-        var beforeSignature = getListSignature(pairs)
+        var beforeSignature = getListSignature(pairs, subjectField, amountField)
         var beforeCount = pairs.length
         var batchCount = 0
         var totalAmount = 0
@@ -643,17 +795,17 @@ export function buildAutoVoucherEntryScript(
         if (isRetrySingle) {
           var cb = targetPair.leftRow.querySelector('input[type="checkbox"]')
           if (cb && !cb.checked) clickElement(cb)
-          totalAmount = parseAmount(getCellText(targetPair.rightRow, CONFIG.listAmountField))
+          totalAmount = parseAmount(getCellText(targetPair.rightRow, amountField))
           batchCount = cb ? 1 : 0
         } else {
           for (var i = currentIndex; i < pairs.length; i++) {
             var pair = pairs[i]
-            var subject = getCellText(pair.rightRow, CONFIG.subjectField)
+            var subject = getCellText(pair.rightRow, subjectField)
             if (subject !== targetSubject) continue
             var checkbox = pair.leftRow.querySelector('input[type="checkbox"]')
             if (!checkbox) continue
             if (!checkbox.checked) clickElement(checkbox)
-            totalAmount += parseAmount(getCellText(pair.rightRow, CONFIG.listAmountField))
+            totalAmount += parseAmount(getCellText(pair.rightRow, amountField))
             batchCount += 1
             lastSelectedIndex = i
           }
@@ -689,10 +841,11 @@ export function buildAutoVoucherEntryScript(
         var availableAmount = 0
         for (var q = 0; q < matchPage.quotaPairs.length; q++) {
           var quotaPair = matchPage.quotaPairs[q]
-          var cellText = getCellText(quotaPair.rightRow, CONFIG.subjectField)
+          var matchSubjectField = matchPage.subjectField || subjectField
+          var cellText = getCellText(quotaPair.rightRow, matchSubjectField)
           if (cellText && cellText.indexOf(targetCode) === 0) {
             matchedPair = quotaPair
-            availableAmount = parseAmount(getCellText(quotaPair.rightRow, CONFIG.availableAmountField))
+            availableAmount = parseAmount(getCellText(quotaPair.rightRow, matchPage.availableAmountField || CONFIG.availableAmountField))
             break
           }
         }
@@ -734,11 +887,15 @@ export function buildAutoVoucherEntryScript(
         status('保存：' + targetSubject + '\\n金额：' + formatAmount(totalAmount))
         clickElement(saveBtn)
 
-        var refreshedList = await waitForListAfterSave(beforeSignature, beforeCount)
+        var refreshedList = await waitForListAfterSave(beforeSignature, beforeCount, subjectField, amountField)
         if (!refreshedList) throw new Error('保存后没有回到列表页')
 
         savedCount += 1
-        var afterSignature = getListSignature(refreshedList.pairs)
+        var afterSignature = getListSignature(
+          refreshedList.pairs,
+          refreshedList.subjectField || subjectField,
+          refreshedList.amountField || amountField
+        )
         var afterCount = refreshedList.pairs.length
         currentIndex =
           afterSignature === beforeSignature && afterCount === beforeCount
@@ -755,6 +912,37 @@ export function buildAutoVoucherEntryScript(
     } finally {
       running = false
       setButtonRunning(false)
+    }
+  }
+
+  async function startBatchProcessIfCurrentFrameTarget() {
+    var startedAt = Date.now()
+    // 本 frame 就是直接支付列表页(templateslist) 时，多等一会儿让 easyui 数据表格初始化完成：
+    // iframe 直达时 URL 很快就绪、但表格(.datagrid-view1+“生成”)要等 JS/AJAX 再渲染，
+    // 旧的 10s 窗口会在表格就绪前就放弃 → “命中 0 个直接支付列表页”。
+    // 其它 frame（门户/凭证录入/about:blank）不可能是目标，快速跳过，避免拖慢 drainAllFrames。
+    var isTemplatesFrame = false
+    try {
+      isTemplatesFrame = /pay-voucher-web\\/record\\/templateslist/i.test(String(location && location.href ? location.href : ''))
+    } catch (error) {}
+    var targetWait = isTemplatesFrame ? 45000 : Math.min(8000, CONFIG.maxWaitTime || 8000)
+    if (isTemplatesFrame) {
+      console.log('[auto-voucher-entry] 本 frame 是直接支付列表页，等待表格初始化（最多 ' + Math.round(targetWait / 1000) + 's）...')
+    }
+    while (Date.now() - startedAt < targetWait) {
+      if (getCurrentFrameListPage()) {
+        return startBatchProcess(0)
+      }
+      await sleep(500)
+    }
+    if (isTemplatesFrame) {
+      console.log('[auto-voucher-entry] 直接支付列表页表格在 ' + Math.round((Date.now() - startedAt) / 1000) + 's 内仍未就绪，跳过自启动')
+    }
+    return {
+      ok: false,
+      skipped: true,
+      message: '非直接支付外部数据列表页，跳过自启动',
+      frameHref: String(location && location.href ? location.href : '')
     }
   }
 
@@ -776,14 +964,8 @@ export function buildAutoVoucherEntryScript(
         if (existing && existing.parentNode) existing.parentNode.removeChild(existing)
         continue
       }
-      var isTargetPage =
-        !isSalaryPaymentPage(doc) &&
-        doc.querySelector('.datagrid-view1') &&
-        findExactButton(doc, '生成') &&
-        !findButton(doc, '返回') &&
-        !getQuotaRowPairs(doc).length &&
-        doc.querySelector('[field="' + CONFIG.subjectField + '"]') &&
-        doc.querySelector('[field="' + CONFIG.listAmountField + '"]')
+      var page = getListPageFromDoc(doc)
+      var isTargetPage = !!page
 
       if (!isTargetPage) {
         if (existing && existing.parentNode) existing.parentNode.removeChild(existing)
@@ -847,7 +1029,10 @@ export function buildAutoVoucherEntryScript(
   window.__autoVoucherEntryTimer = setInterval(injectButton, 1500)
   injectButton()
 
-  if (AUTO_START) return startBatchProcess(0)
+  if (AUTO_START) {
+    if (AUTO_START_TARGET_ONLY) return startBatchProcessIfCurrentFrameTarget()
+    return startBatchProcess(0)
+  }
   return { ok: true, message: 'installed' }
 })()
 `

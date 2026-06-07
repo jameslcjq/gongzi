@@ -9,8 +9,8 @@ type SalaryExportScriptOptions = {
   menuid?: string
   /** 月份；为空则用当前月 */
   month?: string
-  /** 要遍历的工资类别列表；单位 + 批次都在脚本运行时自动发现 */
-  saltypes: SalaryExportSaltypeInput[]
+  /** 兼容旧配置；为空时脚本运行时自动探测工资类别 */
+  saltypes?: SalaryExportSaltypeInput[]
   /** 单位过滤名：只导出 agency_name 包含这个字符串的单位；为空则全导 */
   filterUnitName?: string
   /** 预算单位编码：多单位账号下优先用编码精确定位单位 */
@@ -32,7 +32,7 @@ type SalaryExportScriptOptions = {
 export function buildSalaryExportScript(options: SalaryExportScriptOptions): string {
   const menuid = options.menuid ?? '1fb8071c09c44932a99439096316db28'
   const month = options.month ?? ''
-  const saltypes = options.saltypes
+  const saltypes = options.saltypes ?? []
   const filterUnitName = options.filterUnitName ?? ''
   const filterUnitCode = options.filterUnitCode ?? ''
 
@@ -46,6 +46,24 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
 
   const EMPTY_XLS_THRESHOLD = 4096
   const STEP_DELAY = 350
+  const DEFAULT_SALTYPE_CANDIDATES = [
+    { saltype_id: '1', saltype_name: '001行政' },
+    { saltype_id: '2', saltype_name: '002事业' },
+    { saltype_id: '3', saltype_name: '003行政离休' },
+    { saltype_id: '4', saltype_name: '004行政退休' },
+    { saltype_id: '5', saltype_name: '006事业退休' },
+    { saltype_id: '6', saltype_name: '005事业离休' },
+    { saltype_id: '7', saltype_name: '007其他' },
+    { saltype_id: '8', saltype_name: '008其他' },
+    { saltype_id: '9', saltype_name: '009其他' },
+    { saltype_id: '10', saltype_name: '010其他' }
+  ]
+  for (let autoId = 11; autoId <= 30; autoId++) {
+    DEFAULT_SALTYPE_CANDIDATES.push({
+      saltype_id: String(autoId),
+      saltype_name: String(autoId).padStart(3, '0') + '工资类别'
+    })
+  }
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
   function normalizeCode(value) { return String(value || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase() }
@@ -194,6 +212,34 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     }
   }
 
+  async function discoverSaltypes(agencyBatches) {
+    if (Array.isArray(SALTYPES) && SALTYPES.length) {
+      return SALTYPES.filter(function (s) { return s && s.saltype_id && s.saltype_name })
+    }
+
+    status('🔍 自动探测工资类别...')
+    const found = []
+    for (let i = 0; i < DEFAULT_SALTYPE_CANDIDATES.length; i++) {
+      const candidate = DEFAULT_SALTYPE_CANDIDATES[i]
+      let ok = false
+      for (let ai = 0; ai < agencyBatches.length && !ok; ai++) {
+        const item = agencyBatches[ai]
+        if (!item || !item.agency || !item.batches || !item.batches.length) continue
+        for (let bi = 0; bi < item.batches.length && !ok; bi++) {
+          const r = await loadItemIds(
+            item.agency.agency_id,
+            candidate.saltype_id,
+            item.batches[bi].salbatch_id
+          )
+          ok = !!r.ok
+          await sleep(80)
+        }
+      }
+      if (ok) found.push(candidate)
+    }
+    return found
+  }
+
   // -------------------------------------------------------------------------
   // 4) 单组合导出
   // -------------------------------------------------------------------------
@@ -257,10 +303,6 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
   // 主流程
   // -------------------------------------------------------------------------
   try {
-    if (!Array.isArray(SALTYPES) || !SALTYPES.length) {
-      throw new Error('未配置任何工资类别，请在"系统设置 → 单位信息 → 一体化工资导出"里维护')
-    }
-
     const MONTH = FORCE_MONTH || String(new Date().getMonth() + 1)
 
     status('🔍 发现单位列表...')
@@ -321,17 +363,22 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
       }
     }
 
+    const saltypes = await discoverSaltypes(agencyBatches)
+    if (!saltypes.length) {
+      throw new Error('未能自动发现可导出的工资类别，请确认当前账号已进入工资模块且该单位有工资类别配置')
+    }
+
     // 算总组合数：考虑每个 saltype 的 onlyFirstBatch
     let totalCombos = 0
     for (let ai = 0; ai < agencyBatches.length; ai++) {
       const batchCount = agencyBatches[ai].batches.length
-      for (let si = 0; si < SALTYPES.length; si++) {
-        const limit = SALTYPES[si].onlyFirstBatch ? Math.min(1, batchCount) : batchCount
+      for (let si = 0; si < saltypes.length; si++) {
+        const limit = saltypes[si].onlyFirstBatch ? Math.min(1, batchCount) : batchCount
         totalCombos += limit
       }
     }
     status(
-      '📦 ' + agencies.length + ' 单位 × ' + SALTYPES.length + ' 类别 = ' + totalCombos + ' 个组合\\n月份：' + MONTH
+      '📦 ' + agencies.length + ' 单位 × ' + saltypes.length + ' 类别 = ' + totalCombos + ' 个组合\\n月份：' + MONTH
     )
     await sleep(700)
 
@@ -353,8 +400,8 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
       }
       const firstBatchId = ab.batches[0].salbatch_id
 
-      for (let si = 0; si < SALTYPES.length; si++) {
-        const st = SALTYPES[si]
+      for (let si = 0; si < saltypes.length; si++) {
+        const st = saltypes[si]
         const batchLimit = st.onlyFirstBatch ? Math.min(1, ab.batches.length) : ab.batches.length
         for (let bi = 0; bi < batchLimit; bi++) {
           const bt = ab.batches[bi]

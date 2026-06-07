@@ -24,6 +24,12 @@
   CreateDirectory "D:\laojiu\工资导入\imported"
   CreateDirectory "D:\laojiu\工资导入\failed"
   CreateDirectory "D:\laojiu\工资导入\templates"
+  CreateDirectory "D:\laojiu\交换包\工资系统\inbox"
+  CreateDirectory "D:\laojiu\交换包\工资系统\imported"
+  CreateDirectory "D:\laojiu\交换包\工资系统\failed"
+  CreateDirectory "D:\laojiu\交换包\工资系统\quarantine"
+  CreateDirectory "D:\laojiu\交换包\工资系统\outbox"
+  CreateDirectory "D:\laojiu\交换包\工资系统\temp"
   CreateShortcut "$DESKTOP\工资导入.lnk" "D:\laojiu\工资导入"
   CreateShortcut "$DESKTOP\工资数据.lnk" "D:\laojiu\gzdata\工资数据"
 !macroend
