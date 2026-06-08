@@ -433,6 +433,7 @@ function classifyMonthlyPayrollFile(filePath: string): MonthlyPayrollFileKind | 
     if (looksLikeSocialSecurityWorkbook(workbook)) return 'social'
     if (looksLikeTaxWorkbook(workbook)) return 'tax'
     if (looksLikeIntegratedSalaryDetailWorkbook(workbook)) return undefined
+    return classifyMonthlyPayrollFileByName(filePath, { allowSalaryWorkbookName: false })
   }
   return classifyMonthlyPayrollFileByName(filePath)
 }
@@ -450,11 +451,14 @@ function readWorkbookSample(filePath: string): XLSX.WorkBook | undefined {
   }
 }
 
-function classifyMonthlyPayrollFileByName(filePath: string): MonthlyPayrollFileKind | undefined {
+function classifyMonthlyPayrollFileByName(
+  filePath: string,
+  options: { allowSalaryWorkbookName?: boolean } = {}
+): MonthlyPayrollFileKind | undefined {
   const name = normalizedFileBaseName(filePath)
   if (looksLikeSocialSecurityWorkbookName(name)) return 'social'
   if (looksLikeTaxWorkbookName(name)) return 'tax'
-  if (looksLikeSalaryWorkbookName(name)) return 'salary'
+  if (options.allowSalaryWorkbookName !== false && looksLikeSalaryWorkbookName(name)) return 'salary'
   return undefined
 }
 

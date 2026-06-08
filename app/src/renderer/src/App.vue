@@ -535,9 +535,11 @@ async function handleImportWatcherNotifications(next: ImportWatcherStatus) {
     .forEach((log) => {
       seenImportLogKeys.add(getImportLogKey(log))
       ElMessage({
-        type: log.ok ? 'success' : 'error',
+        type: log.ok ? (log.importedRows > 0 ? 'success' : 'info') : 'error',
         message: log.ok
-          ? `导入成功：${log.fileName}，${log.importedRows} 行`
+          ? log.importedRows > 0
+            ? `导入成功：${log.fileName}，${log.importedRows} 行`
+            : `${log.fileName}：${log.message || '已处理，但没有导入新的数据行'}`
           : `导入失败：${log.fileName}：${log.message}`,
         duration: log.ok ? 3500 : 7000,
         showClose: true
