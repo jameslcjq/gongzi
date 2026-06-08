@@ -449,6 +449,7 @@ async function buildDevicePayload() {
 
   return {
     device_id: identity.deviceId,
+    device_aliases: identity.deviceAliases?.slice(0, 12) || [],
     device_name: `${os.hostname()} / ${appName}`.slice(0, 180),
     app_version: appVersion,
     hardware: identity.hardware.slice(0, 240)

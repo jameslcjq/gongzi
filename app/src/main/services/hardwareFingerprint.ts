@@ -19,9 +19,15 @@ interface HardwareField {
   value: string
 }
 
+interface DeviceIdCandidate {
+  label: string
+  values: string[]
+}
+
 export interface HardwareIdentity {
   deviceId: string
   hardware: string
+  deviceAliases?: string[]
 }
 
 export function normalizeHardwareValue(value: unknown): string {
@@ -40,9 +46,24 @@ export function makeDeviceId(values: string[]): string {
   return hashHex(payload)
 }
 
+function makeCandidateDeviceId(candidate: DeviceIdCandidate): string {
+  return makeDeviceId([candidate.label, ...candidate.values])
+}
+
+function uniqueDeviceIds(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
 function addField(fields: HardwareField[], label: string, value: unknown): void {
   const normalized = normalizeHardwareValue(value)
   if (normalized) fields.push({ label, value: normalized })
+}
+
+function addCandidate(candidates: DeviceIdCandidate[], label: string, values: unknown[]): void {
+  const normalizedValues = values.map(normalizeHardwareValue).filter(Boolean)
+  if (normalizedValues.length === values.length && normalizedValues.length > 0) {
+    candidates.push({ label, values: normalizedValues })
+  }
 }
 
 export function summarizeHardware(fields: HardwareField[], platform = process.platform): string {
@@ -85,6 +106,16 @@ export function collectWindowsHardwareFields(raw: any): HardwareField[] {
   return fields
 }
 
+export function collectWindowsDeviceIdCandidates(raw: any): DeviceIdCandidate[] {
+  const candidates: DeviceIdCandidate[] = []
+  addCandidate(candidates, 'win:asset', [raw?.csProduct?.IdentifyingNumber])
+  addCandidate(candidates, 'win:bios', [raw?.bios?.SerialNumber])
+  addCandidate(candidates, 'win:uuid', [raw?.csProduct?.UUID])
+  addCandidate(candidates, 'win:board', [raw?.baseBoard?.SerialNumber])
+  addCandidate(candidates, 'win:board-cpu', [raw?.baseBoard?.SerialNumber, raw?.cpu?.ProcessorId])
+  return candidates
+}
+
 function collectFallbackHardwareFields(): HardwareField[] {
   const fields: HardwareField[] = []
   addField(fields, 'host', os.hostname())
@@ -92,6 +123,28 @@ function collectFallbackHardwareFields(): HardwareField[] {
   addField(fields, 'arch', process.arch)
   addField(fields, 'release', os.release())
   return fields
+}
+
+function buildIdentityFromWindowsHardware(raw: any): HardwareIdentity | null {
+  const fields = collectWindowsHardwareFields(raw)
+  const candidates = collectWindowsDeviceIdCandidates(raw)
+  if (candidates.length === 0) return null
+
+  const primaryDeviceId = makeCandidateDeviceId(candidates[0])
+  const legacyFullHardwareId = fields.length > 0 ? makeDeviceId(fields.map((field) => field.value)) : ''
+  const fallbackFields = collectFallbackHardwareFields()
+  const legacyFallbackId = makeDeviceId(fallbackFields.map((field) => field.value))
+  const deviceAliases = uniqueDeviceIds([
+    legacyFullHardwareId,
+    legacyFallbackId,
+    ...candidates.slice(1).map(makeCandidateDeviceId)
+  ]).filter((deviceId) => deviceId !== primaryDeviceId)
+
+  return {
+    deviceId: primaryDeviceId,
+    hardware: summarizeHardware(fields),
+    deviceAliases
+  }
 }
 
 function getTestIdentityOverride(): HardwareIdentity | null {
@@ -111,13 +164,8 @@ export async function getHardwareIdentity(): Promise<HardwareIdentity> {
   try {
     if (process.platform === 'win32') {
       const raw = await readWindowsHardware()
-      const fields = collectWindowsHardwareFields(raw)
-      if (fields.length > 0) {
-        return {
-          deviceId: makeDeviceId(fields.map((field) => field.value)),
-          hardware: summarizeHardware(fields)
-        }
-      }
+      const identity = buildIdentityFromWindowsHardware(raw)
+      if (identity) return identity
     }
   } catch (error) {
     console.warn('[License] 读取硬件信息失败，使用稳定系统信息降级生成设备指纹:', error)
