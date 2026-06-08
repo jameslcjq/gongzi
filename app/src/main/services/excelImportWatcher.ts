@@ -328,9 +328,7 @@ function detectMonthlyPayrollFiles(path: string): MonthlyPayrollDetectedFiles {
     filePath,
     kind: classifyMonthlyPayrollFile(filePath)
   }))
-  const salary =
-    pickLatestFile(classified.filter((file) => file.kind === 'salary').map((file) => file.filePath)) ??
-    pickFallbackSalaryWorkbook(classified)
+  const salary = pickLatestFile(classified.filter((file) => file.kind === 'salary').map((file) => file.filePath))
   const socialSecurity = pickLatestFile(classified.filter((file) => file.kind === 'social').map((file) => file.filePath))
   const tax = pickLatestFile(classified.filter((file) => file.kind === 'tax').map((file) => file.filePath))
 
@@ -435,9 +433,17 @@ function classifyMonthlyPayrollFile(filePath: string): MonthlyPayrollFileKind | 
     if (looksLikeSocialSecurityWorkbook(workbook)) return 'social'
     if (looksLikeTaxWorkbook(workbook)) return 'tax'
     if (looksLikeIntegratedSalaryDetailWorkbook(workbook)) return undefined
-    return classifyMonthlyPayrollFileByName(filePath, { allowSalaryWorkbookName: false })
   }
-  return classifyMonthlyPayrollFileByName(filePath)
+  return undefined
+}
+
+function isDirectImportMonthlyPayrollWorkbook(filePath: string): boolean {
+  try {
+    const result = inferWorksheet(filePath)
+    return result.worksheet ? directImportMonthlyPayrollWorksheetNames.has(result.worksheet.name) : false
+  } catch {
+    return false
+  }
 }
 
 function readWorkbookSample(filePath: string): XLSX.WorkBook | undefined {
@@ -451,80 +457,6 @@ function readWorkbookSample(filePath: string): XLSX.WorkBook | undefined {
     console.warn(`[import-watcher] 无法读取工作簿用于识别：${basename(filePath)}，${message}`)
     return undefined
   }
-}
-
-function classifyMonthlyPayrollFileByName(
-  filePath: string,
-  options: { allowSalaryWorkbookName?: boolean } = {}
-): MonthlyPayrollFileKind | undefined {
-  const name = normalizedFileBaseName(filePath)
-  if (looksLikeSocialSecurityWorkbookName(name)) return 'social'
-  if (looksLikeTaxWorkbookName(name)) return 'tax'
-  if (options.allowSalaryWorkbookName !== false && looksLikeSalaryWorkbookName(name)) return 'salary'
-  return undefined
-}
-
-function pickFallbackSalaryWorkbook(
-  classified: Array<{ filePath: string; kind: MonthlyPayrollFileKind | undefined }>
-): string | undefined {
-  const candidates = classified
-    .filter((file) => file.kind === undefined)
-    .map((file) => file.filePath)
-    .filter((filePath) => isFallbackSalaryWorkbookCandidate(filePath))
-
-  if (candidates.length === 1) return candidates[0]
-
-  const namedCandidates = candidates.filter((filePath) => looksLikeSalaryWorkbookName(normalizedFileBaseName(filePath)))
-  return pickLatestFile(namedCandidates)
-}
-
-function isFallbackSalaryWorkbookCandidate(filePath: string): boolean {
-  const name = normalizedFileBaseName(filePath)
-  if (looksLikeSocialSecurityWorkbookName(name) || looksLikeTaxWorkbookName(name)) return false
-  if (isHousingAccountWorkbook(filePath) || isPersonalInsuranceDetailWorkbook(filePath)) return false
-  if (isPersonalTaxTemplateWorkbook(filePath) || isSocialBaseTemplateWorkbook(filePath)) return false
-  if (name.includes('人员经费') || name.includes('核对') || name.includes('模板')) return false
-  if (isDirectImportMonthlyPayrollWorkbook(filePath)) return false
-  const workbook = readWorkbookSample(filePath)
-  if (workbook && looksLikeIntegratedSalaryDetailWorkbook(workbook)) return false
-  return true
-}
-
-function isDirectImportMonthlyPayrollWorkbook(filePath: string): boolean {
-  try {
-    const result = inferWorksheet(filePath)
-    return result.worksheet ? directImportMonthlyPayrollWorksheetNames.has(result.worksheet.name) : false
-  } catch {
-    return false
-  }
-}
-
-function normalizedFileBaseName(filePath: string): string {
-  return normalizeHeader(basename(filePath, extname(filePath)))
-}
-
-function looksLikeSocialSecurityWorkbookName(name: string): boolean {
-  return name.includes('社保费未申报汇总信息') || name.includes('社保未申报汇总') || name.includes('未申报汇总信息')
-}
-
-function looksLikeTaxWorkbookName(name: string): boolean {
-  return (
-    name.includes('税款计算') ||
-    name.includes('个税计算') ||
-    name.includes('个人所得税') ||
-    name.includes('工资薪金所得')
-  )
-}
-
-function looksLikeSalaryWorkbookName(name: string): boolean {
-  if (looksLikeSocialSecurityWorkbookName(name) || looksLikeTaxWorkbookName(name)) return false
-  return (
-    name.includes('工资表') ||
-    name.includes('工资') ||
-    name.includes('薪资') ||
-    name.includes('薪酬') ||
-    /^\d*[\u4e00-\u9fa5]+(小学|中学|学校|幼儿园|中心|学院|职校)/.test(name)
-  )
 }
 
 function looksLikeSalaryWorkbook(workbook: XLSX.WorkBook): boolean {

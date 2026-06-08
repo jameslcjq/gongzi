@@ -262,7 +262,7 @@ export function inferWorksheet(filePath: string): WorksheetInferenceResult {
   const matches = getSignatureMatches(headerRow.headers, worksheets)
   if (matches.length === 1) return { worksheet: matches[0].worksheet }
   if (matches.length > 1) {
-    const salaryMatch = pickSalaryWorksheetMatch(fileName, aoa, headerRow, matches)
+    const salaryMatch = pickSalaryWorksheetMatch(aoa, headerRow, matches)
     if (salaryMatch) return { worksheet: salaryMatch }
     const best = pickUniqueBestMatch(matches)
     if (best) return { worksheet: best }
@@ -354,7 +354,6 @@ function pickUniqueBestMatch(matches: SignatureMatch[]): WorksheetMeta | undefin
 }
 
 function pickSalaryWorksheetMatch(
-  fileName: string,
   aoa: unknown[][],
   headerRow: { rowIndex: number; headers: string[] },
   matches: SignatureMatch[]
@@ -364,20 +363,15 @@ function pickSalaryWorksheetMatch(
   )
   if (salaryMatches.length < 2) return undefined
 
-  const targetName = inferSalaryWorksheetName(fileName, aoa, headerRow)
+  const targetName = inferSalaryWorksheetName(aoa, headerRow)
   if (!targetName) return undefined
   return salaryMatches.find((item) => item.worksheet.name === targetName)?.worksheet
 }
 
 function inferSalaryWorksheetName(
-  fileName: string,
   aoa: unknown[][],
   headerRow: { rowIndex: number; headers: string[] }
 ): string | undefined {
-  const fileKey = normalize(fileName)
-  if (/退休|离休/.test(fileKey)) return N.retiredSalary
-  if (/其他|遗属|遗补/.test(fileKey)) return N.otherSalary
-
   const typeIndex = headerRow.headers.findIndex((header) => header === normalize(F.salaryTypeName))
   if (typeIndex === -1) return undefined
 
@@ -385,7 +379,7 @@ function inferSalaryWorksheetName(
     const salaryTypeName = normalize(aoa[rowIndex]?.[typeIndex])
     if (!salaryTypeName) continue
     if (/退休|离休/.test(salaryTypeName)) return N.retiredSalary
-    if (/其他|遗属|遗补/.test(salaryTypeName)) return N.otherSalary
+    if (/其他|遗属|遗补/.test(salaryTypeName)) return N.retiredSalary
     return N.activeSalary
   }
 
