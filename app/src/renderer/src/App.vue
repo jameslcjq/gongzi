@@ -1045,7 +1045,7 @@ function getLicenseReasonText(status: LicenseStatus | null): string {
     seats_exceeded: '授权电脑数量已达上限',
     device_mismatch: '授权文件不属于当前电脑',
     unit_mismatch: '授权单位与本机单位不一致',
-    license_mismatch: '离线授权文件与当前授权码不一致',
+    license_mismatch: '离线授权文件异常，请从授权中心重新生成后导入',
     offline_invalid: '离线授权文件无效',
     offline_key_missing: '缺少离线授权公钥',
     clock_rollback: '检测到本机时间异常'

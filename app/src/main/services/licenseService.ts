@@ -603,11 +603,6 @@ async function validateOfflineLicenseEnvelope(envelope: OfflineLicenseFile, devi
     return offlineStatus('missing_product_or_license', '离线授权文件缺少当前产品或授权码', payload)
   }
 
-  const savedLicenseKey = getSavedLicenseKey()
-  if (savedLicenseKey && payloadLicenseKey !== savedLicenseKey) {
-    return offlineStatus('license_mismatch', '离线授权文件与当前授权码不一致', payload)
-  }
-
   if (!payload.expires_at || !/^\d{4}-\d{2}-\d{2}$/.test(payload.expires_at)) {
     return offlineStatus('offline_invalid', '离线授权文件缺少有效到期日期', payload)
   }
