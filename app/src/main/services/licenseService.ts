@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { getDataPath } from '../config/paths'
 import { getHardwareIdentity } from './hardwareFingerprint'
+import { readUnitSettings } from './unitSettings'
 
 export type LicenseSource = 'online' | 'offline' | 'cache'
 
@@ -91,6 +92,8 @@ export interface LicenseDeviceInfo {
 export interface LicenseMachineRequest extends LicenseDeviceInfo {
   format: 'yunbg.license-request'
   version: 1
+  customer_code?: string
+  customer_name?: string
   generated_at: string
 }
 
@@ -178,6 +181,21 @@ function normalizeLicenseKey(value: string): string {
 
 function normalizeCustomerName(value: string): string {
   return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 160)
+}
+
+function normalizeCustomerCode(value: string): string {
+  return String(value || '').trim().replace(/\s+/g, '').toUpperCase().slice(0, 120)
+}
+
+function normalizeCustomerNameKey(value: string): string {
+  return normalizeCustomerName(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function customerNamesMatch(left: string, right: string): boolean {
+  const a = normalizeCustomerNameKey(left)
+  const b = normalizeCustomerNameKey(right)
+  if (!a || !b) return true
+  return a === b || a.endsWith(b) || b.endsWith(a)
 }
 
 function normalizeApiBase(url: string): string {
@@ -539,7 +557,36 @@ function offlineStatus(
   }
 }
 
-function validateOfflineLicenseEnvelope(envelope: OfflineLicenseFile, deviceId: string): LicenseStatus {
+async function validateLicenseUnitBinding(status: LicenseStatus): Promise<LicenseStatus> {
+  if (!status.valid) return status
+  const settings = await readUnitSettings()
+  const localCode = normalizeCustomerCode(settings.unitImportCode)
+  const licensedCode = normalizeCustomerCode(status.customer_code || '')
+  const localName = normalizeCustomerName(settings.unitFullName)
+  const licensedName = normalizeCustomerName(status.customer_name || '')
+
+  if (localCode && licensedCode && localCode !== licensedCode) {
+    return {
+      ...status,
+      valid: false,
+      reason: 'unit_mismatch',
+      message: `授权单位编码与本机单位不一致：本机 ${settings.unitImportCode}，授权 ${status.customer_code}`
+    }
+  }
+
+  if (localName && licensedName && !customerNamesMatch(localName, licensedName)) {
+    return {
+      ...status,
+      valid: false,
+      reason: 'unit_mismatch',
+      message: `授权单位与本机单位不一致：本机 ${settings.unitFullName}，授权 ${status.customer_name}`
+    }
+  }
+
+  return status
+}
+
+async function validateOfflineLicenseEnvelope(envelope: OfflineLicenseFile, deviceId: string): Promise<LicenseStatus> {
   const payload = envelope?.payload
   if (!payload || typeof payload !== 'object') {
     return offlineStatus('offline_invalid', '离线授权文件格式不正确')
@@ -600,7 +647,7 @@ function validateOfflineLicenseEnvelope(envelope: OfflineLicenseFile, deviceId: 
     return offlineStatus('offline_invalid', '离线授权文件验签失败', payload)
   }
 
-  return {
+  return validateLicenseUnitBinding({
     valid: true,
     source: 'offline',
     product_key: payload.product_key,
@@ -616,7 +663,7 @@ function validateOfflineLicenseEnvelope(envelope: OfflineLicenseFile, deviceId: 
     cached: true,
     checkedAt: new Date().toISOString(),
     device_id: normalizedDeviceId
-  }
+  })
 }
 
 async function readOfflineLicenseStatus(): Promise<LicenseStatus | null> {
@@ -626,7 +673,7 @@ async function readOfflineLicenseStatus(): Promise<LicenseStatus | null> {
     const raw = fs.readFileSync(filePath, 'utf-8')
     const envelope = JSON.parse(raw) as OfflineLicenseFile
     const device = await buildDevicePayload()
-    return validateOfflineLicenseEnvelope(envelope, device.device_id)
+    return await validateOfflineLicenseEnvelope(envelope, device.device_id)
   } catch {
     return offlineStatus('offline_invalid', '离线授权文件读取失败')
   }
@@ -774,10 +821,13 @@ export async function getLicenseDeviceInfo(licenseKeyInput = ''): Promise<Licens
 
 export async function exportMachineRequest(licenseKeyInput = ''): Promise<LicenseMachineRequest> {
   const info = await getLicenseDeviceInfo(licenseKeyInput)
+  const unit = await readUnitSettings()
   return {
     format: 'yunbg.license-request',
     version: 1,
     ...info,
+    customer_code: normalizeCustomerCode(unit.unitImportCode) || undefined,
+    customer_name: normalizeCustomerName(unit.unitFullName) || undefined,
     generated_at: new Date().toISOString()
   }
 }
@@ -787,7 +837,7 @@ export async function importOfflineLicenseText(raw: string): Promise<LicenseStat
     const envelope = JSON.parse(raw) as OfflineLicenseFile
     saveEmbeddedOfflinePublicKey(envelope)
     const device = await buildDevicePayload()
-    const status = validateOfflineLicenseEnvelope(envelope, device.device_id)
+    const status = await validateOfflineLicenseEnvelope(envelope, device.device_id)
     if (!status.valid) return status
 
     fs.writeFileSync(getOfflineLicensePath(), JSON.stringify(envelope, null, 2), 'utf-8')
@@ -821,11 +871,11 @@ export async function claimTrialLicense(
     const result = await httpPost(`${apiBase}/v2/trial`, {
       product_key: PRODUCT_KEY,
       customer_name: customerName,
-      customer_code: normalizeCustomerName(customerCodeInput) || undefined,
+      customer_code: normalizeCustomerCode(customerCodeInput) || undefined,
       ...device
     })
     if (typeof result?.offline_public_key === 'string') saveOfflinePublicKey(result.offline_public_key)
-    const status = toLicenseStatus(result)
+    const status = await validateLicenseUnitBinding(toLicenseStatus(result))
     status.device_id = device.device_id
     if (status.valid && status.license_key) {
       writeCache(cacheFromStatus(status))
@@ -880,7 +930,7 @@ export async function verifyLicense(licenseKeyInput = ''): Promise<LicenseStatus
       ...device
     })
     if (typeof result?.offline_public_key === 'string') saveOfflinePublicKey(result.offline_public_key)
-    const status = toLicenseStatus(result)
+    const status = await validateLicenseUnitBinding(toLicenseStatus(result))
     status.device_id = device.device_id
     if (status.valid && !status.license_key) status.license_key = requestedLicenseKey
 
@@ -895,7 +945,7 @@ export async function verifyLicense(licenseKeyInput = ''): Promise<LicenseStatus
     }
 
     const cache = readCache()
-    if (cache) return statusFromCache(cache)
+    if (cache) return await validateLicenseUnitBinding(statusFromCache(cache))
     return {
       valid: false,
       product_key: PRODUCT_KEY,
@@ -916,7 +966,7 @@ export async function getCachedLicenseStatus(): Promise<LicenseStatus> {
   if (offline) return offline
 
   const cache = readCache()
-  if (cache) return statusFromCache(cache)
+  if (cache) return await validateLicenseUnitBinding(statusFromCache(cache))
 
   return {
     valid: false,

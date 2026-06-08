@@ -1044,6 +1044,7 @@ function getLicenseReasonText(status: LicenseStatus | null): string {
     network_error: '无法连接授权中心',
     seats_exceeded: '授权电脑数量已达上限',
     device_mismatch: '授权文件不属于当前电脑',
+    unit_mismatch: '授权单位与本机单位不一致',
     license_mismatch: '离线授权文件与当前授权码不一致',
     offline_invalid: '离线授权文件无效',
     offline_key_missing: '缺少离线授权公钥',
