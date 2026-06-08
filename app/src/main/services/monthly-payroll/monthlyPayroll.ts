@@ -511,7 +511,11 @@ export async function generateMonthlyPayrollReportView(
   const salary = rawSalary
     ? applyTaxToSalarySummary(rawSalary, taxByIdCard, { clearTaxWhenMissing: !tax })
     : undefined
-  const integratedActiveSummary = await applyTaxAndRecomputeIntegratedActive(taxByIdCard, { clearTaxWhenMissing: !tax })
+  const preserveIntegratedTaxField = !useIntegratedDataSource && hasActiveBackpayAdjustments(salary)
+  const integratedActiveSummary = await applyTaxAndRecomputeIntegratedActive(taxByIdCard, {
+    clearTaxWhenMissing: !tax,
+    preserveExistingTaxField: preserveIntegratedTaxField
+  })
   const integratedOtherPaySummary = await recomputeIntegratedOtherLikeWorksheet('其他工资')
   const integratedRetiredPaySummary = await recomputeIntegratedOtherLikeWorksheet('退休工资')
 
@@ -1530,6 +1534,13 @@ function buildBackpayRows(
   }
 
   return [...rowsById.values(), ...rowsWithoutId].filter(hasBackpayAdjustments)
+}
+
+function hasActiveBackpayAdjustments(salary: SalarySummary | undefined): boolean {
+  return Boolean(salary?.activePeople.some((person) =>
+    num(person.values['基本补发']) !== 0 ||
+      num(person.values['绩效补发']) !== 0
+  ))
 }
 
 function resolveHousingFund(salary: SalarySummary, integratedActiveHousingFund: number): number {
