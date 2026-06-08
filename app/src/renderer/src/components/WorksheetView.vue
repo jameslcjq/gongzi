@@ -762,7 +762,7 @@ function workflowDisabled(workflow: WorkflowDefinition) {
 
         <div v-else class="ws-empty">
           <strong>暂无数据</strong>
-          <span>点击右上角"+ 记录"录入第一条，或把 Excel 拖进 D:\\laojiu\\工资导入 自动入库</span>
+          <span>点击右上角"+ 记录"录入第一条，或把 Excel 拖进 D:\\laojiu\\gzdata\\工资导入 自动入库</span>
         </div>
         </div>
       </div>
