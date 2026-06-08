@@ -322,7 +322,7 @@ async function restoreRecycleBatch(row: RecycleBinBatch) {
 async function wipeAll() {
   try {
     await ElMessageBox.confirm(
-      '将清空业务工作表数据 + 导入批次，四张对照基础表会保留；本次清空会写入永久操作留痕。建议先建一份备份。确定继续吗？',
+      '将清空业务工作表数据、导入批次、工资报账记录和摆渡包记录，四张对照基础表会保留；本次清空会写入永久操作留痕。建议先建一份备份。确定继续吗？',
       '一键清空所有数据',
       {
         type: 'error',
@@ -357,7 +357,7 @@ async function wipeAll() {
   wiping.value = true
   try {
     const summary = await window.salaryApi.wipeAllData()
-    ElMessage.success(`已清空 ${summary.tables} 张业务表，共 ${summary.rows} 行，基础对照表已保留`)
+    ElMessage.success(`已清空 ${summary.tables} 张业务表/记录表，共 ${summary.rows} 行，基础对照表已保留`)
     unitSettingsLock.value = await window.salaryApi.getUnitSettingsLockState()
     emit('changed')
   } catch (error) {

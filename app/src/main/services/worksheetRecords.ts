@@ -236,6 +236,11 @@ export async function wipeAllWorksheetData(): Promise<{ tables: number; rows: nu
   const database = await getDatabase()
   const worksheets = readWorksheetMetadata()
   const retainedBaseTables = new Set(['岗位工资对照', '薪级工资对照', '乡镇工作年限对照', '学校对照表'])
+  const businessRecordTables = [
+    { tableName: 'monthly_payroll_runs', label: '工资报账记录' },
+    { tableName: 'monthly_payroll_source_versions', label: '工资报账源文件版本' },
+    { tableName: 'exchange_packages', label: '工资报账摆渡包记录' }
+  ]
 
   let totalRows = 0
   let clearedTables = 0
@@ -263,6 +268,21 @@ export async function wipeAllWorksheetData(): Promise<{ tables: number; rows: nu
         action: 'wipe'
       })
       await run(database, `DELETE FROM ${tableName}`)
+    }
+    for (const table of businessRecordTables) {
+      const totalRow = await get<{ total: number }>(
+        database,
+        `SELECT COUNT(*) AS total FROM ${quoteIdentifier(table.tableName)}`
+      )
+      totalRows += totalRow?.total ?? 0
+      clearedTables += 1
+      await logRowsBeforeDelete(database, {
+        batchId,
+        tableName: table.tableName,
+        worksheetName: table.label,
+        action: 'wipe'
+      })
+      await run(database, `DELETE FROM ${quoteIdentifier(table.tableName)}`)
     }
     await run(database, `DELETE FROM import_batch_rows`)
     await run(database, `DELETE FROM import_batches`)
