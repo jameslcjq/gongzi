@@ -1146,7 +1146,6 @@ export function registerAppIpc(): void {
             margins: { marginType: 'none' },
             landscape: request.landscape,
             scaleFactor: request.scaleFactor,
-            pageRanges: request.pageRanges,
             pageSize: request.pageSize
           },
           (success, failureReason) => {

@@ -85,6 +85,7 @@ const importingExchangePackage = ref(false)
 const printers = ref<PrinterSummary[]>([])
 const printSettings = ref<MonthlyPayrollPrintSettings>({
   reportPrinterName: '',
+  reportOffsetX: 3,
   voucherPrinterName: '',
   voucherOffsetX: 10,
   voucherOffsetY: 10,
@@ -124,6 +125,7 @@ function applyPrintOptions(nextPrinters: PrinterSummary[], settings: MonthlyPayr
   printers.value = nextPrinters
   printSettings.value = {
     reportPrinterName: settings.reportPrinterName || nextPrinters.find((item: PrinterSummary) => item.isDefault)?.name || '',
+    reportOffsetX: Number(settings.reportOffsetX ?? 3),
     voucherPrinterName: settings.voucherPrinterName || '',
     voucherOffsetX: Number(settings.voucherOffsetX ?? 0),
     voucherOffsetY: Number(settings.voucherOffsetY ?? 0)
@@ -1166,44 +1168,88 @@ const currentPrinterName = computed(() =>
 )
 
 function currentPrintRequest(printerName: string, sheetName = activeSheet.value?.name): PrintRequest {
-  const pageRanges = parsePrintPageRanges(printPageRangeText.value)
   if (isVoucherPrintSheet(sheetName)) {
     return {
       printerName,
       scaleFactor: 100,
-      pageRanges,
       pageSize: { width: 230000, height: 132000 }
     }
   }
-  return { printerName, pageRanges }
+  return { printerName }
 }
 
-function parsePrintPageRanges(value: string): PrintRequest['pageRanges'] {
+type PrintPageSelection =
+  | { ok: true; pages?: number[] }
+  | { ok: false; message: string }
+
+function parsePrintPageSelection(value: string, totalPages: number): PrintPageSelection {
   const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const ranges = trimmed.split(/[,，]/).flatMap((part) => {
+  if (!trimmed) return { ok: true }
+  if (totalPages <= 0) return { ok: false, message: '当前视图没有可打印页面' }
+
+  const pages = new Set<number>()
+  let hasInvalidPart = false
+  for (const part of trimmed.split(/[,，]/)) {
     const rangeText = part.trim()
-    if (!rangeText) return []
+    if (!rangeText) continue
     const [fromText, toText = fromText] = rangeText.split(/[-~～]/).map((item) => item.trim())
     const from = Number(fromText)
     const to = Number(toText)
-    if (!Number.isInteger(from) || !Number.isInteger(to) || from <= 0 || to <= 0) return []
-    const start = Math.min(from, to) - 1
-    const end = Math.max(from, to) - 1
-    return [{ from: start, to: end }]
-  })
-  return ranges.length ? ranges : undefined
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from <= 0 || to <= 0) {
+      hasInvalidPart = true
+      continue
+    }
+    const start = Math.min(from, to)
+    const end = Math.max(from, to)
+    if (end > totalPages) {
+      return { ok: false, message: `当前视图共 ${totalPages} 页，不能打印第 ${end} 页` }
+    }
+    for (let page = start; page <= end; page += 1) {
+      pages.add(page)
+    }
+  }
+
+  if (hasInvalidPart || pages.size === 0) {
+    return { ok: false, message: '打印页码格式不正确，请输入 1 或 1-2' }
+  }
+
+  return { ok: true, pages: Array.from(pages).sort((a, b) => a - b) }
 }
 
 async function printCurrentViewForSheet(printerName: string, sheetName = activeSheet.value?.name): Promise<void> {
+  const pageSelection = parsePrintPageSelection(printPageRangeText.value, printablePageCountForSheet(sheetName))
+  if (!pageSelection.ok) throw new Error(pageSelection.message)
+  const removePageSelectionStyle = installPrintPageSelectionStyle(pageSelection.pages, sheetName)
   const removeVoucherPrintStyle = isVoucherPrintSheet(sheetName)
     ? installVoucherPrintPageStyle()
     : undefined
   try {
     await window.salaryApi.printCurrentView(currentPrintRequest(printerName, sheetName))
   } finally {
+    removePageSelectionStyle?.()
     removeVoucherPrintStyle?.()
   }
+}
+
+function installPrintPageSelectionStyle(pageNumbers: number[] | undefined, sheetName: string | undefined): (() => void) | undefined {
+  if (!pageNumbers?.length) return undefined
+  const pageSelector = isVoucherPrintSheet(sheetName) ? '.voucher-page' : '.print-page'
+  const visibleSelectors = pageNumbers
+    .map((page) => `${pageSelector}[data-print-page-index="${page}"]`)
+    .join(',\n  ')
+  const style = document.createElement('style')
+  style.textContent = `
+@media print {
+  ${pageSelector} {
+    display: none !important;
+  }
+  ${visibleSelectors} {
+    display: block !important;
+  }
+}
+`
+  document.head.appendChild(style)
+  return () => style.remove()
 }
 
 function installVoucherPrintPageStyle(): () => void {
@@ -1497,6 +1543,10 @@ const voucherPageStyle = computed(() => ({
   '--voucher-offset-y': `${Number(printSettings.value.voucherOffsetY || 0)}mm`
 }))
 
+const reportPageStyle = computed(() => ({
+  '--report-offset-x': `${Number(printSettings.value.reportOffsetX || 0)}mm`
+}))
+
 const activeSheet = computed(() =>
   visibleSheets.value.find((sheet) => sheet.name === activeReportSheet.value)
 )
@@ -1520,10 +1570,22 @@ watch(
 const activePages = computed<MonthlyPayrollReportSheet[]>(() => {
   const sheet = activeSheet.value
   if (!sheet) return []
+  return reportPrintPagesForSheet(sheet)
+})
+
+function reportPrintPagesForSheet(sheet: MonthlyPayrollReportSheet): MonthlyPayrollReportSheet[] {
   if (sheet.name === '自动生成') return splitAutoSheet(sheet)
   if (isRetiredHousingSheetName(sheet.name)) return splitRetiredHousingSheet(sheet)
   return [sheet]
-})
+}
+
+function printablePageCountForSheet(sheetName = activeSheet.value?.name): number {
+  const sheet = visibleSheets.value.find((item) => item.name === sheetName)
+  if (!sheet) return 0
+  if (isVoucherPrintSheet(sheet.name)) return sheet.rows.length
+  if (isReportPrintSheet(sheet.name)) return reportPrintPagesForSheet(sheet).length
+  return 0
+}
 
 function splitRetiredHousingSheet(sheet: MonthlyPayrollReportSheet): MonthlyPayrollReportSheet[] {
   if (sheet.rows.length <= 3) return [sheet]
@@ -1531,7 +1593,7 @@ function splitRetiredHousingSheet(sheet: MonthlyPayrollReportSheet): MonthlyPayr
   const headerRow = sheet.rows[1]
   const totalRow = sheet.rows[sheet.rows.length - 1]
   const dataRows = sheet.rows.slice(2, -1)
-  const perPage = 18
+  const perPage = 25
   if (dataRows.length <= perPage) return [sheet]
   const pages: MonthlyPayrollReportSheet[] = []
   for (let start = 0; start < dataRows.length; start += perPage) {
@@ -2062,6 +2124,21 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
               />
             </label>
           </div>
+          <div v-else-if="activeSheet" class="report-offset-controls">
+            <label>
+              <span>报表横向偏移 mm</span>
+              <el-input-number
+                v-model="printSettings.reportOffsetX"
+                size="small"
+                :min="-20"
+                :max="20"
+                :step="0.5"
+                :precision="1"
+                controls-position="right"
+                @change="savePrintSettings"
+              />
+            </label>
+          </div>
           <label class="print-page-range">
             <span>打印页码</span>
             <el-input
@@ -2134,6 +2211,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
           :key="index"
           class="voucher-page"
           :class="{ 'salary-voucher': isSalaryVoucher(row) }"
+          :data-print-page-index="index + 1"
           :style="voucherPageStyle"
         >
           <span class="voucher-item unit-name">{{ row[1] }}</span>
@@ -2168,6 +2246,8 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
           :key="pageIdx"
           class="print-page"
           :class="[reportSheetClass(activeSheet.name), { 'custom-styled': isCustomStyledSheet(activeSheet.name) }]"
+          :data-print-page-index="pageIdx + 1"
+          :style="reportPageStyle"
         >
           <div class="print-area">
             <table class="report-table">
@@ -2732,6 +2812,12 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   width: 100%;
 }
 
+.report-offset-controls {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
 .print-page-range {
   display: grid;
   gap: 4px;
@@ -2740,6 +2826,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 
 .printer-selects label,
 .voucher-offset-controls label,
+.report-offset-controls label,
 .print-page-range {
   display: grid;
   gap: 4px;
@@ -2747,6 +2834,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 
 .printer-selects span,
 .voucher-offset-controls span,
+.report-offset-controls span,
 .print-page-range span {
   color: var(--text-3);
   font-size: 12px;
@@ -2754,6 +2842,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 
 .printer-selects .el-select,
 .voucher-offset-controls .el-input-number,
+.report-offset-controls .el-input-number,
 .print-page-range .el-input {
   width: 100%;
 }
@@ -3296,6 +3385,8 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
     height: 297mm;
     min-height: 297mm;
     margin: 0;
+    transform: translateX(var(--report-offset-x, 0mm));
+    transform-origin: top left;
     page-break-after: always;
   }
 

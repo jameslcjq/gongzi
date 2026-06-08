@@ -790,6 +790,7 @@ export type PrinterSummary = {
 
 export type MonthlyPayrollPrintSettings = {
   reportPrinterName: string
+  reportOffsetX: number
   voucherPrinterName: string
   voucherOffsetX: number
   voucherOffsetY: number
@@ -809,10 +810,6 @@ export type PrintRequest = {
   printerName?: string
   landscape?: boolean
   scaleFactor?: number
-  pageRanges?: Array<{
-    from: number
-    to: number
-  }>
   pageSize?: {
     width: number
     height: number

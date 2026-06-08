@@ -3,10 +3,12 @@ import type { MonthlyPayrollPrintSettings } from '../../shared/types'
 
 const STORAGE_KEY = 'monthlyPayrollPrintSettings'
 const VOUCHER_OFFSET_PRESET_VERSION = 1
+const DEFAULT_REPORT_OFFSET_X_MM = 3
 const DEFAULT_VOUCHER_OFFSET_MM = 10
 
 export const defaultMonthlyPayrollPrintSettings: MonthlyPayrollPrintSettings = {
   reportPrinterName: '',
+  reportOffsetX: DEFAULT_REPORT_OFFSET_X_MM,
   voucherPrinterName: '',
   voucherOffsetX: DEFAULT_VOUCHER_OFFSET_MM,
   voucherOffsetY: DEFAULT_VOUCHER_OFFSET_MM,
@@ -50,6 +52,7 @@ function normalizeMonthlyPayrollPrintSettings(
   const merged: MonthlyPayrollPrintSettings = {
     ...defaultMonthlyPayrollPrintSettings,
     ...settings,
+    reportOffsetX: Number(settings.reportOffsetX ?? defaultMonthlyPayrollPrintSettings.reportOffsetX),
     voucherOffsetX: Number(settings.voucherOffsetX ?? defaultMonthlyPayrollPrintSettings.voucherOffsetX),
     voucherOffsetY: Number(settings.voucherOffsetY ?? defaultMonthlyPayrollPrintSettings.voucherOffsetY),
     voucherOffsetPresetVersion: VOUCHER_OFFSET_PRESET_VERSION
