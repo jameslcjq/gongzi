@@ -9,7 +9,7 @@ export const isDevelopmentDataMode = !app.isPackaged
 export const dataRoot = process.env.PAYROLL_DATA_ROOT ||
   join(laojiuRoot, isDevelopmentDataMode ? 'gzdata-dev' : 'gzdata')
 export const desktopInstallRoot = join(laojiuRoot, isDevelopmentDataMode ? 'gzxt-dev' : 'gzxt')
-export const importFolder = process.env.PAYROLL_IMPORT_ROOT || join(dataRoot, '工资导入')
+export const importFolder = process.env.PAYROLL_IMPORT_ROOT || join(laojiuRoot, '工资导入')
 export const outputRoot = process.env.PAYROLL_OUTPUT_ROOT || join(dataRoot, '工资数据')
 export const tempRoot = process.env.PAYROLL_TEMP_ROOT || join(dataRoot, 'temp')
 export const archiveRoot = outputRoot
