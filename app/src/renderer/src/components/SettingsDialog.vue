@@ -37,6 +37,8 @@ const emit = defineEmits<{
 const backups = ref<BackupSummary[]>([])
 const backupsLoading = ref(false)
 const creatingBackup = ref(false)
+const creatingFullBackup = ref(false)
+const restoringFullBackup = ref(false)
 const wiping = ref(false)
 const recycleBatches = ref<RecycleBinBatch[]>([])
 const recycleLoading = ref(false)
@@ -270,6 +272,19 @@ async function createBackup() {
   }
 }
 
+async function createFullBackup() {
+  creatingFullBackup.value = true
+  try {
+    const summary = await window.salaryApi.createFullBackup()
+    if (!summary) return
+    ElMessage.success(`完整备份已保存：${summary.fileName}，共 ${summary.includedFiles} 个文件`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '完整备份失败')
+  } finally {
+    creatingFullBackup.value = false
+  }
+}
+
 async function restore(backup: BackupSummary) {
   try {
     await ElMessageBox.confirm(
@@ -286,6 +301,20 @@ async function restore(backup: BackupSummary) {
   } catch (error) {
     if (error instanceof Error && error.message === '用户取消恢复') return
     ElMessage.error(error instanceof Error ? error.message : '恢复失败')
+  }
+}
+
+async function restoreFullBackup() {
+  restoringFullBackup.value = true
+  try {
+    const summary = await window.salaryApi.restoreFullBackup()
+    if (!summary) return
+    ElMessage.success(`已恢复完整备份：${summary.includedFiles} 个文件，正在重启`)
+  } catch (error) {
+    if (error instanceof Error && error.message === '用户取消恢复') return
+    ElMessage.error(error instanceof Error ? error.message : '完整恢复失败')
+  } finally {
+    restoringFullBackup.value = false
   }
 }
 
@@ -602,10 +631,18 @@ function formatSize(bytes: number): string {
         <div class="settings-section">
           <h4>数据库</h4>
           <p>{{ databasePath || '初始化中' }}</p>
-          <div>
-            <el-button type="primary" :loading="creatingBackup" @click="createBackup">立即备份</el-button>
+          <div class="backup-actions">
+            <el-button type="primary" :loading="creatingBackup" @click="createBackup">备份数据库</el-button>
+            <el-button :loading="creatingFullBackup" @click="createFullBackup">导出完整备份</el-button>
+            <el-button
+              type="warning"
+              plain
+              :loading="restoringFullBackup"
+              @click="restoreFullBackup"
+            >从完整备份恢复</el-button>
             <el-button @click="refreshBackups">刷新备份列表</el-button>
           </div>
+          <p>完整备份包含业务数据库、工资数据、工资导入和交换包；恢复时使用当前电脑自己的授权。</p>
         </div>
 
         <el-table :data="backups" v-loading="backupsLoading" border size="small" height="420">
@@ -780,6 +817,12 @@ function formatSize(bytes: number): string {
 }
 
 .lookup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backup-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;

@@ -1174,6 +1174,13 @@ export type BackupSummary = {
   createdAt: string
 }
 
+export type FullBackupSummary = BackupSummary & {
+  includedFiles: number
+  databaseIncluded: boolean
+  importFolderIncluded: boolean
+  exchangeFolderIncluded: boolean
+}
+
 export type PivotAggregation = 'sum' | 'count' | 'count_distinct' | 'avg' | 'max' | 'min'
 
 export type PivotFilterOp =

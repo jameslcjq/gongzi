@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { session, type Session } from 'electron'
 import * as XLSX from 'xlsx'
-import { getMonthlyOutputPath } from '../config/paths'
+import { getMonthlyOutputPath, portalPartitionPrefix } from '../config/paths'
 import { readUnitSettings } from './unitSettings'
 import type {
   IntegratedHistorySalaryDataset,
@@ -95,7 +95,7 @@ export async function generatePerformancePayrollFromHistory(
 
 function integratedPortalPartition(unitCode: string, suffix: '0101' | '0201'): string {
   const normalizedUnit = String(unitCode || '').replace(/\D/g, '').slice(0, 6) || 'unit'
-  return `persist:integrated-portal-${normalizedUnit}-${suffix}`
+  return `persist:${portalPartitionPrefix}-${normalizedUnit}-${suffix}`
 }
 
 export async function generatePerformancePayrollFromLocal(

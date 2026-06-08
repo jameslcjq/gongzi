@@ -115,6 +115,7 @@ type PortalKeySuffix = '0101' | '0201'
 
 const businessKeySuffix: PortalKeySuffix = '0101'
 const reviewKeySuffix: PortalKeySuffix = '0201'
+const portalPartitionPrefix = window.salaryApi.appInstance.portalPartitionPrefix
 const portalUnitCode = ref('')
 
 function normalizePortalUnitCode(value?: string): string {
@@ -128,7 +129,7 @@ function portalKeySerial(suffix: PortalKeySuffix): string {
 
 function portalPartition(suffix: PortalKeySuffix): string {
   const unit = portalUnitCode.value || 'unit'
-  return `persist:integrated-portal-${unit}-${suffix}`
+  return `persist:${portalPartitionPrefix}-${unit}-${suffix}`
 }
 
 function portalKeyRole(suffix: PortalKeySuffix): string {

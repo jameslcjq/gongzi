@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import {
+  buildPayrollInstanceSummary,
+  resolvePayrollInstanceId,
+  type PayrollInstanceSummary
+} from '../shared/payrollInstance'
 import type {
   AppSummary,
   BackupSummary,
@@ -77,6 +82,7 @@ import type {
   PersonalTaxImportGenerateResult,
   SocialInsuranceBaseExportInput,
   SocialInsuranceBaseExportResult,
+  FullBackupSummary,
   MailAccountView,
   MailAccount,
   MailDownloadRule,
@@ -87,6 +93,16 @@ import type {
   LocalFileBase64,
   BudgetImportResult
 } from '../shared/types'
+
+const appInstance = buildPayrollInstanceSummary({
+  id: resolvePayrollInstanceId({
+    env: process.env,
+    argv: process.argv,
+    execPath: process.execPath
+  }),
+  isDevelopment: process.env.NODE_ENV === 'development',
+  env: process.env
+})
 
 type PivotConfigSummary = {
   id: number
@@ -106,7 +122,9 @@ type LookupFailureQuery = {
 }
 
 const salaryApi = {
+  appInstance,
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
+  getAppInstance: (): Promise<PayrollInstanceSummary> => ipcRenderer.invoke('app:get-instance'),
   licenseStatus: () => ipcRenderer.invoke('license:status'),
   licenseCheck: (licenseKey?: string) => ipcRenderer.invoke('license:check', licenseKey),
   licenseClaimTrial: (customerName: string, customerCode?: string) =>
@@ -482,6 +500,10 @@ const salaryApi = {
   createBackup: (): Promise<BackupSummary> => ipcRenderer.invoke('backup:create'),
   restoreBackup: (fileName: string): Promise<BackupSummary> =>
     ipcRenderer.invoke('backup:restore', fileName),
+  createFullBackup: (): Promise<FullBackupSummary | null> =>
+    ipcRenderer.invoke('backup:create-full'),
+  restoreFullBackup: (): Promise<FullBackupSummary | null> =>
+    ipcRenderer.invoke('backup:restore-full'),
 
   listPivotConfigs: (): Promise<PivotConfigSummary[]> =>
     ipcRenderer.invoke('pivot:list-configs'),

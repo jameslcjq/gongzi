@@ -1,7 +1,13 @@
 import { app, ipcMain as electronIpcMain, shell, type IpcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { getDatabase, getDatabasePath, run } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
-import { createBackup, listBackups, restoreBackup } from '../services/backup'
+import {
+  createBackup,
+  createFullBackup,
+  listBackups,
+  restoreBackup,
+  restoreFullBackup
+} from '../services/backup'
 import { applyConsistencyAuditUpdates, runConsistencyAudit } from '../services/consistencyAudit'
 import {
   chooseExcelFile,
@@ -65,6 +71,8 @@ import {
   loadIntegratedSimpleAggregates,
   loadTraffic002Total
 } from '../services/monthly-payroll/monthlyPayrollDataLoaders'
+import { payrollInstance } from '../config/paths'
+import type { PayrollInstanceSummary } from '../../shared/payrollInstance'
 import {
   applyAnnualAdjustment,
   chooseAnnualAdjustmentFiles,
@@ -202,6 +210,7 @@ import type {
   AnnualAdjustmentPreview,
   AnnualAdjustmentPreviewInput,
   ExchangeStatus,
+  FullBackupSummary,
   ExchangePackagePreview,
   ExchangePackageBuildResult,
   ExchangePackageImportResult,
@@ -225,6 +234,7 @@ import type {
 const LICENSE_FREE_CHANNELS = new Set([
   // 授权门禁页仍需要读取基础状态、单位设置和备份列表；业务写入类 IPC 继续走授权拦截。
   'app:get-version',
+  'app:get-instance',
   'app:get-summary',
   'app:list-workflows',
   'import-watcher:get-status',
@@ -495,6 +505,7 @@ export function registerAppIpc(): void {
   const ipcMain = createLicensedIpcMain()
 
   ipcMain.handle('app:get-version', (): string => app.getVersion())
+  ipcMain.handle('app:get-instance', (): PayrollInstanceSummary => payrollInstance)
 
   ipcMain.handle('app:get-summary', async (): Promise<AppSummary> => {
     await getDatabase()
@@ -1532,6 +1543,8 @@ export function registerAppIpc(): void {
     'backup:restore',
     (_event, fileName: string): Promise<BackupSummary> => restoreBackup(fileName)
   )
+  ipcMain.handle('backup:create-full', (): Promise<FullBackupSummary | null> => createFullBackup())
+  ipcMain.handle('backup:restore-full', (): Promise<FullBackupSummary | null> => restoreFullBackup())
 
   ipcMain.handle('pivot:list-configs', (): Promise<PivotConfigSummary[]> => listPivotConfigs())
 

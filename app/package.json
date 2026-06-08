@@ -1,6 +1,6 @@
 {
   "name": "salary-system-electron",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "productName": "老九的工资系统",
   "description": "独立版工资系统 Electron 桌面程序",
@@ -11,6 +11,7 @@
     "build:helper": "dotnet publish ../tools/laojiu-automation-helper/laojiu-automation-helper.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=false -p:IncludeNativeLibrariesForSelfExtract=true -o native",
     "build": "npm run clean:build && npm run build:helper && vue-tsc --noEmit && vite build",
     "dist": "npm run build && electron-builder --win nsis",
+    "dist:copy2": "npm run build && electron-builder --win nsis --config installer/electron-builder.copy2.yml",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test:monthly-payroll-reconciliation": "node scripts/run-monthly-payroll-reconciliation-test.mjs"
@@ -66,7 +67,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "老九的工资系统",
-      "artifactName": "老九的工资系统安装包-1.05.${ext}",
+      "artifactName": "老九的工资系统安装包-1.06.${ext}",
       "installerIcon": "installer/assets/app-icon.ico",
       "uninstallerIcon": "installer/assets/app-icon.ico",
       "include": "installer/installer.nsh"

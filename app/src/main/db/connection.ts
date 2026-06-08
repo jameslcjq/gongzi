@@ -201,6 +201,18 @@ export function getDatabasePath(): string {
   return databasePath
 }
 
+export function closeDatabase(): Promise<void> {
+  const current = db
+  if (!current) return Promise.resolve()
+  db = undefined
+  return new Promise((resolve, reject) => {
+    current.close((error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
 function openDatabase(path: string): Promise<sqlite3.Database> {
   return new Promise((resolve, reject) => {
     const database = new sqlite3.Database(path, (error) => {

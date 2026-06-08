@@ -1,20 +1,37 @@
 import { app, shell } from 'electron'
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { dirname, join, normalize } from 'node:path'
+import {
+  buildPayrollInstanceSummary,
+  resolvePayrollInstanceId
+} from '../../shared/payrollInstance'
 
-export const appDisplayName = '老九的工资系统'
 export const laojiuRoot = 'D:\\laojiu'
 // 业务数据与安装目录在开发版/正式版分开，避免调试时污染正式工资库。
 export const isDevelopmentDataMode = !app.isPackaged
-export const dataRoot = process.env.PAYROLL_DATA_ROOT ||
-  join(laojiuRoot, isDevelopmentDataMode ? 'gzdata-dev' : 'gzdata')
-export const desktopInstallRoot = join(laojiuRoot, isDevelopmentDataMode ? 'gzxt-dev' : 'gzxt')
-export const importFolder = process.env.PAYROLL_IMPORT_ROOT || join(laojiuRoot, '工资导入')
-export const outputRoot = process.env.PAYROLL_OUTPUT_ROOT || join(dataRoot, '工资数据')
-export const tempRoot = process.env.PAYROLL_TEMP_ROOT || join(dataRoot, 'temp')
+export const payrollInstance = buildPayrollInstanceSummary({
+  id: resolvePayrollInstanceId({
+    env: process.env,
+    argv: process.argv,
+    execPath: process.execPath,
+    appName: app.getName()
+  }),
+  isDevelopment: isDevelopmentDataMode,
+  env: process.env
+})
+if (payrollInstance.userDataRoot) {
+  mkdirSync(payrollInstance.userDataRoot, { recursive: true })
+  app.setPath('userData', payrollInstance.userDataRoot)
+}
+export const appDisplayName = payrollInstance.displayName
+export const dataRoot = payrollInstance.dataRoot
+export const desktopInstallRoot = payrollInstance.installRoot
+export const importFolder = payrollInstance.importFolder
+export const outputRoot = payrollInstance.outputRoot
+export const tempRoot = payrollInstance.tempRoot
 export const archiveRoot = outputRoot
-export const exchangeRoot =
-  process.env.PAYROLL_EXCHANGE_ROOT || join(laojiuRoot, '交换包', '工资系统')
+export const exchangeRoot = payrollInstance.exchangeRoot
+export const portalPartitionPrefix = payrollInstance.portalPartitionPrefix
 export const exchangeInboxFolder = join(exchangeRoot, 'inbox')
 export const exchangeImportedFolder = join(exchangeRoot, 'imported')
 export const exchangeFailedFolder = join(exchangeRoot, 'failed')
@@ -91,9 +108,18 @@ export function ensureImportFolderDesktopShortcut(): void {
   ensureBusinessFolders()
   const desktop = app.getPath('desktop')
   mkdirSync(desktop, { recursive: true })
-  const outputSuffix = isDevelopmentDataMode ? '-开发' : ''
-  ensureDesktopShortcut(join(desktop, '工资导入.lnk'), importFolder, '打开老九的工资系统工资导入文件夹')
-  ensureDesktopShortcut(join(desktop, `工资数据${outputSuffix}.lnk`), outputRoot, '打开老九的工资系统工资数据文件夹')
+  const importSuffix = payrollInstance.shortcutSuffix
+  const outputSuffix = payrollInstance.shortcutSuffix || (isDevelopmentDataMode ? '-开发' : '')
+  ensureDesktopShortcut(
+    join(desktop, `工资导入${importSuffix}.lnk`),
+    importFolder,
+    `打开${appDisplayName}工资导入文件夹`
+  )
+  ensureDesktopShortcut(
+    join(desktop, `工资数据${outputSuffix}.lnk`),
+    outputRoot,
+    `打开${appDisplayName}工资数据文件夹`
+  )
 }
 
 function ensureDesktopShortcut(shortcutPath: string, target: string, description: string): void {
