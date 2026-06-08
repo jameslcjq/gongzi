@@ -2,6 +2,7 @@ import { shell } from 'electron'
 import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
+import * as XLSX from 'xlsx'
 import { all, getDatabase, run } from '../db/connection'
 import type {
   AnnualAdjustmentDetectedFiles,
@@ -13,9 +14,11 @@ import { commitExcelImport } from './excelImport'
 import { inferWorksheet } from './worksheetInference'
 import { isPersonnelExpensePlanWorkbook } from './budget/personnelExpensePlanPrefill'
 import { importFolder } from '../config/paths'
+import { isValidIdCard, normalizeHeader, text } from './monthly-payroll/monthlyPayrollUtils'
 
 const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
+type MonthlyPayrollFileKind = 'salary' | 'social' | 'tax'
 
 let importQueue: Promise<unknown> = Promise.resolve()
 
@@ -151,14 +154,11 @@ async function readRecentImportLogs(): Promise<ExcelImportLog[]> {
 async function importExcelFile(filePath: string): Promise<void> {
   const extension = extname(filePath).toLowerCase()
   if (!importableExtensions.has(extension) || basename(filePath).startsWith('~$')) return
-  if (isReservedWorkflowFile(filePath)) {
+  const reservedWorkflowName = reservedWorkflowWorksheetName(filePath)
+  if (reservedWorkflowName) {
     pushMemoryLog({
       fileName: basename(filePath),
-      worksheetName: isPersonnelExpensePlanWorkbook(filePath)
-        ? '人员经费核对'
-        : isAnnualAdjustmentFile(filePath)
-          ? '社保个税'
-          : '工资报账',
+      worksheetName: reservedWorkflowName,
       ok: true,
       importedRows: 0,
       message: '已识别为专项处理文件，保留在监控文件夹供业务模块使用',
@@ -269,9 +269,13 @@ function getTemplateFolderPath(): string {
 
 function detectMonthlyPayrollFiles(path: string): MonthlyPayrollDetectedFiles {
   const files = listRootImportableFiles(path)
-  const salary = pickLatestFile(files.filter((filePath) => isSalaryWorkbook(filePath)))
-  const socialSecurity = pickLatestFile(files.filter((filePath) => isSocialSecurityWorkbook(filePath)))
-  const tax = pickLatestFile(files.filter((filePath) => isTaxWorkbook(filePath)))
+  const classified = files.map((filePath) => ({
+    filePath,
+    kind: classifyMonthlyPayrollFile(filePath)
+  }))
+  const salary = pickLatestFile(classified.filter((file) => file.kind === 'salary').map((file) => file.filePath))
+  const socialSecurity = pickLatestFile(classified.filter((file) => file.kind === 'social').map((file) => file.filePath))
+  const tax = pickLatestFile(classified.filter((file) => file.kind === 'tax').map((file) => file.filePath))
 
   const mode: MonthlyPayrollDetectedFiles['mode'] = salary
     ? socialSecurity && tax
@@ -350,14 +354,11 @@ function safeMtimeMs(filePath: string): number {
   }
 }
 
-function isReservedWorkflowFile(filePath: string): boolean {
-  return (
-    isSalaryWorkbook(filePath) ||
-    isSocialSecurityWorkbook(filePath) ||
-    isTaxWorkbook(filePath) ||
-    isAnnualAdjustmentFile(filePath) ||
-    isPersonnelExpensePlanWorkbook(filePath)
-  )
+function reservedWorkflowWorksheetName(filePath: string): string | undefined {
+  if (classifyMonthlyPayrollFile(filePath)) return '工资报账'
+  if (isPersonnelExpensePlanWorkbook(filePath)) return '人员经费核对'
+  if (isAnnualAdjustmentFile(filePath)) return '社保个税'
+  return undefined
 }
 
 function isAnnualAdjustmentFile(filePath: string): boolean {
@@ -369,23 +370,113 @@ function isAnnualAdjustmentFile(filePath: string): boolean {
   )
 }
 
+function classifyMonthlyPayrollFile(filePath: string): MonthlyPayrollFileKind | undefined {
+  const workbook = readWorkbookSample(filePath)
+  if (!workbook) return undefined
+  if (looksLikeSalaryWorkbook(workbook)) return 'salary'
+  if (looksLikeSocialSecurityWorkbook(workbook)) return 'social'
+  if (looksLikeTaxWorkbook(workbook)) return 'tax'
+  return undefined
+}
+
+function readWorkbookSample(filePath: string): XLSX.WorkBook | undefined {
+  try {
+    return XLSX.readFile(filePath, {
+      cellDates: false,
+      sheetRows: 80
+    })
+  } catch {
+    return undefined
+  }
+}
+
+function looksLikeSalaryWorkbook(workbook: XLSX.WorkBook): boolean {
+  const activeSheetName = workbook.SheetNames.find((name) => normalizeHeader(name) === normalizeHeader('公办在职'))
+  if (!activeSheetName) return false
+  const rows = sheetToRows(workbook.Sheets[activeSheetName])
+  const headerRows = rows.slice(0, 12)
+  const hasExpectedHeaders = [
+    '身份证号',
+    '姓名',
+    '岗位工资',
+    '薪级工资',
+    '实发工资合计'
+  ].filter((keyword) => rowsContainNormalized(headerRows, keyword)).length >= 4
+  const idCardRows = rows.filter((row) => row.some((cell) => isValidIdCard(cell))).length
+  return hasExpectedHeaders && idCardRows > 0
+}
+
+function looksLikeSocialSecurityWorkbook(workbook: XLSX.WorkBook): boolean {
+  return workbook.SheetNames.some((sheetName) => {
+    const rows = sheetToRows(workbook.Sheets[sheetName])
+    return rows.some((row) => {
+      const headers = row.map((cell) => normalizeHeader(text(cell)))
+      return hasAnyHeader(headers, [
+        '征收品目',
+        '征收项目',
+        '征收品目名称',
+        '征收项目名称',
+        '征收子目',
+        '征收子目名称'
+      ]) && hasAnyHeader(headers, [
+        '应补（退）费额(元)',
+        '应补(退)费额(元)',
+        '应补（退）费额',
+        '应补(退)费额',
+        '应缴费额(元)',
+        '应缴费额'
+      ]) && hasAnyHeader(headers, [
+        '费款所属期起',
+        '费款所属期开始',
+        '费款所属期起始',
+        '所属期起',
+        '所属期开始',
+        '所属期起始',
+        '费款所属期',
+        '所属期'
+      ])
+    })
+  })
+}
+
+function looksLikeTaxWorkbook(workbook: XLSX.WorkBook): boolean {
+  return workbook.SheetNames.some((sheetName) => {
+    const rows = sheetToRows(workbook.Sheets[sheetName])
+    return rows.some((row) => {
+      const headers = row.map((cell) => normalizeHeader(text(cell)))
+      return hasAllHeaders(headers, ['姓名', '证件号码']) &&
+        hasAnyHeader(headers, ['应补（退）税额', '应补(退)税额', '本期应补（退）税额', '本期应补(退)税额']) &&
+        hasAnyHeader(headers, ['税款所属期起', '税款所属期开始', '税款所属期起始', '所得期间起', '税款所属期', '所得期间'])
+    })
+  })
+}
+
+function sheetToRows(sheet: XLSX.WorkSheet | undefined): unknown[][] {
+  if (!sheet) return []
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: null,
+    raw: false
+  })
+}
+
+function rowsContainNormalized(rows: unknown[][], keyword: string): boolean {
+  const expected = normalizeHeader(keyword)
+  return rows.some((row) => row.some((cell) => normalizeHeader(text(cell)).includes(expected)))
+}
+
+function hasAnyHeader(headers: string[], candidates: string[]): boolean {
+  const normalized = candidates.map(normalizeHeader)
+  return headers.some((header) => normalized.includes(header))
+}
+
+function hasAllHeaders(headers: string[], candidates: string[]): boolean {
+  const set = new Set(headers)
+  return candidates.map(normalizeHeader).every((header) => set.has(header))
+}
+
 function isSalaryWorkbook(filePath: string): boolean {
-  const name = basename(filePath)
-  if (name.startsWith('一体化_工资')) return false
-  return (
-    name.includes('工资表') &&
-    !name.includes('税款计算') &&
-    !name.includes('补发工资') &&
-    !name.includes('工资报账')
-  )
-}
-
-function isSocialSecurityWorkbook(filePath: string): boolean {
-  return basename(filePath).startsWith('社保费未申报汇总信息')
-}
-
-function isTaxWorkbook(filePath: string): boolean {
-  return basename(filePath).includes('税款计算_工资薪金所得')
+  return classifyMonthlyPayrollFile(filePath) === 'salary'
 }
 
 function isHousingAccountWorkbook(filePath: string): boolean {
