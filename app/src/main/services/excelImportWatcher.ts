@@ -208,6 +208,8 @@ async function importExcelFile(filePath: string): Promise<void> {
 }
 
 function pushReservedWorkflowLog(filePath: string, worksheetName: string): void {
+  // 工资报账源文件会在业务页展示，导入监控里不刷保留提示。
+  if (worksheetName === '工资报账') return
   pushMemoryLog({
     fileName: basename(filePath),
     worksheetName,
