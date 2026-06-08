@@ -3179,7 +3179,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   overflow: visible;
   background: #fff;
   color: #000;
-  font-family: SimSun, 'Songti SC', serif;
+  font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', SimHei, sans-serif;
   font-size: 15pt;
   page-break-after: always;
   --voucher-offset-x: 0mm;
@@ -3190,7 +3190,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   position: absolute;
   display: block;
   color: #000;
-  font-family: SimSun, 'Songti SC', serif;
+  font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', SimHei, sans-serif;
   font-size: 12pt;
   line-height: 1.1;
   white-space: nowrap;
@@ -3307,7 +3307,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   top: 70.35mm;
   width: 88mm;
   height: 59.53mm;
-  font-family: FangSong, STFangsong, SimSun, serif;
+  font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', SimHei, sans-serif;
   font-size: 10.5pt;
   line-height: 1.08;
   white-space: pre-line;
@@ -3319,7 +3319,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   top: 62.35mm;
   width: 45mm;
   font-size: 10.5pt;
-  font-family: FangSong, STFangsong, SimSun, serif;
+  font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', SimHei, sans-serif;
   line-height: 1;
 }
 
@@ -3384,9 +3384,10 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
     width: 210mm;
     height: 297mm;
     min-height: 297mm;
-    margin: 0;
-    transform: translateX(var(--report-offset-x, 0mm));
-    transform-origin: top left;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
     page-break-after: always;
   }
 
@@ -3423,6 +3424,8 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
     border: 0;
     overflow: visible;
     box-sizing: border-box;
+    transform: translateX(var(--report-offset-x, 0mm));
+    transform-origin: top center;
   }
 
   .report-table th,
