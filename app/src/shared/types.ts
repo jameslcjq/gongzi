@@ -793,6 +793,7 @@ export type MonthlyPayrollPrintSettings = {
   voucherPrinterName: string
   voucherOffsetX: number
   voucherOffsetY: number
+  voucherOffsetPresetVersion?: number
 }
 
 export type MonthlyPayrollSalaryPrintPageSummary = {

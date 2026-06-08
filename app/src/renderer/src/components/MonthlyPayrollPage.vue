@@ -86,8 +86,9 @@ const printers = ref<PrinterSummary[]>([])
 const printSettings = ref<MonthlyPayrollPrintSettings>({
   reportPrinterName: '',
   voucherPrinterName: '',
-  voucherOffsetX: 0,
-  voucherOffsetY: 0
+  voucherOffsetX: 10,
+  voucherOffsetY: 10,
+  voucherOffsetPresetVersion: 1
 })
 const payrollSettings = reactive<MonthlyPayrollSettings>({
   taxField: '补扣工资'
@@ -3268,6 +3269,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   .monthly-header,
   .month-overview,
   .monthly-grid,
+  .source-version-panel,
   .process-mode-panel,
   .result-panel,
   .report-toolbar,
