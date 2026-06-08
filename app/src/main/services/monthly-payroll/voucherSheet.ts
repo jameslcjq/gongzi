@@ -247,10 +247,7 @@ export function buildInsuranceVoucherUsage(
     ['公积金（个人）', num(active['住房公积金'])],
     ['公积金（单位）', num(active['住房公积金'])],
     ['个税', activeTax],
-    ['合计', total],
-    ['补缴养老保险', 0],
-    ['补缴职业年金', 0],
-    ['补缴医保、工伤失业等', 0]
+    ['合计', total]
   ].map(([label, amount]) => `${label}${formatVoucherAmount(Number(amount))}`).join('\n')
 }
 

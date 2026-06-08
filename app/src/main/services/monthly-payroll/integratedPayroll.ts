@@ -721,24 +721,26 @@ const SALARY_IMPORT_FIELD_ORDER = [
   '公车补贴',
   '住房补贴',
   '基础绩效奖',
-  '补发工资',
-  '补扣工资',
   '其他一',
   '其他二',
   '其他三',
-  '当月个人所得税',
   '公积金',
   '养老保险缴费',
   '职业年金缴费',
   '医疗保险',
-  '失业保险'
+  '失业保险',
+  '支出一',
+  '支出二',
+  '支出三'
 ]
+const SALARY_IMPORT_FIELD_SET = new Set(SALARY_IMPORT_FIELD_ORDER)
 
 function buildSalaryImportDiff(plan: IntegratedWriteBackPlan): { fields: string[]; idCards: string[] } {
   const fields = new Set<string>()
   const idCards = new Set<string>()
   for (const change of plan.changes) {
     if (change.worksheetName !== '在职工资') continue
+    if (!SALARY_IMPORT_FIELD_SET.has(change.fieldName)) continue
     fields.add(change.fieldName)
     idCards.add(change.idCard)
   }

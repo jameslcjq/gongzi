@@ -686,7 +686,7 @@ function countRetiredHousingPrintPages(sheets: MonthlyPayrollReportSheet[]): num
   if (sheet.rows.length === 0) return 0
   if (sheet.rows.length <= 3) return 1
   const dataCount = Math.max(0, sheet.rows.length - 3)
-  return Math.max(1, Math.ceil(dataCount / 18))
+  return Math.max(1, Math.ceil(dataCount / 20))
 }
 
 function applyVoucherPageCounts(

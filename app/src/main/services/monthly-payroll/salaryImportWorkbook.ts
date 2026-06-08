@@ -4,7 +4,6 @@ import { all, getDatabase } from '../../db/connection'
 import { getWorksheetLocalColumns } from '../../db/schema'
 import { getWorksheetByName, tableNameOf } from '../worksheetTable'
 import type { SalarySummary } from './monthlyPayrollTypes'
-import { activeBackpayAdjustmentTotals } from './salaryBackpayAdjustments'
 import { normalizeIdCard, num, roundMoney, text } from './monthlyPayrollUtils'
 
 type TemplateColumn = {
@@ -28,17 +27,17 @@ const SALARY_IMPORT_FIELD_COLUMNS: Record<string, number[]> = {
   公车补贴: [22],
   住房补贴: [23],
   基础绩效奖: [24],
-  补发工资: [25],
-  补扣工资: [26],
   其他一: [27, 44],
   其他二: [28],
   其他三: [29],
-  当月个人所得税: [30],
   公积金: [31],
   养老保险缴费: [32],
   职业年金缴费: [33],
   医疗保险: [34],
-  失业保险: [35]
+  失业保险: [35],
+  支出一: [36],
+  支出二: [37],
+  支出三: [38]
 }
 
 export type SalaryImportWorkbookOptions = {
@@ -94,20 +93,19 @@ export async function writeSalaryImportWorkbook(
     assignField('公车补贴', 22, num(person.values['公车补贴']))
     assignField('住房补贴', 23, num(person.values['住房补贴']))
     assignField('基础绩效奖', 24, num(person.values['基础绩效奖']))
-    const adjustmentTotals = activeBackpayAdjustmentTotals(person)
-    assignField('补发工资', 25, adjustmentTotals.increaseTotal)
-    assignField('补扣工资', 26, adjustmentTotals.deductionTotal)
     const splitOtherOne = roundMoney(num(person.values['乡镇补贴']) + num(person.values['边远补贴']))
     const otherOne = splitOtherOne || num(person.values['其他一'])
     assignField('其他一', 27, otherOne)
     assignField('其他二', 28, num(person.values['其他二']))
     assignField('其他三', 29, num(person.values['其他三']))
-    assignField('当月个人所得税', 30, num(person.values['当月个人所得税']))
     assignField('公积金', 31, num(person.values['公积金']))
     assignField('养老保险缴费', 32, num(person.values['养老保险缴费']))
     assignField('职业年金缴费', 33, num(person.values['职业年金缴费']))
     assignField('医疗保险', 34, num(person.values['医疗保险']))
     assignField('失业保险', 35, num(person.values['失业保险']))
+    assignField('支出一', 36, num(person.values['支出一']))
+    assignField('支出二', 37, num(person.values['支出二']))
+    assignField('支出三', 38, num(person.values['支出三']))
     if ((!includedFields || includedFields.has('其他一')) && num(row[27]) > 0) row[44] = '乡镇补贴'
 
     return row

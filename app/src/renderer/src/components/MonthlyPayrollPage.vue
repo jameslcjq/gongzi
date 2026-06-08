@@ -1593,7 +1593,7 @@ function splitRetiredHousingSheet(sheet: MonthlyPayrollReportSheet): MonthlyPayr
   const headerRow = sheet.rows[1]
   const totalRow = sheet.rows[sheet.rows.length - 1]
   const dataRows = sheet.rows.slice(2, -1)
-  const perPage = 25
+  const perPage = 20
   if (dataRows.length <= perPage) return [sheet]
   const pages: MonthlyPayrollReportSheet[] = []
   for (let start = 0; start < dataRows.length; start += perPage) {
@@ -3315,8 +3315,8 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 }
 
 .voucher-total-pages {
-  left: 200.34mm;
-  top: 62.35mm;
+  left: 215.34mm;
+  top: 50.35mm;
   width: 45mm;
   font-size: 10.5pt;
   font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', SimHei, sans-serif;
