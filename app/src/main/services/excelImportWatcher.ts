@@ -1,6 +1,6 @@
 import { shell } from 'electron'
 import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
-import { basename, extname, join } from 'node:path'
+import { basename, extname, join, normalize } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import * as XLSX from 'xlsx'
 import { all, getDatabase, run } from '../db/connection'
@@ -21,6 +21,7 @@ const memoryLogs: ExcelImportLog[] = []
 type MonthlyPayrollFileKind = 'salary' | 'social' | 'tax'
 
 let importQueue: Promise<unknown> = Promise.resolve()
+const queuedImportFiles = new Set<string>()
 
 function enqueueImport<T>(task: () => Promise<T>): Promise<T> {
   const next = importQueue.then(task, task)
@@ -64,11 +65,10 @@ export async function startExcelImportWatcher(_customFolderPath?: string): Promi
       path.includes(`${folderPath}/failed`)
   })
 
-  watcher.on('add', (filePath) => {
-    void enqueueImport(() => importExcelFile(filePath))
-  })
+  watcher.on('add', enqueueImportFile)
 
   running = true
+  scanExistingImportFiles(folderPath)
   return getImportWatcherStatus()
 }
 
@@ -206,6 +206,60 @@ async function importExcelFile(filePath: string): Promise<void> {
       await persistFailedLog(basename(filePath), message)
     }
   }
+}
+
+function scanExistingImportFiles(path: string): void {
+  for (const filePath of listRootImportableFiles(path)) {
+    enqueueImportFile(filePath)
+  }
+}
+
+function enqueueImportFile(filePath: string): void {
+  const key = normalize(filePath).toLowerCase()
+  if (queuedImportFiles.has(key)) return
+  queuedImportFiles.add(key)
+  void enqueueImport(async () => {
+    try {
+      if (await waitForStableImportFile(filePath)) {
+        await importExcelFile(filePath)
+      }
+    } finally {
+      queuedImportFiles.delete(key)
+    }
+  })
+}
+
+async function waitForStableImportFile(filePath: string): Promise<boolean> {
+  const deadline = Date.now() + 30_000
+  let lastSignature = ''
+  let stableSince = 0
+
+  while (Date.now() < deadline) {
+    let signature = ''
+    try {
+      const stats = statSync(filePath)
+      if (!stats.isFile()) return false
+      signature = `${stats.size}:${stats.mtimeMs}`
+    } catch {
+      return false
+    }
+
+    if (signature === lastSignature) {
+      if (Date.now() - stableSince >= 1_200) return true
+    } else {
+      lastSignature = signature
+      stableSince = Date.now()
+    }
+    await sleep(250)
+  }
+
+  return true
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 function moveProcessedFile(filePath: string, targetFolderName: 'imported' | 'failed'): void {
@@ -378,6 +432,7 @@ function classifyMonthlyPayrollFile(filePath: string): MonthlyPayrollFileKind | 
     if (looksLikeSalaryWorkbook(workbook)) return 'salary'
     if (looksLikeSocialSecurityWorkbook(workbook)) return 'social'
     if (looksLikeTaxWorkbook(workbook)) return 'tax'
+    if (looksLikeIntegratedSalaryDetailWorkbook(workbook)) return undefined
   }
   return classifyMonthlyPayrollFileByName(filePath)
 }
@@ -423,6 +478,8 @@ function isFallbackSalaryWorkbookCandidate(filePath: string): boolean {
   if (isHousingAccountWorkbook(filePath) || isPersonalInsuranceDetailWorkbook(filePath)) return false
   if (isPersonalTaxTemplateWorkbook(filePath) || isSocialBaseTemplateWorkbook(filePath)) return false
   if (name.includes('人员经费') || name.includes('核对') || name.includes('模板')) return false
+  const workbook = readWorkbookSample(filePath)
+  if (workbook && looksLikeIntegratedSalaryDetailWorkbook(workbook)) return false
   return true
 }
 
@@ -468,6 +525,33 @@ function looksLikeSalaryWorkbook(workbook: XLSX.WorkBook): boolean {
   ].filter((keyword) => rowsContainNormalized(headerRows, keyword)).length >= 4
   const idCardRows = rows.filter((row) => row.some((cell) => isValidIdCard(cell))).length
   return hasExpectedHeaders && idCardRows > 0
+}
+
+function looksLikeIntegratedSalaryDetailWorkbook(workbook: XLSX.WorkBook): boolean {
+  return workbook.SheetNames.some((sheetName) => {
+    const rows = sheetToRows(workbook.Sheets[sheetName]).slice(0, 12)
+    return rows.some((row) => {
+      const headers = row.map((cell) => normalizeHeader(text(cell)))
+      return hasAllHeaders(headers, [
+        '单位编码',
+        '单位名称',
+        '工资类别名称',
+        '业务年度',
+        '月份',
+        '姓名',
+        '证件号码'
+      ]) && hasAnyHeader(headers, [
+        '工资批次编码',
+        '工资批次名称'
+      ]) && hasAnyHeader(headers, [
+        '岗位工资',
+        '薪级工资',
+        '住房补贴',
+        '实发工资合计',
+        '实发合计'
+      ])
+    })
+  })
 }
 
 function looksLikeSocialSecurityWorkbook(workbook: XLSX.WorkBook): boolean {
