@@ -1,5 +1,5 @@
 import { shell } from 'electron'
-import { mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { basename, extname, join, normalize } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import * as XLSX from 'xlsx'
@@ -458,8 +458,9 @@ function isDirectImportMonthlyPayrollWorkbook(filePath: string): boolean {
 
 function readWorkbookSample(filePath: string): XLSX.WorkBook | undefined {
   try {
-    return XLSX.readFile(filePath, {
+    return XLSX.read(readFileSync(filePath), {
       cellDates: false,
+      type: 'buffer',
       sheetRows: 80
     })
   } catch (error) {
