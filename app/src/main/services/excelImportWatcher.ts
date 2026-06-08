@@ -157,14 +157,7 @@ async function importExcelFile(filePath: string): Promise<void> {
   if (!importableExtensions.has(extension) || basename(filePath).startsWith('~$')) return
   const reservedWorkflowName = reservedWorkflowWorksheetName(filePath)
   if (reservedWorkflowName) {
-    pushMemoryLog({
-      fileName: basename(filePath),
-      worksheetName: reservedWorkflowName,
-      ok: true,
-      importedRows: 0,
-      message: '已识别为专项处理文件，保留在监控文件夹供业务模块使用',
-      createdAt: new Date().toISOString()
-    })
+    pushReservedWorkflowLog(filePath, reservedWorkflowName)
     return
   }
 
@@ -194,6 +187,11 @@ async function importExcelFile(filePath: string): Promise<void> {
       createdAt: new Date().toISOString()
     })
   } catch (error) {
+    const reservedWorkflowNameAfterFailure = reservedWorkflowWorksheetName(filePath)
+    if (reservedWorkflowNameAfterFailure) {
+      pushReservedWorkflowLog(filePath, reservedWorkflowNameAfterFailure)
+      return
+    }
     moveProcessedFile(filePath, 'failed')
     const message = error instanceof Error ? error.message : '导入失败'
     pushMemoryLog({
@@ -207,6 +205,17 @@ async function importExcelFile(filePath: string): Promise<void> {
       await persistFailedLog(basename(filePath), message)
     }
   }
+}
+
+function pushReservedWorkflowLog(filePath: string, worksheetName: string): void {
+  pushMemoryLog({
+    fileName: basename(filePath),
+    worksheetName,
+    ok: true,
+    importedRows: 0,
+    message: '已识别为专项处理文件，保留在监控文件夹供业务模块使用',
+    createdAt: new Date().toISOString()
+  })
 }
 
 function scanExistingImportFiles(path: string): void {
@@ -410,8 +419,9 @@ function safeMtimeMs(filePath: string): number {
 }
 
 function reservedWorkflowWorksheetName(filePath: string): string | undefined {
-  if (isDirectImportMonthlyPayrollWorkbook(filePath)) return undefined
-  if (classifyMonthlyPayrollFile(filePath)) return '工资报账'
+  if (classifyMonthlyPayrollFile(filePath) && !isDirectImportMonthlyPayrollWorkbook(filePath)) {
+    return '工资报账'
+  }
   if (isPersonnelExpensePlanWorkbook(filePath)) return '人员经费核对'
   if (isAnnualAdjustmentFile(filePath)) return '社保个税'
   return undefined
