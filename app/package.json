@@ -12,7 +12,8 @@
     "build": "npm run clean:build && npm run build:helper && vue-tsc --noEmit && vite build",
     "dist": "npm run build && electron-builder --win nsis",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test:monthly-payroll-reconciliation": "node scripts/run-monthly-payroll-reconciliation-test.mjs"
   },
   "build": {
     "appId": "com.laojiu.gzxt",

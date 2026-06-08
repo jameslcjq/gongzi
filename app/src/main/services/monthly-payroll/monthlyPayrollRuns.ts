@@ -10,6 +10,7 @@ import type {
   MonthlyPayrollArchiveResult,
   MonthlyPayrollDataSourceMode,
   MonthlyPayrollExchangeStatus,
+  MonthlyPayrollPushGuardResult,
   MonthlyPayrollPushStatus,
   MonthlyPayrollPushTarget,
   MonthlyPayrollReportResult,
@@ -162,6 +163,7 @@ export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
       insurance_pushed_at, voucher_pushed_at, salary_pushed_at,
       exchange_package_id, exchange_package_status, exchange_receipt_id,
       exchange_receipt_at, exchange_receipt_path,
+      report_snapshot,
       created_at
      FROM monthly_payroll_runs ORDER BY created_at DESC`
   )
@@ -486,6 +488,42 @@ export async function updateMonthlyPayrollPushStatus(
   )
   if (!rows[0]) throw new Error('未找到工资报账记录')
   return mapRunRow(rows[0])
+}
+
+export async function assertMonthlyPayrollRunPushable(
+  id: number
+): Promise<MonthlyPayrollPushGuardResult> {
+  const database = await getDatabase()
+  const rows = await all<Record<string, unknown>>(
+    database,
+    `SELECT * FROM monthly_payroll_runs WHERE id = ? LIMIT 1`,
+    [id]
+  )
+  if (!rows[0]) {
+    return { ok: false, reason: '未找到工资报账记录' }
+  }
+  const run = mapRunRow(rows[0])
+  if (run.isOutdated) {
+    return { ok: false, reason: '这条报账记录已过期，请使用最新生成的记录重新推送' }
+  }
+  const reconciliation = run.reportSnapshot?.reconciliation ?? null
+  if (!reconciliation) {
+    return {
+      ok: false,
+      reason: '这条报账记录没有自动复核结果，请重新生成报表后再推送。',
+      reconciliation
+    }
+  }
+  if (reconciliation.status !== 'passed') {
+    const firstIssue = reconciliation.issues.find((issue) => issue.severity === 'error') ??
+      reconciliation.issues[0]
+    return {
+      ok: false,
+      reason: firstIssue?.message ?? reconciliation.summary,
+      reconciliation
+    }
+  }
+  return { ok: true }
 }
 
 export async function getMonthlyPayrollRunReport(

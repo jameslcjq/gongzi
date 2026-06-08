@@ -2,6 +2,7 @@ import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { failRule, okRule } from '../ruleResult'
 import type {
+  MonthlyPayrollReconciliationResult,
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
   MonthlyPayrollSalaryPrintPageSummary,
@@ -116,12 +117,14 @@ import {
   backupAndWriteTaxToSalaryWorkbook,
   buildTaxByIdCardFromSummary
 } from './monthlyPayrollTax'
+import { reconcileMonthlyPayrollReport } from './monthlyPayrollReconciliation'
 export {
   archiveMonthlyPayrollRun,
   cancelMonthlyPayrollMonthClose,
   deleteMonthlyPayrollRun,
   getMonthlyPayrollRunReport,
   listMonthlyPayrollRuns,
+  assertMonthlyPayrollRunPushable,
   updateMonthlyPayrollPushStatus
 } from './monthlyPayrollRuns'
 export { inspectMonthlyPayrollSourcePeriods } from './monthlyPayrollPeriodChecks'
@@ -459,6 +462,16 @@ export async function generateMonthlyPayrollReports(
   try {
     const report = await generateMonthlyPayrollReportView(payload?.monthlyPayroll)
     const affectedRows = report.sheets.reduce((total, sheet) => total + sheet.rows.length, 0)
+    if (!report.ok) {
+      const result = failRule(generateWorkflowName, report.message)
+      result.affectedRows = affectedRows
+      result.warnings = [
+        ...result.warnings,
+        ...reconciliationIssueMessages(report.reconciliation)
+      ]
+      result.monthlyPayrollReport = report
+      return result
+    }
     const outputMessages = [
       report.insuranceImportPath ? `保险导入：${report.insuranceImportPath}` : '',
       report.salaryImportPath ? `工资导入：${report.salaryImportPath}` : '',
@@ -573,6 +586,28 @@ export async function generateMonthlyPayrollReportView(
   applyVoucherPageCounts(sheets, voucherPageCounts)
   const reportFingerprint = fingerprintReportSheets(sheets)
   const period = targetDate
+  const reconciliation = await reconcileMonthlyPayrollReport({
+    salary,
+    socialSecurity,
+    tax,
+    dataSourceMode,
+    sheets,
+    integratedActiveAggregates,
+    integratedRetiredAggregates,
+    integratedOtherAggregates
+  })
+  if (reconciliation.status === 'failed') {
+    return {
+      ok: false,
+      message: reconciliation.summary,
+      taxField,
+      processScope: input.processScope,
+      dataSourceMode,
+      voucherPageCounts,
+      reconciliation,
+      sheets
+    }
+  }
   const salaryImportFields = normalizeList(input.salaryImportFields)
   const salaryImportIdCards = normalizeList(input.salaryImportIdCards)
   const shouldGenerateSalaryImport = Boolean(
@@ -608,7 +643,10 @@ export async function generateMonthlyPayrollReportView(
     reportFingerprint,
     dataSourceMode
   )
-  if (previousRun && !shouldGenerateSalaryImport) {
+  if (
+    previousRun?.reportSnapshot?.reconciliation?.status === 'passed' &&
+      !shouldGenerateSalaryImport
+  ) {
     return {
       ok: true,
       message: '本次报表内容无变化，未重新生成文件，已沿用上次输出结果',
@@ -620,6 +658,7 @@ export async function generateMonthlyPayrollReportView(
       processScope: input.processScope,
       dataSourceMode,
       voucherPageCounts,
+      reconciliation,
       sheets
     }
   }
@@ -681,6 +720,8 @@ export async function generateMonthlyPayrollReportView(
       })
     : buildSalaryWorkbookBusinessSummary(reportSalary, reportRetired)
 
+  const reportMessage = `已生成 ${sheets.length} 张报表预览${outputMessages.length ? `，并输出${outputMessages.join('、')}` : ''}`
+
   await persistMonthlyPayrollRun({
     year: period.year,
     month: period.month,
@@ -716,7 +757,7 @@ export async function generateMonthlyPayrollReportView(
     dataSourceMode,
     reportSnapshot: {
       ok: true,
-      message: `已生成 ${sheets.length} 张报表预览${outputMessages.length ? `，并输出${outputMessages.join('、')}` : ''}`,
+      message: reportMessage,
       insuranceImportPath,
       salaryImportPath,
       payrollBackpayPath,
@@ -726,13 +767,14 @@ export async function generateMonthlyPayrollReportView(
       processScope: input.processScope,
       dataSourceMode,
       voucherPageCounts,
+      reconciliation,
       sheets
     }
   })
 
   return {
     ok: true,
-    message: `已生成 ${sheets.length} 张报表预览${outputMessages.length ? `，并输出${outputMessages.join('、')}` : ''}`,
+    message: reportMessage,
     insuranceImportPath,
     salaryImportPath,
     payrollBackpayPath,
@@ -742,8 +784,17 @@ export async function generateMonthlyPayrollReportView(
     processScope: input.processScope,
     dataSourceMode,
     voucherPageCounts,
+    reconciliation,
     sheets
   }
+}
+
+function reconciliationIssueMessages(
+  reconciliation: MonthlyPayrollReconciliationResult | undefined
+): string[] {
+  return (reconciliation?.issues ?? [])
+    .slice(0, 8)
+    .map((issue) => issue.message)
 }
 
 function buildReportSheets(

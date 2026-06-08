@@ -684,6 +684,49 @@ export type MonthlyPayrollRun = {
   createdAt: string
 }
 
+export type MonthlyPayrollReconciliationStatus = 'passed' | 'failed' | 'warning' | 'not_run'
+
+export type MonthlyPayrollReconciliationIssue = {
+  severity: 'error' | 'warning'
+  checkKey: string
+  checkName: string
+  category: string
+  message: string
+  name?: string
+  idCard?: string
+  fieldName?: string
+  sourceValue?: number
+  databaseValue?: number
+  reportValue?: number
+  difference?: number
+  suggestion?: string
+}
+
+export type MonthlyPayrollReconciliationCheck = {
+  key: string
+  name: string
+  status: MonthlyPayrollReconciliationStatus
+  checkedCount: number
+  issueCount: number
+  summary: string
+}
+
+export type MonthlyPayrollReconciliationResult = {
+  status: MonthlyPayrollReconciliationStatus
+  generatedAt: string
+  summary: string
+  checks: MonthlyPayrollReconciliationCheck[]
+  issues: MonthlyPayrollReconciliationIssue[]
+}
+
+export type MonthlyPayrollPushGuardResult =
+  | { ok: true }
+  | {
+      ok: false
+      reason: string
+      reconciliation?: MonthlyPayrollReconciliationResult | null
+    }
+
 export type MonthlyPayrollExchangeStatus =
   | 'package-built'
   | 'copied-to-media'
@@ -770,6 +813,7 @@ export type MonthlyPayrollReportResult = {
   processScope?: MonthlyPayrollProcessScope
   dataSourceMode?: MonthlyPayrollDataSourceMode
   voucherPageCounts?: MonthlyPayrollVoucherPageCounts
+  reconciliation?: MonthlyPayrollReconciliationResult
   sheets: MonthlyPayrollReportSheet[]
 }
 

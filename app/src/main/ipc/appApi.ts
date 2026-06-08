@@ -47,6 +47,7 @@ import {
 import { listWorkflows, runWorkflow } from '../services/workflowRegistry'
 import {
   archiveMonthlyPayrollRun,
+  assertMonthlyPayrollRunPushable,
   cancelMonthlyPayrollMonthClose,
   deleteMonthlyPayrollRun,
   generateMonthlyPayrollReportView,
@@ -181,6 +182,7 @@ import type {
   WorksheetField,
   LookupFailureEntry,
   MonthlyPayrollRun,
+  MonthlyPayrollPushGuardResult,
   MonthlyPayrollPushStatus,
   MonthlyPayrollPushTarget,
   MonthlyPayrollSourceVersion,
@@ -1181,6 +1183,12 @@ export function registerAppIpc(): void {
       target: MonthlyPayrollPushTarget,
       status: MonthlyPayrollPushStatus
     ): Promise<MonthlyPayrollRun> => updateMonthlyPayrollPushStatus(id, target, status)
+  )
+
+  ipcMain.handle(
+    'monthly-payroll:assert-pushable',
+    (_event, id: number): Promise<MonthlyPayrollPushGuardResult> =>
+      assertMonthlyPayrollRunPushable(id)
   )
 
   ipcMain.handle('monthly-payroll:delete-run', (_event, id: number): Promise<boolean> =>

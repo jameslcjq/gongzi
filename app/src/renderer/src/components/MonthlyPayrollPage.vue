@@ -38,6 +38,8 @@ import type {
   MonthlyPayrollDataSourceMode,
   MonthlyPayrollExchangeStatus,
   MonthlyPayrollSettings,
+  MonthlyPayrollPushGuardResult,
+  MonthlyPayrollReconciliationResult,
   MonthlyPayrollReportResult,
   MonthlyPayrollReportSheet,
   MonthlyPayrollPrintSettings,
@@ -562,6 +564,15 @@ async function confirmPushTargets(
     ElMessage.warning('这条报账记录已过期，请使用最新生成的记录重新推送')
     return false
   }
+  const guard = await window.salaryApi.assertMonthlyPayrollRunPushable(row.id)
+  if (!guard.ok) {
+    await ElMessageBox.alert(
+      reconciliationGuardMessage(guard),
+      '自动复核未通过',
+      { type: 'error', confirmButtonText: '知道了' }
+    )
+    return false
+  }
   const repushTargets = targets.filter((target) => {
     const status = pushStatusForTarget(row, target)
     return status === 'success' || status === 'needs-repush'
@@ -723,6 +734,40 @@ function dataSourceModeText(mode?: MonthlyPayrollDataSourceMode | null): string 
 
 function dataSourceModeTagType(mode?: MonthlyPayrollDataSourceMode | null): 'success' | 'warning' {
   return mode === 'integrated' ? 'success' : 'warning'
+}
+
+function reconciliationOfRun(
+  row: MonthlyPayrollRun
+): MonthlyPayrollReconciliationResult | null {
+  return row.reportSnapshot?.reconciliation ?? null
+}
+
+function reconciliationStatusText(
+  status?: MonthlyPayrollReconciliationResult['status'] | null
+): string {
+  if (status === 'passed') return '通过'
+  if (status === 'failed') return '未通过'
+  if (status === 'warning') return '有提醒'
+  return '未复核'
+}
+
+function reconciliationTagType(
+  status?: MonthlyPayrollReconciliationResult['status'] | null
+): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'passed') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'warning') return 'warning'
+  return 'info'
+}
+
+function reconciliationGuardMessage(guard: MonthlyPayrollPushGuardResult): string {
+  if (guard.ok) return ''
+  const issues = guard.reconciliation?.issues ?? []
+  const detailLines = issues.slice(0, 6).map((issue) => `· ${issue.message}`)
+  const suffix = issues.length > detailLines.length
+    ? [`· 还有 ${issues.length - detailLines.length} 条差异，请打开报表复核详情查看`]
+    : []
+  return [guard.reason, ...detailLines, ...suffix].join('\n')
 }
 
 function pushStatusText(status: MonthlyPayrollRun['insurancePushStatus']): string {
@@ -1997,11 +2042,17 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
         <el-table-column label="退休房补实发" width="140" align="right">
           <template #default="{ row }">{{ formatMoney(row.retiredHousingActualPay) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="140">
+        <el-table-column label="状态" width="180">
           <template #default="{ row }">
             <div class="status-tags">
               <el-tag :type="row.archivedAt ? 'info' : row.isOutdated ? 'warning' : 'success'" effect="plain">
                 {{ row.archivedAt ? '已月结' : row.isOutdated ? '已过期' : '可处理' }}
+              </el-tag>
+              <el-tag
+                :type="reconciliationTagType(reconciliationOfRun(row)?.status)"
+                effect="plain"
+              >
+                复核 {{ reconciliationStatusText(reconciliationOfRun(row)?.status) }}
               </el-tag>
               <el-tag
                 v-if="row.exchangePackageStatus"
@@ -2051,8 +2102,28 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
             >
               {{ dataSourceModeText(report.dataSourceMode ?? selectedHistoryRun?.dataSourceMode) }}
             </el-tag>
+            <el-tag
+              v-if="report.reconciliation"
+              size="small"
+              :type="reconciliationTagType(report.reconciliation.status)"
+              effect="plain"
+            >
+              自动复核 {{ reconciliationStatusText(report.reconciliation.status) }}
+            </el-tag>
           </div>
           <p v-if="report">{{ report.message }}</p>
+          <p
+            v-if="report.reconciliation"
+            class="reconciliation-summary"
+            :class="{ failed: report.reconciliation.status !== 'passed' }"
+          >
+            {{ report.reconciliation.summary }}
+          </p>
+          <small
+            v-for="issue in report.reconciliation?.issues.slice(0, 4) ?? []"
+            :key="`${issue.checkKey}-${issue.message}`"
+            class="reconciliation-issue"
+          >复核差异：{{ issue.message }}</small>
           <small v-if="report?.salaryImportPath">工资导入：{{ report.salaryImportPath }}</small>
           <small v-if="report?.payrollBackpayPath">补发工资：{{ report.payrollBackpayPath }}</small>
           <small v-if="report?.insuranceImportPath">保险导入：{{ report.insuranceImportPath }}</small>
@@ -2789,6 +2860,16 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   margin: 4px 0 0;
   color: var(--text-3);
   font-size: 12.5px;
+}
+
+.report-toolbar .reconciliation-summary {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.report-toolbar .reconciliation-summary.failed,
+.report-toolbar .reconciliation-issue {
+  color: var(--danger);
 }
 
 .print-controls {

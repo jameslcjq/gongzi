@@ -48,6 +48,7 @@ import type {
   WorksheetRecordsQuery,
   WorksheetRecordsResult,
   MonthlyPayrollRun,
+  MonthlyPayrollPushGuardResult,
   MonthlyPayrollPushStatus,
   MonthlyPayrollPushTarget,
   MonthlyPayrollSourceVersion,
@@ -320,6 +321,8 @@ const salaryApi = {
     status: MonthlyPayrollPushStatus
   ): Promise<MonthlyPayrollRun> =>
     ipcRenderer.invoke('monthly-payroll:update-push-status', id, target, status),
+  assertMonthlyPayrollRunPushable: (id: number): Promise<MonthlyPayrollPushGuardResult> =>
+    ipcRenderer.invoke('monthly-payroll:assert-pushable', id),
   deleteMonthlyPayrollRun: (id: number): Promise<boolean> =>
     ipcRenderer.invoke('monthly-payroll:delete-run', id),
   archiveMonthlyPayrollRun: (id: number): Promise<MonthlyPayrollArchiveResult> =>
