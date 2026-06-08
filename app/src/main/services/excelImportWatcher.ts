@@ -19,6 +19,7 @@ import { isValidIdCard, normalizeHeader, text } from './monthly-payroll/monthlyP
 const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
 type MonthlyPayrollFileKind = 'salary' | 'social' | 'tax'
+const directImportMonthlyPayrollWorksheetNames = new Set(['在职工资', '退休工资', '其他工资'])
 
 let importQueue: Promise<unknown> = Promise.resolve()
 const queuedImportFiles = new Set<string>()
@@ -411,6 +412,7 @@ function safeMtimeMs(filePath: string): number {
 }
 
 function reservedWorkflowWorksheetName(filePath: string): string | undefined {
+  if (isDirectImportMonthlyPayrollWorkbook(filePath)) return undefined
   if (classifyMonthlyPayrollFile(filePath)) return '工资报账'
   if (isPersonnelExpensePlanWorkbook(filePath)) return '人员经费核对'
   if (isAnnualAdjustmentFile(filePath)) return '社保个税'
@@ -482,9 +484,19 @@ function isFallbackSalaryWorkbookCandidate(filePath: string): boolean {
   if (isHousingAccountWorkbook(filePath) || isPersonalInsuranceDetailWorkbook(filePath)) return false
   if (isPersonalTaxTemplateWorkbook(filePath) || isSocialBaseTemplateWorkbook(filePath)) return false
   if (name.includes('人员经费') || name.includes('核对') || name.includes('模板')) return false
+  if (isDirectImportMonthlyPayrollWorkbook(filePath)) return false
   const workbook = readWorkbookSample(filePath)
   if (workbook && looksLikeIntegratedSalaryDetailWorkbook(workbook)) return false
   return true
+}
+
+function isDirectImportMonthlyPayrollWorkbook(filePath: string): boolean {
+  try {
+    const result = inferWorksheet(filePath)
+    return result.worksheet ? directImportMonthlyPayrollWorksheetNames.has(result.worksheet.name) : false
+  } catch {
+    return false
+  }
 }
 
 function normalizedFileBaseName(filePath: string): string {
