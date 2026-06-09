@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260609-salary-quota-match-residual-reselect'
+  var VERSION = '20260609c-salary-quota-match-pay-money-guard'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -1358,6 +1358,31 @@ export function buildSalaryQuotaMatchScript(
     return null
   }
 
+  function domElementOf(target) {
+    if (!target) return null
+    if (target.nodeType === 1) return target
+    if (target[0] && target[0].nodeType === 1) return target[0]
+    return null
+  }
+
+  function editorBelongsToCell(editorInfo, cell) {
+    var target = domElementOf(editorInfo && editorInfo.editor && editorInfo.editor.target)
+    if (!target || !cell) return false
+    if (cell.contains(target)) return true
+    try {
+      var jq = editorInfo && editorInfo.jq
+      if (jq) {
+        var wrapper = jq(target).closest('.textbox,.combo,.numberbox,.datagrid-editable')
+        if (wrapper && wrapper[0] && cell.contains(wrapper[0])) return true
+      }
+    } catch (error) {}
+    try {
+      var fieldCell = target.closest && target.closest('[field]')
+      if (fieldCell === cell) return true
+    } catch (error) {}
+    return false
+  }
+
   function setEditorValue(editorInfo, value) {
     var jq = editorInfo && editorInfo.jq
     var target = editorInfo && editorInfo.editor && editorInfo.editor.target
@@ -1422,7 +1447,7 @@ export function buildSalaryQuotaMatchScript(
     await sleep(250)
     var doc = row.ownerDocument
     var editorInfo = findDatagridEditor(row, CONFIG.quotaAmountField)
-    if (editorInfo && setEditorValue(editorInfo, amount)) {
+    if (editorInfo && editorBelongsToCell(editorInfo, cell) && setEditorValue(editorInfo, amount)) {
       await sleep(150)
       var actual = parseAmount(currentEditorValue(editorInfo))
       if (Math.abs(actual - amount) <= 0.01) return true
@@ -1433,17 +1458,27 @@ export function buildSalaryQuotaMatchScript(
           (currentEditorValue(editorInfo) || '空'),
         'warn'
       )
+    } else if (editorInfo) {
+      status('已放弃一个不属于“挂接金额”列的编辑器，避免误填“部门经济分类”等其他列。', 'warn')
     }
 
+    // 只在「挂接金额」(pay_money) 单元格内查找编辑框，绝不跨列/跨文档兜底：
+    // 点了页面“修改”后，可挂接指标行里“部门经济分类”等下拉列同样可编辑，且在列顺序里
+    // 排在“挂接金额”之前；doc 级兜底会抓到第一列（部门经济分类），把金额误填进去，
+    // 整行被写坏导致无法保存。
     var inputs = Array.prototype.slice.call(
       cell.querySelectorAll('input.textbox-text, input[type="text"], textarea')
-    ).concat(
-      Array.prototype.slice.call(doc.querySelectorAll('.datagrid-editable input.textbox-text, .datagrid-editable input[type="text"], .datagrid-editable textarea'))
-    ).concat(
-      Array.prototype.slice.call(doc.querySelectorAll('input.textbox-text, input[type="text"], textarea'))
     ).filter(isVisible)
-    var input = inputs[0] || doc.activeElement
-    if (!input || !('value' in input)) return false
+    if (!inputs.length) {
+      inputs = Array.prototype.slice.call(cell.querySelectorAll('input, textarea')).filter(function (node) {
+        return isVisible(node) && node.type !== 'hidden'
+      })
+    }
+    var input = inputs[0]
+    if (!input || !('value' in input)) {
+      status('未能在“挂接金额”列定位到可编辑输入框，已停止本次填写，避免误填“部门经济分类”等其他列。', 'err')
+      return false
+    }
     input.focus()
     input.value = String(amount)
     input.dispatchEvent(new Event('input', { bubbles: true }))

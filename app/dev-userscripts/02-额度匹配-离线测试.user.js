@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         工资系统-额度匹配调试（离线）
 // @namespace    https://www.hujiuxi.top/gongzi/dev
-// @version      2026.06.09
+// @version      2026.06.09c
 // @description  离线油猴调试版：在一体化生成支付页面测试额度匹配、修改、保存、重新选行。
 // @author       老九 / Codex
 // @match        http://172.24.147.202/*
@@ -13,7 +13,7 @@
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = false
   var SHOW_PAGE_BUTTON = true
-  var VERSION = '20260609-salary-quota-match-residual-reselect'
+  var VERSION = '20260609c-salary-quota-match-pay-money-guard'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = (function () {
@@ -687,29 +687,6 @@
     return best
   }
 
-  function pick30301With30107Fallback(rows, amount, options) {
-    var primary = pickQuotaByRequirement(
-      rows,
-      amount,
-      options.primaryRequire || ['30301'],
-      options.primaryPrefer || ['30301', '基本工资'],
-      options.primaryAvoid || ['30302', '退休费', '30305', '生活补助', '生活补贴'],
-      options.primaryReject
-    )
-    if (primary) return { row: primary, label: options.primaryLabel || '30301 基本工资' }
-
-    var fallback = pickQuotaByRequirement(
-      rows,
-      amount,
-      options.fallbackRequire || ['30107'],
-      options.fallbackPrefer || ['30107', '绩效工资'],
-      options.fallbackAvoid || ['30302', '退休费', '30305', '生活补助', '生活补贴'],
-      options.fallbackReject
-    )
-    if (fallback) return { row: fallback, label: options.fallbackLabel || '30107 绩效工资' }
-    return null
-  }
-
   function pickPersonnelExpenseFallback(rows, amount, options) {
     options = options || {}
     var best = null
@@ -757,37 +734,75 @@
     return best
   }
 
-  function pickCareerSalary30302Quota(rows, amount) {
-    var best = null
-    var bestScore = Number.NEGATIVE_INFINITY
+  function getMixablePersonnelExpenseCode(text) {
+    var codes = text.match(/[0-9]{5}/g) || []
+    for (var i = 0; i < codes.length; i++) {
+      var code = codes[i]
+      if (code === '30302') continue
+      if (code.indexOf('301') === 0 || code.indexOf('303') === 0) return code
+    }
+    return ''
+  }
+
+  function buildPersonnelExpenseMixAllocations(rows, amount, options) {
+    options = options || {}
+    var candidates = []
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i]
       var text = normalizeText(quotaText(row))
-      if (text.indexOf('30302') < 0) continue
-      if (text.indexOf('事业工资') < 0 && text.indexOf('事业人员工资') < 0) continue
-      if (
-        text.indexOf('事业人员提租补贴') >= 0 ||
-        text.indexOf('提租补贴') >= 0 ||
-        text.indexOf('住房补贴') >= 0 ||
-        text.indexOf('退休费') >= 0 ||
-        text.indexOf('30305') >= 0 ||
-        text.indexOf('生活补助') >= 0 ||
-        text.indexOf('生活补贴') >= 0
-      ) {
-        continue
+      var code = getMixablePersonnelExpenseCode(text)
+      if (!code) continue
+      var rejected = false
+      var reject = options.reject || ['30302', '退休费']
+      for (var r = 0; r < reject.length; r++) {
+        if (text.indexOf(normalizeText(reject[r])) >= 0) {
+          rejected = true
+          break
+        }
       }
-      if (quotaAvailable(row) < amount) continue
+      if (rejected) continue
+      var available = roundMoney(quotaAvailable(row))
+      if (available <= 0) continue
 
       var score = 100
-      if (text.indexOf('事业人员工资') >= 0) score += 30
-      if (text.indexOf('事业工资') >= 0) score += 20
-      if (text.indexOf('30302') >= 0) score += 10
-      if (score > bestScore) {
-        best = row
-        bestScore = score
+      if (code === options.primaryCode) score += 100
+      if (code.indexOf('301') === 0) score += 20
+      if (code.indexOf('303') === 0) score += 10
+      var orderIndex = PERSONNEL_EXPENSE_CODES.indexOf(code)
+      if (orderIndex >= 0) score += PERSONNEL_EXPENSE_CODES.length - orderIndex
+      if (options.prefer) {
+        for (var p = 0; p < options.prefer.length; p++) {
+          if (text.indexOf(normalizeText(options.prefer[p])) >= 0) score += (options.prefer.length - p) * 5
+        }
       }
+      candidates.push({ row: row, code: code, available: available, score: score })
     }
-    return best
+
+    candidates.sort(function (a, b) {
+      return b.score - a.score
+    })
+
+    var remaining = roundMoney(amount)
+    var allocations = []
+    for (var c = 0; c < candidates.length; c++) {
+      if (remaining <= 0.01) break
+      var candidate = candidates[c]
+      var take = roundMoney(Math.min(candidate.available, remaining))
+      if (take <= 0) continue
+      var baseLabel =
+        candidate.code === options.primaryCode
+          ? options.primaryLabel || candidate.code + ' 人员经费'
+          : candidate.code + ' 人员经费兜底'
+      allocations.push({
+        row: candidate.row,
+        amount: take,
+        label: baseLabel + (options.labelSuffix || '')
+      })
+      remaining = roundMoney(remaining - take)
+    }
+
+    if (remaining > 0.01) return null
+    return allocations
   }
 
   function mergeAllocations(allocations) {
@@ -796,7 +811,7 @@
       var item = allocations[i]
       var found = null
       for (var j = 0; j < merged.length; j++) {
-        if (merged[j].row === item.row) {
+        if (merged[j].row === item.row && merged[j].label === item.label) {
           found = merged[j]
           break
         }
@@ -1048,40 +1063,27 @@
   }
 
   function buildCareerBasicSalaryWholeAllocations(itemName, itemRow, amount, rows) {
-    var basicQuota = pick30301With30107Fallback(
+    var basicAllocations = buildPersonnelExpenseMixAllocations(
       rows,
       amount,
       {
-        primaryRequire: ['30301'],
-        primaryPrefer: ['30301', '基本工资'],
-        primaryAvoid: ['30107', '绩效工资', '30302', '退休费', '30305', '生活补助'],
-        primaryReject: ['乡镇', '基础性绩效'],
-        primaryLabel: '30301 基本工资',
-        fallbackRequire: ['30107'],
-        fallbackPrefer: ['30107', '绩效工资'],
-        fallbackAvoid: ['30302', '退休费', '30305', '生活补助'],
-        fallbackLabel: '30107 绩效工资'
+        primaryCode: '30101',
+        primaryLabel: '30101 基本工资',
+        prefer: ['30101', '基本工资'],
+        reject: ['30302', '退休费']
       }
     )
-    if (basicQuota) {
+    if (basicAllocations) {
       return {
         ok: true,
-        allocations: [{ row: basicQuota.row, amount: amount, label: basicQuota.label }]
-      }
-    }
-
-    var careerSalaryQuota = pickCareerSalary30302Quota(rows, amount)
-    if (careerSalaryQuota) {
-      return {
-        ok: true,
-        allocations: [{ row: careerSalaryQuota, amount: amount, label: '30302 事业人员工资' }]
+        allocations: basicAllocations
       }
     }
 
     return {
       ok: false,
       reason:
-        '整项匹配也失败：30301 基本工资/30107 绩效工资/30302 事业人员工资余额不足、未找到或余额读取失败。金额：' +
+        '整项匹配也失败：30101 基本工资及其他可混用人员经费余额不足、未找到或余额读取失败。金额：' +
         formatAmount(amount)
     }
   }
@@ -1136,92 +1138,71 @@
     var allocations = []
 
     if (performanceAmount > 0) {
-      var performanceQuota = pickQuotaByRequirement(
+      var performanceAllocations = buildPersonnelExpenseMixAllocations(
         rows,
         performanceAmount,
-        ['30107', '绩效'],
-        ['30107', '绩效工资', '基础性绩效', '基础性绩效工资'],
-        ['30301', '30302', '退休费', '30305', '生活补助'],
-        ['乡镇']
+        {
+          primaryCode: '30107',
+          primaryLabel: '30107 绩效工资',
+          prefer: ['30107', '绩效工资', '基础性绩效', '基础性绩效工资'],
+          reject: ['30302', '退休费'],
+          labelSuffix: '（岗位津贴+生活补贴）'
+        }
       )
-      if (!performanceQuota) {
-        var performanceFallback = pickPersonnelExpenseFallback(
-          rows,
-          performanceAmount,
-          {
-            prefer: ['30107', '30101', '30102'],
-            reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
-          }
-        )
-        performanceQuota = performanceFallback && performanceFallback.row
-      }
-      if (!performanceQuota) {
+      if (!performanceAllocations) {
         return {
           ok: false,
           reason:
-            '事业基本工资中的岗位津贴+生活补贴无法匹配：30107 绩效工资余额不足、未找到或余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
+            '事业基本工资中的岗位津贴+生活补贴无法匹配：30107 绩效工资及其他可混用人员经费余额不足、未找到或余额读取失败。金额：' +
             formatAmount(performanceAmount)
         }
       }
-      allocations.push({ row: performanceQuota, amount: performanceAmount, label: '30107 绩效工资（岗位津贴+生活补贴）' })
+      allocations = allocations.concat(performanceAllocations)
     }
 
     if (otherOneAmount > 0) {
-      var otherOneQuota = pickPersonnelExpenseFallback(
+      var otherOneAllocations = buildPersonnelExpenseMixAllocations(
         rows,
         otherOneAmount,
         {
-          prefer: ['30101', '30107', '30102'],
-          reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
+          primaryCode: '30101',
+          primaryLabel: '30101 基本工资',
+          prefer: ['30101', '基本工资'],
+          reject: ['30302', '退休费'],
+          labelSuffix: '（其他一）'
         }
       )
-      if (!otherOneQuota) {
+      if (!otherOneAllocations) {
         return {
           ok: false,
           reason:
-            '事业基本工资中的其他一无法匹配：人员经费兜底范围余额不足、未找到或余额读取失败。金额：' +
+            '事业基本工资中的其他一无法匹配：30101 基本工资及其他可混用人员经费余额不足、未找到或余额读取失败。金额：' +
             formatAmount(otherOneAmount)
         }
       }
-      allocations.push({ row: otherOneQuota.row, amount: otherOneAmount, label: otherOneQuota.label + '（其他一）' })
+      allocations = allocations.concat(otherOneAllocations)
     }
 
     if (remainingAmount > 0) {
-      var basicQuota = pick30301With30107Fallback(
+      var basicAllocations = buildPersonnelExpenseMixAllocations(
         rows,
         remainingAmount,
         {
-          primaryRequire: ['30301'],
-          primaryPrefer: ['30301', '基本工资'],
-          primaryAvoid: ['30107', '绩效工资', '30302', '退休费', '30305', '生活补助'],
-          primaryReject: ['乡镇', '基础性绩效'],
-          primaryLabel: '30301 基本工资',
-          fallbackRequire: ['30107'],
-          fallbackPrefer: ['30107', '绩效工资'],
-          fallbackAvoid: ['30302', '退休费', '30305', '生活补助'],
-          fallbackLabel: '30107 绩效工资'
+          primaryCode: '30101',
+          primaryLabel: '30101 基本工资',
+          prefer: ['30101', '基本工资'],
+          reject: ['30302', '退休费']
         }
       )
-      if (!basicQuota) {
-        var remainingFallback = pickPersonnelExpenseFallback(
-          rows,
-          remainingAmount,
-          {
-            prefer: ['30101', '30107', '30102'],
-            reject: ['30302', '退休费', '30305', '生活补助', '生活补贴']
-          }
-        )
-        if (remainingFallback) basicQuota = remainingFallback
-      }
-      if (!basicQuota) {
+      if (!basicAllocations) {
         return {
           ok: false,
           reason:
-            '事业基本工资剩余金额无法匹配：30301 基本工资余额不足/未找到/余额读取失败，人员经费兜底范围也不足或不可用。金额：' +
+            '事业基本工资剩余金额无法匹配：30101 基本工资及其他可混用人员经费余额不足、未找到或余额读取失败。金额：' +
             formatAmount(remainingAmount)
         }
       }
-      allocations.push({ row: basicQuota.row, amount: remainingAmount, label: basicQuota.label })
+      allocations = allocations.concat(basicAllocations)
     }
 
     return { ok: true, allocations: allocations }
@@ -1379,6 +1360,31 @@
     return null
   }
 
+  function domElementOf(target) {
+    if (!target) return null
+    if (target.nodeType === 1) return target
+    if (target[0] && target[0].nodeType === 1) return target[0]
+    return null
+  }
+
+  function editorBelongsToCell(editorInfo, cell) {
+    var target = domElementOf(editorInfo && editorInfo.editor && editorInfo.editor.target)
+    if (!target || !cell) return false
+    if (cell.contains(target)) return true
+    try {
+      var jq = editorInfo && editorInfo.jq
+      if (jq) {
+        var wrapper = jq(target).closest('.textbox,.combo,.numberbox,.datagrid-editable')
+        if (wrapper && wrapper[0] && cell.contains(wrapper[0])) return true
+      }
+    } catch (error) {}
+    try {
+      var fieldCell = target.closest && target.closest('[field]')
+      if (fieldCell === cell) return true
+    } catch (error) {}
+    return false
+  }
+
   function setEditorValue(editorInfo, value) {
     var jq = editorInfo && editorInfo.jq
     var target = editorInfo && editorInfo.editor && editorInfo.editor.target
@@ -1443,7 +1449,7 @@
     await sleep(250)
     var doc = row.ownerDocument
     var editorInfo = findDatagridEditor(row, CONFIG.quotaAmountField)
-    if (editorInfo && setEditorValue(editorInfo, amount)) {
+    if (editorInfo && editorBelongsToCell(editorInfo, cell) && setEditorValue(editorInfo, amount)) {
       await sleep(150)
       var actual = parseAmount(currentEditorValue(editorInfo))
       if (Math.abs(actual - amount) <= 0.01) return true
@@ -1454,17 +1460,27 @@
           (currentEditorValue(editorInfo) || '空'),
         'warn'
       )
+    } else if (editorInfo) {
+      status('已放弃一个不属于“挂接金额”列的编辑器，避免误填“部门经济分类”等其他列。', 'warn')
     }
 
+    // 只在「挂接金额」(pay_money) 单元格内查找编辑框，绝不跨列/跨文档兜底：
+    // 点了页面“修改”后，可挂接指标行里“部门经济分类”等下拉列同样可编辑，且在列顺序里
+    // 排在“挂接金额”之前；doc 级兜底会抓到第一列（部门经济分类），把金额误填进去，
+    // 整行被写坏导致无法保存。
     var inputs = Array.prototype.slice.call(
       cell.querySelectorAll('input.textbox-text, input[type="text"], textarea')
-    ).concat(
-      Array.prototype.slice.call(doc.querySelectorAll('.datagrid-editable input.textbox-text, .datagrid-editable input[type="text"], .datagrid-editable textarea'))
-    ).concat(
-      Array.prototype.slice.call(doc.querySelectorAll('input.textbox-text, input[type="text"], textarea'))
     ).filter(isVisible)
-    var input = inputs[0] || doc.activeElement
-    if (!input || !('value' in input)) return false
+    if (!inputs.length) {
+      inputs = Array.prototype.slice.call(cell.querySelectorAll('input, textarea')).filter(function (node) {
+        return isVisible(node) && node.type !== 'hidden'
+      })
+    }
+    var input = inputs[0]
+    if (!input || !('value' in input)) {
+      status('未能在“挂接金额”列定位到可编辑输入框，已停止本次填写，避免误填“部门经济分类”等其他列。', 'err')
+      return false
+    }
     input.focus()
     input.value = String(amount)
     input.dispatchEvent(new Event('input', { bubbles: true }))
