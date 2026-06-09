@@ -53,6 +53,7 @@ export type MonthlyPayrollWorkflowInput = {
   year?: number
   month?: number
   confirmWriteBack?: boolean
+  confirmIdentityFallback?: boolean
   salaryImportFields?: string[]
   salaryImportIdCards?: string[]
   processScope?: MonthlyPayrollProcessScope
@@ -77,14 +78,29 @@ export type MonthlyPayrollSettings = {
 
 export type MonthlyPayrollWriteBackPreview = {
   requiresConfirmation: boolean
+  requiresIdentityConfirmation: boolean
   applied: boolean
   syncableCount: number
   manualCount: number
+  identityReviewCount: number
+  identityConfirmableCount: number
+  identityBlockedCount: number
   personCount: number
   examples: string[]
   manualExamples: string[]
+  identityReviewExamples: string[]
   salaryImportFields: string[]
   salaryImportIdCards: string[]
+}
+
+export type MonthlyPayrollIdentityReview = {
+  worksheetName: string
+  sourceName: string
+  sourceIdCard: string
+  targetName?: string
+  targetIdCard?: string
+  confirmable: boolean
+  reason: string
 }
 
 export type WorkflowDefinition = {

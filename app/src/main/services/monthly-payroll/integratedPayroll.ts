@@ -1,7 +1,10 @@
 import { all, getDatabase, run } from '../../db/connection'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../../db/schema'
 import { findColumnByName, getWorksheetByName, tableNameOf } from '../worksheetTable'
-import type { MonthlyPayrollWriteBackPreview } from '../../../shared/types'
+import type {
+  MonthlyPayrollIdentityReview,
+  MonthlyPayrollWriteBackPreview
+} from '../../../shared/types'
 import type { PayrollPerson } from './monthlyPayrollTypes'
 import { inactiveMonthlyPayrollTaxField, readMonthlyPayrollSettings } from './monthlyPayrollSettings'
 import {
@@ -32,6 +35,8 @@ export type CompareSummary = {
   added: number
   removed: number
   changed: number
+  identityReviewCount: number
+  identityReviewExamples: string[]
   changedExamples: string[]
 }
 
@@ -65,6 +70,27 @@ type IntegratedManualDifference = {
 export type IntegratedWriteBackPlan = {
   changes: IntegratedWriteBackChange[]
   manual: IntegratedManualDifference[]
+  identityReviews: MonthlyPayrollIdentityReview[]
+}
+
+type IntegratedIdentityRowGroup = {
+  idCard: string
+  name: string
+  rows: Record<string, unknown>[]
+}
+
+type IntegratedIdentityIndex = {
+  byIdCard: Map<string, Record<string, unknown>[]>
+  byName: Map<string, IntegratedIdentityRowGroup[]>
+}
+
+type IntegratedIdentityResolution = {
+  rows?: Record<string, unknown>[]
+  review?: MonthlyPayrollIdentityReview
+}
+
+type IntegratedIdentityFallbackOptions = {
+  allowIdentityFallback?: boolean
 }
 
 export type IntegratedRow = {
@@ -344,22 +370,47 @@ export async function comparePayrollPeople(
   sourceName: string,
   sourcePeople: PayrollPerson[],
   targetWorksheetName: string,
-  compareFields: Array<[string, string]>
+  compareFields: Array<[string, string]>,
+  options: { allowIdentityFallback?: boolean } = {}
 ): Promise<CompareSummary> {
   const targetRows = await loadIntegratedRows(targetWorksheetName)
-  const sourceById = new Map(sourcePeople.map((person) => [person.idCard, person]))
   const targetById = new Map(targetRows.map((row) => [row.idCard, row]))
+  const targetByName = new Map<string, IntegratedRow[]>()
+  for (const target of targetRows) {
+    const nameKey = normalizePersonName(target.name)
+    if (!nameKey) continue
+    const grouped = targetByName.get(nameKey) ?? []
+    grouped.push(target)
+    targetByName.set(nameKey, grouped)
+  }
+  const matchedTargetIdCards = new Set<string>()
   let added = 0
   let removed = 0
   let changed = 0
   const changedExamples: string[] = []
+  let identityReviewCount = 0
+  const identityReviewExamples: string[] = []
 
   for (const person of sourcePeople) {
-    const target = targetById.get(person.idCard)
+    let target = targetById.get(person.idCard)
     if (!target) {
-      added += 1
-      continue
+      const resolution = resolveIntegratedRowIdentityFallback(
+        person,
+        targetByName,
+        targetWorksheetName,
+        options.allowIdentityFallback ?? false
+      )
+      if (resolution.review && identityReviewExamples.length < 5) {
+        identityReviewExamples.push(formatIntegratedIdentityReview(resolution.review))
+      }
+      if (resolution.review) identityReviewCount += 1
+      target = resolution.row
+      if (!target) {
+        added += 1
+        continue
+      }
     }
+    matchedTargetIdCards.add(target.idCard)
     const changes = getPayrollPersonChanges(person, target, compareFields)
     if (changes.length > 0) {
       changed += 1
@@ -370,7 +421,7 @@ export async function comparePayrollPeople(
   }
 
   for (const target of targetRows) {
-    if (!sourceById.has(target.idCard)) removed += 1
+    if (!matchedTargetIdCards.has(target.idCard)) removed += 1
   }
 
   return {
@@ -381,12 +432,15 @@ export async function comparePayrollPeople(
     added,
     removed,
     changed,
+    identityReviewCount,
+    identityReviewExamples,
     changedExamples
   }
 }
 
 export async function buildIntegratedActiveWriteBackPlan(
-  sourcePeople: PayrollPerson[]
+  sourcePeople: PayrollPerson[],
+  options: IntegratedIdentityFallbackOptions = {}
 ): Promise<IntegratedWriteBackPlan> {
   const settings = await readMonthlyPayrollSettings()
   const taxField = settings.taxField
@@ -395,12 +449,14 @@ export async function buildIntegratedActiveWriteBackPlan(
     '在职工资',
     getActiveCompareFields(taxField),
     '在职工资 缺少证件号码字段',
-    (targetFieldName) => targetFieldName === '交通费' ? '002' : '001'
+    (targetFieldName) => targetFieldName === '交通费' ? '002' : '001',
+    options
   )
 }
 
 export async function buildIntegratedActiveBackpayAdjustmentPlan(
-  sourcePeople: PayrollPerson[]
+  sourcePeople: PayrollPerson[],
+  options: IntegratedIdentityFallbackOptions = {}
 ): Promise<IntegratedWriteBackPlan> {
   const worksheet = getWorksheetByName('在职工资')
   const columns = getWorksheetLocalColumns(worksheet)
@@ -428,11 +484,20 @@ export async function buildIntegratedActiveBackpayAdjustmentPlan(
     grouped.push(row)
     rowsByIdCard.set(idCard, grouped)
   }
+  const identityIndex = buildIntegratedIdentityIndex(rowsByIdCard, nameColumn, batchColumn)
 
   const changes: IntegratedWriteBackChange[] = []
   const manual: IntegratedManualDifference[] = []
+  const identityReviews: MonthlyPayrollIdentityReview[] = []
   for (const person of sourcePeople) {
-    const personRows = rowsByIdCard.get(person.idCard)
+    const identity = resolveIntegratedIdentityRows({
+      worksheetName: '在职工资',
+      person,
+      identityIndex,
+      allowIdentityFallback: options.allowIdentityFallback ?? false
+    })
+    if (identity.review) identityReviews.push(identity.review)
+    const personRows = identity.rows
     if (!personRows) continue
 
     const name = person.name || text(personRows[0]?.[nameColumn])
@@ -463,7 +528,7 @@ export async function buildIntegratedActiveBackpayAdjustmentPlan(
     })
   }
 
-  return { changes, manual }
+  return { changes, manual, identityReviews }
 }
 
 function appendActiveBackpayAdjustmentChange(input: {
@@ -517,13 +582,16 @@ function appendActiveBackpayAdjustmentChange(input: {
 }
 
 export async function buildIntegratedOtherWriteBackPlan(
-  sourcePeople: PayrollPerson[]
+  sourcePeople: PayrollPerson[],
+  options: IntegratedIdentityFallbackOptions = {}
 ): Promise<IntegratedWriteBackPlan> {
   return buildIntegratedWorksheetWriteBackPlan(
     sourcePeople,
     '其他工资',
     survivorCompareFields,
-    '其他工资 缺少证件号码字段'
+    '其他工资 缺少证件号码字段',
+    undefined,
+    options
   )
 }
 
@@ -532,7 +600,8 @@ async function buildIntegratedWorksheetWriteBackPlan(
   worksheetName: string,
   compareFields: Array<[string, string]>,
   missingIdCardMessage: string,
-  fallbackBatchHint?: (targetFieldName: string) => string | undefined
+  fallbackBatchHint?: (targetFieldName: string) => string | undefined,
+  options: IntegratedIdentityFallbackOptions = {}
 ): Promise<IntegratedWriteBackPlan> {
   const worksheet = getWorksheetByName(worksheetName)
   const columns = getWorksheetLocalColumns(worksheet)
@@ -567,6 +636,7 @@ async function buildIntegratedWorksheetWriteBackPlan(
     grouped.push(row)
     rowsByIdCard.set(idCard, grouped)
   }
+  const identityIndex = buildIntegratedIdentityIndex(rowsByIdCard, nameColumn, batchColumn)
 
   const batchHintByField = new Map<string, string>()
   for (const item of writableFields) {
@@ -576,8 +646,16 @@ async function buildIntegratedWorksheetWriteBackPlan(
 
   const changes: IntegratedWriteBackChange[] = []
   const manual: IntegratedManualDifference[] = []
+  const identityReviews: MonthlyPayrollIdentityReview[] = []
   for (const person of sourcePeople) {
-    const personRows = rowsByIdCard.get(person.idCard)
+    const identity = resolveIntegratedIdentityRows({
+      worksheetName,
+      person,
+      identityIndex,
+      allowIdentityFallback: options.allowIdentityFallback ?? false
+    })
+    if (identity.review) identityReviews.push(identity.review)
+    const personRows = identity.rows
     if (!personRows) continue
 
     for (const item of writableFields) {
@@ -621,13 +699,14 @@ async function buildIntegratedWorksheetWriteBackPlan(
     }
   }
 
-  return { changes, manual }
+  return { changes, manual, identityReviews }
 }
 
 export function mergeIntegratedWriteBackPlans(...plans: IntegratedWriteBackPlan[]): IntegratedWriteBackPlan {
   return {
     changes: plans.flatMap((plan) => plan.changes),
-    manual: plans.flatMap((plan) => plan.manual)
+    manual: plans.flatMap((plan) => plan.manual),
+    identityReviews: dedupeIdentityReviews(plans.flatMap((plan) => plan.identityReviews))
   }
 }
 
@@ -678,17 +757,29 @@ export async function applyIntegratedWriteBackPlan(plan: IntegratedWriteBackPlan
 
 export function buildMonthlyPayrollWriteBackPreview(
   plan: IntegratedWriteBackPlan,
-  state: { requiresConfirmation: boolean; applied: boolean }
+  state: { requiresConfirmation: boolean; requiresIdentityConfirmation?: boolean; applied: boolean }
 ): MonthlyPayrollWriteBackPreview {
   const salaryImportDiff = buildSalaryImportDiff(plan)
+  const identityConfirmableCount = plan.identityReviews.filter((review) => review.confirmable).length
+  const identityBlockedCount = plan.identityReviews.length - identityConfirmableCount
+  const identityReviewExamples = plan.identityReviews
+    .slice()
+    .sort((left, right) => Number(left.confirmable) - Number(right.confirmable))
+    .slice(0, 5)
+    .map(formatIntegratedIdentityReview)
   return {
     requiresConfirmation: state.requiresConfirmation,
+    requiresIdentityConfirmation: state.requiresIdentityConfirmation ?? false,
     applied: state.applied,
     syncableCount: plan.changes.length,
     manualCount: plan.manual.length,
+    identityReviewCount: plan.identityReviews.length,
+    identityConfirmableCount,
+    identityBlockedCount,
     personCount: new Set(plan.changes.map((item) => item.idCard)).size,
     examples: plan.changes.slice(0, 5).map(formatIntegratedWriteBackChange),
     manualExamples: plan.manual.slice(0, 5).map(formatIntegratedManualDifference),
+    identityReviewExamples,
     salaryImportFields: salaryImportDiff.fields,
     salaryImportIdCards: salaryImportDiff.idCards
   }
@@ -757,6 +848,14 @@ function formatIntegratedWriteBackChange(change: IntegratedWriteBackChange): str
 
 function formatIntegratedManualDifference(change: IntegratedManualDifference): string {
   return `${change.worksheetName} ${change.name || change.idCard} ${change.fieldName} 工资表=${formatMoney(change.sourceValue)} / 一体化=${formatMoney(change.targetValue)}（${change.reason}）`
+}
+
+function formatIntegratedIdentityReview(review: MonthlyPayrollIdentityReview): string {
+  const source = `${review.sourceName || '未填姓名'}（工资表身份证 ${review.sourceIdCard || '空'}）`
+  const target = review.targetIdCard
+    ? `本地 ${review.targetName || review.sourceName || '未填姓名'}（身份证 ${review.targetIdCard}）`
+    : '未找到唯一本地人员'
+  return `${review.worksheetName} ${source} -> ${target}：${review.reason}`
 }
 
 function inferIntegratedFieldBatch(
@@ -907,6 +1006,120 @@ function integratedCurrentRowKey(
   batchColumn: string | undefined
 ): string {
   return batchColumn ? `${idCard}\u0000${text(row[batchColumn])}` : idCard
+}
+
+function buildIntegratedIdentityIndex(
+  byIdCard: Map<string, Record<string, unknown>[]>,
+  nameColumn: string | undefined,
+  batchColumn: string | undefined
+): IntegratedIdentityIndex {
+  const byName = new Map<string, IntegratedIdentityRowGroup[]>()
+  if (!nameColumn) return { byIdCard, byName }
+  for (const [idCard, rows] of byIdCard.entries()) {
+    const representative = selectIntegratedRepresentativeRow(rows, batchColumn)
+    const name = text(representative[nameColumn])
+    const nameKey = normalizePersonName(name)
+    if (!nameKey) continue
+    const grouped = byName.get(nameKey) ?? []
+    grouped.push({ idCard, name, rows })
+    byName.set(nameKey, grouped)
+  }
+  return { byIdCard, byName }
+}
+
+function resolveIntegratedIdentityRows(input: {
+  worksheetName: string
+  person: PayrollPerson
+  identityIndex: IntegratedIdentityIndex
+  allowIdentityFallback: boolean
+}): IntegratedIdentityResolution {
+  const idCard = normalizeIdCard(input.person.idCard)
+  const exactRows = input.identityIndex.byIdCard.get(idCard)
+  if (exactRows) return { rows: exactRows }
+
+  const nameKey = normalizePersonName(input.person.name)
+  if (!nameKey) return {}
+  const candidates = input.identityIndex.byName.get(nameKey) ?? []
+  if (candidates.length === 0) return {}
+  if (candidates.length > 1) {
+    return {
+      review: {
+        worksheetName: input.worksheetName,
+        sourceName: input.person.name,
+        sourceIdCard: idCard,
+        confirmable: false,
+        reason: `姓名重复，对应 ${candidates.map((candidate) => candidate.idCard).join('、')}，需先人工修正`
+      }
+    }
+  }
+
+  const candidate = candidates[0]
+  const review: MonthlyPayrollIdentityReview = {
+    worksheetName: input.worksheetName,
+    sourceName: input.person.name,
+    sourceIdCard: idCard,
+    targetName: candidate.name,
+    targetIdCard: candidate.idCard,
+    confirmable: true,
+    reason: '身份证不一致，姓名唯一匹配'
+  }
+  return input.allowIdentityFallback ? { rows: candidate.rows, review } : { review }
+}
+
+function resolveIntegratedRowIdentityFallback(
+  person: PayrollPerson,
+  targetByName: Map<string, IntegratedRow[]>,
+  worksheetName: string,
+  allowIdentityFallback: boolean
+): { row?: IntegratedRow; review?: MonthlyPayrollIdentityReview } {
+  const nameKey = normalizePersonName(person.name)
+  if (!nameKey) return {}
+  const candidates = targetByName.get(nameKey) ?? []
+  if (candidates.length === 0) return {}
+  if (candidates.length > 1) {
+    return {
+      review: {
+        worksheetName,
+        sourceName: person.name,
+        sourceIdCard: normalizeIdCard(person.idCard),
+        confirmable: false,
+        reason: `姓名重复，对应 ${candidates.map((candidate) => candidate.idCard).join('、')}，需先人工修正`
+      }
+    }
+  }
+  const candidate = candidates[0]
+  const review: MonthlyPayrollIdentityReview = {
+    worksheetName,
+    sourceName: person.name,
+    sourceIdCard: normalizeIdCard(person.idCard),
+    targetName: candidate.name,
+    targetIdCard: candidate.idCard,
+    confirmable: true,
+    reason: '身份证不一致，姓名唯一匹配'
+  }
+  return allowIdentityFallback ? { row: candidate, review } : { review }
+}
+
+function normalizePersonName(value: unknown): string {
+  return text(value).replace(/\s+/g, '')
+}
+
+function dedupeIdentityReviews(reviews: MonthlyPayrollIdentityReview[]): MonthlyPayrollIdentityReview[] {
+  const seen = new Set<string>()
+  const result: MonthlyPayrollIdentityReview[] = []
+  for (const review of reviews) {
+    const key = [
+      review.worksheetName,
+      review.sourceName,
+      review.sourceIdCard,
+      review.targetIdCard ?? '',
+      review.confirmable ? 'confirmable' : 'blocked'
+    ].join('\u0000')
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(review)
+  }
+  return result
 }
 
 function selectIntegratedRepresentativeRow(

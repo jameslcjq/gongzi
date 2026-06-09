@@ -14,7 +14,8 @@
     "dist:copy2": "npm run build && electron-builder --win nsis --config installer/electron-builder.copy2.yml",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test:monthly-payroll-reconciliation": "node scripts/run-monthly-payroll-reconciliation-test.mjs"
+    "test:monthly-payroll-reconciliation": "node scripts/run-monthly-payroll-reconciliation-test.mjs",
+    "test:monthly-payroll-voucher": "node scripts/run-monthly-payroll-voucher-sheet-test.mjs"
   },
   "build": {
     "appId": "com.laojiu.gzxt",

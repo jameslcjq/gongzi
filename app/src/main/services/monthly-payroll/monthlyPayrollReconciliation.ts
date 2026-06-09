@@ -25,6 +25,7 @@ type ReconcileInput = {
   socialSecurity?: SocialSecuritySummary
   tax?: TaxSummary
   dataSourceMode: MonthlyPayrollDataSourceMode
+  allowIdentityFallback?: boolean
   sheets: MonthlyPayrollReportSheet[]
   integratedActiveAggregates?: IntegratedActiveAggregates
   integratedRetiredAggregates?: IntegratedSimpleAggregates
@@ -69,6 +70,7 @@ export async function reconcileMonthlyPayrollReport(
   const backpay = reconcileActiveBackpayPeople({
     salary: input.salary,
     dataSourceMode: input.dataSourceMode,
+    allowIdentityFallback: input.allowIdentityFallback,
     sheets: input.sheets,
     activeRows
   })

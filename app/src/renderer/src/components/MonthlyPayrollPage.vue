@@ -1007,6 +1007,7 @@ async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
 function currentPayload(
   options: {
     confirmWriteBack?: boolean
+    confirmIdentityFallback?: boolean
     salaryImportFields?: string[]
     salaryImportIdCards?: string[]
   } = {}
@@ -1021,6 +1022,7 @@ function currentPayload(
       year: period.year,
       month: period.month,
       confirmWriteBack: options.confirmWriteBack,
+      confirmIdentityFallback: options.confirmIdentityFallback,
       salaryImportFields: options.salaryImportFields,
       salaryImportIdCards: options.salaryImportIdCards,
       processScope,
@@ -1047,6 +1049,29 @@ async function confirmMonthlyPayrollWriteBack(
         type: 'warning',
         confirmButtonText: '确认回写并复核',
         cancelButtonText: '暂不回写'
+      }
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function confirmMonthlyPayrollIdentityFallback(
+  preview: MonthlyPayrollWriteBackPreview
+): Promise<boolean> {
+  if (preview.identityBlockedCount > 0) return false
+  const examples = preview.identityReviewExamples.length
+    ? `\n\n示例：\n${preview.identityReviewExamples.map((item) => `- ${item}`).join('\n')}`
+    : ''
+  try {
+    await ElMessageBox.confirm(
+      `发现 ${preview.identityConfirmableCount} 条工资表与本地工资数据身份证不一致，但姓名唯一匹配。确认后仅本次按姓名候选继续核对和回写，不会自动修改身份证号。${examples}`,
+      '确认身份匹配',
+      {
+        type: 'warning',
+        confirmButtonText: '确认并继续',
+        cancelButtonText: '先不继续'
       }
     )
     return true
@@ -1084,6 +1109,62 @@ async function runPreprocess(): Promise<void> {
     emit('workflowNotice', next)
     await refreshSourceVersions()
     const writeBack = next.monthlyPayrollWriteBack
+    if (writeBack?.requiresIdentityConfirmation && writeBack.identityConfirmableCount > 0) {
+      const confirmedIdentity = await confirmMonthlyPayrollIdentityFallback(writeBack)
+      if (!confirmedIdentity) {
+        ElMessage.info('已暂不继续，可核对身份证后再次预处理')
+        return
+      }
+      const identityPayload = currentPayload({ confirmIdentityFallback: true })
+      if (!identityPayload) return
+      const identityResult = await window.salaryApi.runWorkflow(
+        'monthly-payroll.preprocess',
+        identityPayload
+      )
+      result.value = identityResult
+      emit('workflowNotice', identityResult)
+      await refreshSourceVersions()
+      const confirmedWriteBack = identityResult.monthlyPayrollWriteBack
+      if (confirmedWriteBack?.requiresConfirmation && confirmedWriteBack.syncableCount > 0) {
+        const confirmed = await confirmMonthlyPayrollWriteBack(confirmedWriteBack)
+        if (!confirmed) {
+          ElMessage.info('已暂不回写，可处理后再次预处理')
+          return
+        }
+        const confirmedPayload = currentPayload({
+          confirmIdentityFallback: true,
+          confirmWriteBack: true
+        })
+        if (!confirmedPayload) return
+        const confirmedResult = await window.salaryApi.runWorkflow(
+          'monthly-payroll.preprocess',
+          confirmedPayload
+        )
+        result.value = confirmedResult
+        emit('workflowNotice', confirmedResult)
+        await refreshSourceVersions()
+        if (confirmedResult.ok && confirmedResult.warnings.length === 0) {
+          ElMessage.success('身份与回写复核通过，开始生成报表')
+          await runGenerate(confirmedResult.monthlyPayrollWriteBack)
+        } else if (confirmedResult.ok) {
+          ElMessage.warning('预处理存在提醒，已停止自动生成报表；请查看页面结果或系统通知')
+        } else {
+          ElMessage.error(confirmedResult.warnings[0] ?? '月度工资报账预处理失败')
+        }
+        return
+      }
+      if (identityResult.ok) {
+        ElMessage.success('身份确认通过，月度工资报账预处理完成')
+        if (identityResult.warnings.length === 0) {
+          await runGenerate(identityResult.monthlyPayrollWriteBack)
+        } else {
+          ElMessage.warning('预处理存在提醒，已停止自动生成报表；请查看页面结果或系统通知')
+        }
+      } else {
+        ElMessage.error(identityResult.warnings[0] ?? '月度工资报账预处理失败')
+      }
+      return
+    }
     if (writeBack?.requiresConfirmation && writeBack.syncableCount > 0) {
       const confirmed = await confirmMonthlyPayrollWriteBack(writeBack)
       if (!confirmed) {
@@ -1145,6 +1226,7 @@ async function runGenerate(writeBack?: MonthlyPayrollWriteBackPreview): Promise<
   selectedReportRunId.value = null
   try {
     const payload = currentPayload({
+      confirmIdentityFallback: Boolean(writeBack?.identityReviewCount && writeBack.identityBlockedCount === 0),
       salaryImportFields: writeBack?.salaryImportFields,
       salaryImportIdCards: writeBack?.salaryImportIdCards
     })

@@ -325,22 +325,63 @@ export async function preprocessMonthlyPayroll(
         insuranceCheck.warnings
       )
     }
-    let activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
-    let activeBackpayWriteBackPlan = await buildIntegratedActiveBackpayAdjustmentPlan(salary.activePeople)
+    const identityFallbackOptions = { allowIdentityFallback: Boolean(input.confirmIdentityFallback) }
+    let activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(
+      salary.activePeople,
+      identityFallbackOptions
+    )
+    let activeBackpayWriteBackPlan = await buildIntegratedActiveBackpayAdjustmentPlan(
+      salary.activePeople,
+      identityFallbackOptions
+    )
     let activeWriteBackPlan = mergeIntegratedWriteBackPlans(
       activeFieldWriteBackPlan,
       activeBackpayWriteBackPlan
     )
-    let survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
+    let survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(
+      salary.survivorPeople,
+      identityFallbackOptions
+    )
     let writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
+    const blockedIdentityReviews = writeBackPlan.identityReviews.filter((review) => !review.confirmable)
+    const confirmableIdentityReviews = writeBackPlan.identityReviews.filter((review) => review.confirmable)
     let writeBackPreview = buildMonthlyPayrollWriteBackPreview(writeBackPlan, {
       requiresConfirmation: writeBackPlan.changes.length > 0 && !input.confirmWriteBack,
+      requiresIdentityConfirmation: confirmableIdentityReviews.length > 0 && !input.confirmIdentityFallback,
       applied: false
     })
+
+    if (blockedIdentityReviews.length > 0 || (confirmableIdentityReviews.length > 0 && !input.confirmIdentityFallback)) {
+      const pendingPreview = buildMonthlyPayrollWriteBackPreview(writeBackPlan, {
+        requiresConfirmation: false,
+        requiresIdentityConfirmation: blockedIdentityReviews.length === 0 && confirmableIdentityReviews.length > 0,
+        applied: false
+      })
+      const warnings = blockedIdentityReviews.length > 0
+        ? [
+            `发现 ${blockedIdentityReviews.length} 条工资表与本地工资数据身份无法自动确认，请先人工修正后再预处理。`,
+            ...pendingPreview.identityReviewExamples.map((item) => `身份待处理：${item}`)
+          ]
+        : [
+            `发现 ${confirmableIdentityReviews.length} 条工资表与本地工资数据身份证不一致，但姓名唯一匹配，需要人工确认后才允许继续。`,
+            ...pendingPreview.identityReviewExamples.map((item) => `身份待确认：${item}`)
+          ]
+      const result = okRule(
+        workflowName,
+        salary.activePeople.length + salary.survivorPeople.length + (socialSecurity?.rowCount ?? 0) + (tax?.rows.length ?? 0),
+        [
+          `身份核对：${pendingPreview.identityReviewCount} 条需人工处理，确认前不会回写或更新本地工资数据。`
+        ],
+        warnings
+      )
+      result.monthlyPayrollWriteBack = pendingPreview
+      return result
+    }
 
     if (writeBackPlan.changes.length > 0 && !input.confirmWriteBack) {
       const pendingPreview = buildMonthlyPayrollWriteBackPreview(writeBackPlan, {
         requiresConfirmation: true,
+        requiresIdentityConfirmation: false,
         applied: false
       })
       const result = okRule(
@@ -369,13 +410,22 @@ export async function preprocessMonthlyPayroll(
             preserveExistingTaxField: activeBackpayWriteBackPlan.changes.length > 0
           })
         : await summarizeIntegratedActive(taxByIdCard)
-      activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(salary.activePeople)
-      activeBackpayWriteBackPlan = await buildIntegratedActiveBackpayAdjustmentPlan(salary.activePeople)
+      activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(
+        salary.activePeople,
+        identityFallbackOptions
+      )
+      activeBackpayWriteBackPlan = await buildIntegratedActiveBackpayAdjustmentPlan(
+        salary.activePeople,
+        identityFallbackOptions
+      )
       activeWriteBackPlan = mergeIntegratedWriteBackPlans(
         activeFieldWriteBackPlan,
         activeBackpayWriteBackPlan
       )
-      survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(salary.survivorPeople)
+      survivorWriteBackPlan = await buildIntegratedOtherWriteBackPlan(
+        salary.survivorPeople,
+        identityFallbackOptions
+      )
       writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
       writeBackPreview = mergeAppliedWriteBackPreview(appliedPlan, writeBackPlan)
     } else {
@@ -383,8 +433,8 @@ export async function preprocessMonthlyPayroll(
     }
 
     const [activeCompare, survivorCompare, integratedPersonalInsurance] = await Promise.all([
-      comparePayrollPeople('公办在职', salary.activePeople, '在职工资', getActiveCompareFields(taxField)),
-      comparePayrollPeople('遗补', salary.survivorPeople, '其他工资', survivorCompareFields),
+      comparePayrollPeople('公办在职', salary.activePeople, '在职工资', getActiveCompareFields(taxField), identityFallbackOptions),
+      comparePayrollPeople('遗补', salary.survivorPeople, '其他工资', survivorCompareFields, identityFallbackOptions),
       loadIntegratedActivePersonalInsuranceTotals()
     ])
     const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
@@ -407,6 +457,9 @@ export async function preprocessMonthlyPayroll(
         : '个税：未检测到个税文件，本次跳过个税扣款和补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
       ...(writeBackPreview.applied
         ? [`工资表金额差异已自动回写 ${writeBackPreview.syncableCount} 项，复核后${activeCompare.changed === 0 ? '在职工资已一致' : `仍有 ${activeCompare.changed} 人存在差异`}`]
+        : []),
+      ...(writeBackPreview.identityReviewCount > 0 && input.confirmIdentityFallback
+        ? [`身份核对：已人工确认 ${writeBackPreview.identityConfirmableCount} 条姓名唯一匹配，本次未自动修改身份证号`]
         : []),
       `${writeBackPreview.applied ? '在职工资已按公式重算' : '在职工资当前汇总'} ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
       actualPayMatched
@@ -591,6 +644,7 @@ export async function generateMonthlyPayrollReportView(
     socialSecurity,
     tax,
     dataSourceMode,
+    allowIdentityFallback: Boolean(input.confirmIdentityFallback),
     sheets,
     integratedActiveAggregates,
     integratedRetiredAggregates,
@@ -1148,7 +1202,7 @@ function buildReportSheets(
         salaryReimburseTotal,
         insuranceVoucherTotal,
         withholdingTotal,
-        activeInsurance
+        salaryVoucherInsurance: activeInsuranceWithoutTax
       },
       { includeSalaryVoucher: true, includeInsuranceVoucher: true }
     )
@@ -1498,7 +1552,7 @@ function buildSocialOnlyReportSheets(
       salaryReimburseTotal,
       insuranceVoucherTotal,
       withholdingTotal: activeInsurance,
-      activeInsurance
+      salaryVoucherInsurance: activeInsuranceWithoutTax
     },
     { includeSalaryVoucher: Boolean(salary), includeInsuranceVoucher: true }
   )

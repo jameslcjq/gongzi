@@ -25,7 +25,7 @@ type VoucherInput = {
   salaryReimburseTotal: number
   insuranceVoucherTotal: number
   withholdingTotal: number
-  activeInsurance: number
+  salaryVoucherInsurance: number
 }
 
 type VoucherEntry = {
@@ -105,7 +105,7 @@ export function buildVoucherSheet(
   if (options.includeSalaryVoucher) {
     entries.push(
     // 凭证 1：本月工资发放
-    { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: roundMoney(input.basicActual + input.teachingAge + input.housing + input.performance + input.activeInsurance), summary: '本月工资', hasDifference: true },
+    { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: roundMoney(input.basicActual + input.teachingAge + input.housing + input.performance + input.salaryVoucherInsurance), summary: '本月工资', hasDifference: true },
     { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: input.ruralTotal, summary: '农村补贴', hasDifference: true },
     { voucherNo: '1', subjectCode: '500101', subjectName: '工资福利费用', debit: input.traffic, summary: '交通补贴', hasDifference: true },
     { voucherNo: '1', subjectCode: '500103', subjectName: '对个人和家庭的补助费用', debit: input.survivorTotal, summary: '遗补', hasDifference: true },
@@ -232,23 +232,11 @@ export function buildInsuranceVoucherUsage(
   activeTax: number,
   total: number
 ): string {
-  const social = socialSecurity ?? { byItem: {}, rowCount: 0 }
-  return [
-    ['职业年金（单位）', sumSocialByCanonicalName(social, '职业年金单位')],
-    ['职业年金（个人）', sumSocialByCanonicalName(social, '职业年金个人')],
-    ['养老保险费（单位）', sumSocialByCanonicalName(social, '养老保险单位')],
-    ['养老保险费（个人）', sumSocialByCanonicalName(social, '养老保险个人')],
-    ['医疗保险（个人）', sumSocialByCanonicalName(social, '医保个人')],
-    ['医疗保险（单位）', sumSocialByCanonicalName(social, '医保单位')],
-    ['生育保险', sumSocialByCanonicalName(social, '生育保险')],
-    ['失业保险（单位）', sumSocialByCanonicalName(social, '失业保险单位')],
-    ['失业保险（个人）', sumSocialByCanonicalName(social, '失业保险个人')],
-    ['工伤保险', sumSocialByCanonicalName(social, '工伤保险')],
-    ['公积金（个人）', num(active['住房公积金'])],
-    ['公积金（单位）', num(active['住房公积金'])],
-    ['个税', activeTax],
-    ['合计', total]
-  ].map(([label, amount]) => `${label}${formatVoucherAmount(Number(amount))}`).join('\n')
+  void active
+  void socialSecurity
+  void activeTax
+  void total
+  return '五险一金、个税'
 }
 
 export function buildSalaryVoucherUsage(

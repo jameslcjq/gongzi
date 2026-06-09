@@ -28,6 +28,7 @@ const MONEY_TOLERANCE = 0.01
 export function reconcileActiveBackpayPeople(input: {
   salary?: SalarySummary
   dataSourceMode: MonthlyPayrollDataSourceMode
+  allowIdentityFallback?: boolean
   sheets: MonthlyPayrollReportSheet[]
   activeRows: ActiveBackpayRow[]
 }): ActiveBackpayCheckResult {
@@ -35,6 +36,7 @@ export function reconcileActiveBackpayPeople(input: {
   const checkKey = 'active-person-backpay'
   const issues: MonthlyPayrollReconciliationIssue[] = []
   const activeById = new Map(input.activeRows.map((row) => [normalizeIdCard(row.idCard), row]))
+  const activeByName = buildActiveRowsByName(input.activeRows)
   const reportById = indexBackpaySheetRows(input.sheets)
 
   if (!input.salary) {
@@ -85,7 +87,8 @@ export function reconcileActiveBackpayPeople(input: {
     const source = activeBackpayAdjustmentTotals(person)
     if (!idCard || (source.increaseTotal === 0 && source.deductionTotal === 0)) continue
     checkedCount += 1
-    const dbRow = activeById.get(idCard)
+    const dbRow = activeById.get(idCard) ??
+      (input.allowIdentityFallback ? uniqueActiveRowByName(activeByName, person.name) : undefined)
     const reportRow = reportById.get(idCard)
     const reportTotals = reportRow ? backpayReportTotals(reportRow) : { increaseTotal: 0, deductionTotal: 0 }
     if (!dbRow) {
@@ -165,6 +168,30 @@ function indexBackpaySheetRows(
     result.set(idCard, row)
   }
   return result
+}
+
+function buildActiveRowsByName(rows: ActiveBackpayRow[]): Map<string, ActiveBackpayRow[]> {
+  const result = new Map<string, ActiveBackpayRow[]>()
+  for (const row of rows) {
+    const name = normalizePersonName(row.name)
+    if (!name) continue
+    const grouped = result.get(name) ?? []
+    grouped.push(row)
+    result.set(name, grouped)
+  }
+  return result
+}
+
+function uniqueActiveRowByName(
+  rowsByName: Map<string, ActiveBackpayRow[]>,
+  name: string
+): ActiveBackpayRow | undefined {
+  const rows = rowsByName.get(normalizePersonName(name)) ?? []
+  return rows.length === 1 ? rows[0] : undefined
+}
+
+function normalizePersonName(value: unknown): string {
+  return text(value).replace(/\s+/g, '')
 }
 
 function backpayReportTotals(row: Array<string | number>): { increaseTotal: number; deductionTotal: number } {
