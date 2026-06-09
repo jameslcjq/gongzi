@@ -17,7 +17,8 @@ import type {
   MonthlyPayrollReportSheet,
   MonthlyPayrollRun,
   MonthlyPayrollVoucherPageCounts,
-  MonthlyPayrollWorkflowInput
+  MonthlyPayrollWorkflowInput,
+  SalaryQuotaMatchLocalSummary
 } from '../../../shared/types'
 import { normalizeMonthlyPayrollTaxField } from './monthlyPayrollSettings'
 import { readMonthlyPayrollPrintSettings } from '../printSettings'
@@ -116,8 +117,9 @@ export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput):
       active_actual_pay, survivor_actual_pay, retired_housing_actual_pay, retired_housing,
       source_salary_path, source_social_path, source_tax_path,
       insurance_import_path, voucher_import_path, salary_import_path, payroll_backpay_path,
-      report_fingerprint, tax_field, data_source_mode, report_snapshot
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      report_fingerprint, tax_field, data_source_mode, report_snapshot,
+      quota_match_local_summary
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.year,
       payload.month,
@@ -143,7 +145,8 @@ export async function persistMonthlyPayrollRun(payload: MonthlyPayrollRunInput):
       payload.reportFingerprint,
       payload.taxField,
       payload.dataSourceMode,
-      payload.reportSnapshot ? JSON.stringify(payload.reportSnapshot) : null
+      payload.reportSnapshot ? JSON.stringify(payload.reportSnapshot) : null,
+      payload.quotaMatchLocalSummary ? JSON.stringify(payload.quotaMatchLocalSummary) : null
     ]
   )
 }
@@ -164,6 +167,7 @@ export async function listMonthlyPayrollRuns(): Promise<MonthlyPayrollRun[]> {
       exchange_package_id, exchange_package_status, exchange_receipt_id,
       exchange_receipt_at, exchange_receipt_path,
       report_snapshot,
+      quota_match_local_summary,
       created_at
      FROM monthly_payroll_runs ORDER BY created_at DESC`
   )
@@ -832,7 +836,17 @@ function mapRunRow(row: Record<string, unknown>): MonthlyPayrollRun {
     exchangeReceiptId: (row.exchange_receipt_id as string) ?? null,
     exchangeReceiptAt: (row.exchange_receipt_at as string) ?? null,
     exchangeReceiptPath: (row.exchange_receipt_path as string) ?? null,
+    quotaMatchLocalSummary: parseQuotaMatchLocalSummary(row.quota_match_local_summary),
     createdAt: String(row.created_at ?? '')
+  }
+}
+
+function parseQuotaMatchLocalSummary(value: unknown): SalaryQuotaMatchLocalSummary | null {
+  if (!value || typeof value !== 'string') return null
+  try {
+    return JSON.parse(value) as SalaryQuotaMatchLocalSummary
+  } catch {
+    return null
   }
 }
 

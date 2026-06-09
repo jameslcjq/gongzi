@@ -28,8 +28,14 @@ export type RuleResult = {
   affectedRows: number
   messages: string[]
   warnings: string[]
+  messageTooltips?: WorkflowMessageTooltip[]
   monthlyPayrollWriteBack?: MonthlyPayrollWriteBackPreview
   monthlyPayrollReport?: MonthlyPayrollReportResult
+}
+
+export type WorkflowMessageTooltip = {
+  message: string
+  lines: string[]
 }
 
 export type AnnualReportWorkflowInput = {
@@ -697,6 +703,8 @@ export type MonthlyPayrollRun = {
   exchangeReceiptId: string | null
   exchangeReceiptAt: string | null
   exchangeReceiptPath: string | null
+  /** 额度匹配本地工资汇总：外网打包时算好随交换包带过来，供内网执行端额度匹配使用（明细表不在包内，内网无法现算） */
+  quotaMatchLocalSummary?: SalaryQuotaMatchLocalSummary | null
   createdAt: string
 }
 

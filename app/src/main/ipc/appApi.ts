@@ -71,6 +71,7 @@ import {
   loadIntegratedSimpleAggregates,
   loadTraffic002Total
 } from '../services/monthly-payroll/monthlyPayrollDataLoaders'
+import { computeSalaryQuotaMatchLocalSummary } from '../services/monthly-payroll/quotaMatchLocalSummary'
 import { payrollInstance } from '../config/paths'
 import type { PayrollInstanceSummary } from '../../shared/payrollInstance'
 import {
@@ -638,55 +639,7 @@ export function registerAppIpc(): void {
 
   ipcMain.handle(
     'salary-quota-match:local-summary',
-    async (): Promise<SalaryQuotaMatchLocalSummary> => {
-      try {
-        const now = new Date()
-        const [active, retired, other, traffic002Total, runs] = await Promise.all([
-          loadIntegratedActiveAggregates({ batchCode: '001' }),
-          loadIntegratedSimpleAggregates('退休工资'),
-          loadIntegratedSimpleAggregates('其他工资'),
-          loadTraffic002Total(),
-          listMonthlyPayrollRuns()
-        ])
-        // 实发合计 = 在职实发 + 遗补实发 + 退休房补实发，取当月最新且未过期的报账记录（与历史报表口径一致）。
-        const currentRun = runs.find(
-          (run) => run.year === now.getFullYear() && run.month === now.getMonth() + 1 && !run.isOutdated
-        )
-        const actualPayTotal = currentRun
-          ? Math.round(
-              (currentRun.activeActualPay + currentRun.survivorActualPay + currentRun.retiredHousingActualPay) * 100
-            ) / 100
-          : 0
-        return {
-          ok: true,
-          activeOtherOneTotal: active.其他一,
-          activeBasicPerformanceTotal: active.基础性绩效,
-          activeHousingTotal: active.住房补贴,
-          activeAllowanceTotal: active.教龄津贴,
-          retiredHousingTotal: retired.住房补贴,
-          retiredBackpayTotal: retired.补发工资,
-          retiredActualPayTotal: retired.实发合计,
-          otherActualPayTotal: other.实发合计,
-          actualPayTotal,
-          traffic002Total
-        }
-      } catch (error) {
-        return {
-          ok: false,
-          activeOtherOneTotal: 0,
-          activeBasicPerformanceTotal: 0,
-          activeHousingTotal: 0,
-          activeAllowanceTotal: 0,
-          retiredHousingTotal: 0,
-          retiredBackpayTotal: 0,
-          retiredActualPayTotal: 0,
-          otherActualPayTotal: 0,
-          actualPayTotal: 0,
-          traffic002Total: 0,
-          message: error instanceof Error ? error.message : String(error)
-        }
-      }
-    }
+    (): Promise<SalaryQuotaMatchLocalSummary> => computeSalaryQuotaMatchLocalSummary()
   )
 
   ipcMain.handle(

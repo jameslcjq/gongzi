@@ -14,6 +14,7 @@ import {
 } from '../../config/paths'
 import { listMonthlyPayrollRuns } from '../monthly-payroll/monthlyPayrollRuns'
 import { persistMonthlyPayrollRun, type MonthlyPayrollRunInput } from '../monthly-payroll/monthlyPayrollRuns'
+import { computeSalaryQuotaMatchLocalSummary } from '../monthly-payroll/quotaMatchLocalSummary'
 import { readUnitSettings } from '../unitSettings'
 import { copyExchangeFileToPreferredMedia } from './exchangeMedia'
 import { getExchangeStatus } from './exchangeStatus'
@@ -88,8 +89,10 @@ export async function buildMonthlyPayrollExchangePackage(runId: number): Promise
     })
   }
 
+  // 额度匹配本地汇总：在外网（有明细表）算好打包带给内网执行端（内网无明细表无法现算）。
+  const quotaMatchLocalSummary = await computeSalaryQuotaMatchLocalSummary()
   const payload: PackagePayload = {
-    run: runInfo,
+    run: { ...runInfo, quotaMatchLocalSummary },
     files: packagedFiles
   }
   zip.file('payload/monthly-payroll-run.json', stableJson(payload))
@@ -260,7 +263,8 @@ export async function importMonthlyPayrollExchangePackage(filePath: string): Pro
     reportFingerprint: sourceRun.reportFingerprint,
     taxField: sourceRun.taxField,
     dataSourceMode: sourceRun.dataSourceMode,
-    reportSnapshot: sourceRun.reportSnapshot ?? null
+    reportSnapshot: sourceRun.reportSnapshot ?? null,
+    quotaMatchLocalSummary: sourceRun.quotaMatchLocalSummary ?? null
   }
   await persistMonthlyPayrollRun(runInput)
   const importedRun = await findLatestImportedRun(sourceRun.year, sourceRun.month, sourceRun.unitFullName)

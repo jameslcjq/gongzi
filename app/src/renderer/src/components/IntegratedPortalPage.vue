@@ -1730,13 +1730,20 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
     traffic002Total: 0,
     message: '尚未读取本地工资汇总'
   }
-  try {
-    localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
-  } catch (error) {
-    console.warn('本地工资汇总读取失败，使用默认脚本配置', error)
-    localSummary = {
-      ...localSummary,
-      message: error instanceof Error ? error.message : String(error)
+  // 内网执行端：明细表不在本机，改用当前任务交换包里打包带来的本地工资汇总。
+  // 须先在工具栏选好当前任务；页面导航会自然重注入，切任务后再进额度匹配页即可刷新。
+  const runnerBundledSummary = isRunnerFlavor ? currentRunnerTask.value?.quotaMatchLocalSummary : null
+  if (runnerBundledSummary) {
+    localSummary = runnerBundledSummary
+  } else {
+    try {
+      localSummary = await window.salaryApi.getSalaryQuotaMatchLocalSummary()
+    } catch (error) {
+      console.warn('本地工资汇总读取失败，使用默认脚本配置', error)
+      localSummary = {
+        ...localSummary,
+        message: error instanceof Error ? error.message : String(error)
+      }
     }
   }
   let planUnit = { name: '', code: '' }

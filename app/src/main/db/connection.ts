@@ -358,6 +358,7 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
       exchange_receipt_id TEXT,
       exchange_receipt_at TEXT,
       exchange_receipt_path TEXT,
+      quota_match_local_summary TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -614,7 +615,8 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     { name: 'exchange_package_status', definition: 'TEXT' },
     { name: 'exchange_receipt_id', definition: 'TEXT' },
     { name: 'exchange_receipt_at', definition: 'TEXT' },
-    { name: 'exchange_receipt_path', definition: 'TEXT' }
+    { name: 'exchange_receipt_path', definition: 'TEXT' },
+    { name: 'quota_match_local_summary', definition: 'TEXT' }
   ])
   if (addedMonthlyPayrollColumns.includes('voucher_push_status')) {
     await exec(
