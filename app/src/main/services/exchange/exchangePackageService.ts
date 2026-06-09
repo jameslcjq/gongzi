@@ -305,8 +305,7 @@ export async function syncExchangeMedia(): Promise<ExchangeStatus> {
   for (const file of before.mediaPackages) {
     if (!file.stable) continue
     if (file.kind === 'monthly-package') {
-      const copied = await copyMediaPackageToInbox(file, warnings)
-      if (copied) messages.push(copied)
+      await copyMediaPackageToInbox(file, warnings)
     } else if (file.kind === 'receipt') {
       const receipt = await importMonthlyPayrollExchangeReceipt(file.filePath).catch((error) => {
         warnings.push(`回执处理失败：${file.fileName}，${error instanceof Error ? error.message : String(error)}`)

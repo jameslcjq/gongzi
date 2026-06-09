@@ -38,6 +38,14 @@ export type CompareSummary = {
   identityReviewCount: number
   identityReviewExamples: string[]
   changedExamples: string[]
+  diffDetails: CompareDiffDetail[]
+}
+
+export type CompareDiffDetail = {
+  type: 'added' | 'removed' | 'changed'
+  name: string
+  idCard: string
+  changes?: string[]
 }
 
 type IntegratedWriteBackUpdate = {
@@ -92,6 +100,8 @@ type IntegratedIdentityResolution = {
 type IntegratedIdentityFallbackOptions = {
   allowIdentityFallback?: boolean
 }
+
+export type IntegratedIdCardResolver = (idCard: string, name: string) => string
 
 export type IntegratedRow = {
   idCard: string
@@ -388,6 +398,7 @@ export async function comparePayrollPeople(
   let removed = 0
   let changed = 0
   const changedExamples: string[] = []
+  const diffDetails: CompareDiffDetail[] = []
   let identityReviewCount = 0
   const identityReviewExamples: string[] = []
 
@@ -407,6 +418,11 @@ export async function comparePayrollPeople(
       target = resolution.row
       if (!target) {
         added += 1
+        diffDetails.push({
+          type: 'added',
+          name: person.name,
+          idCard: person.idCard
+        })
         continue
       }
     }
@@ -414,6 +430,12 @@ export async function comparePayrollPeople(
     const changes = getPayrollPersonChanges(person, target, compareFields)
     if (changes.length > 0) {
       changed += 1
+      diffDetails.push({
+        type: 'changed',
+        name: person.name || target.name,
+        idCard: person.idCard || target.idCard,
+        changes
+      })
       if (changedExamples.length < 5) {
         changedExamples.push(`${person.name || person.idCard}：${changes.slice(0, 3).join('；')}`)
       }
@@ -421,7 +443,14 @@ export async function comparePayrollPeople(
   }
 
   for (const target of targetRows) {
-    if (!matchedTargetIdCards.has(target.idCard)) removed += 1
+    if (!matchedTargetIdCards.has(target.idCard)) {
+      removed += 1
+      diffDetails.push({
+        type: 'removed',
+        name: target.name,
+        idCard: target.idCard
+      })
+    }
   }
 
   return {
@@ -434,7 +463,33 @@ export async function comparePayrollPeople(
     changed,
     identityReviewCount,
     identityReviewExamples,
-    changedExamples
+    changedExamples,
+    diffDetails
+  }
+}
+
+export async function buildIntegratedActiveIdCardResolver(): Promise<IntegratedIdCardResolver> {
+  const rows = await loadIntegratedRows('在职工资')
+  const byIdCard = new Map(rows.map((row) => [normalizeIdCard(row.idCard), row.idCard]))
+  const byName = new Map<string, IntegratedRow[]>()
+  for (const row of rows) {
+    const nameKey = normalizePersonName(row.name)
+    if (!nameKey) continue
+    const grouped = byName.get(nameKey) ?? []
+    grouped.push(row)
+    byName.set(nameKey, grouped)
+  }
+
+  return (idCard: string, name: string): string => {
+    const normalizedIdCard = normalizeIdCard(idCard)
+    const exact = byIdCard.get(normalizedIdCard)
+    if (exact) return exact
+
+    const nameKey = normalizePersonName(name)
+    const nameMatches = nameKey ? byName.get(nameKey) ?? [] : []
+    if (nameMatches.length === 1) return nameMatches[0].idCard
+
+    return normalizedIdCard || idCard
   }
 }
 
@@ -1191,6 +1246,50 @@ export function formatCompareWarning(summary: CompareSummary): string {
     ? `。示例：${summary.changedExamples.join('；')}`
     : ''
   return `${lead}（${counts}）${examples}`
+}
+
+export function formatCompareTooltipLines(summary: CompareSummary): string[] {
+  const lines: string[] = []
+  appendCompareDiffLines(
+    lines,
+    summary,
+    'added',
+    `新增 ${summary.added} 人（${summary.sourceName}有，${summary.targetName}找不到）`
+  )
+  appendCompareDiffLines(
+    lines,
+    summary,
+    'removed',
+    `减少 ${summary.removed} 人（${summary.targetName}有，${summary.sourceName}找不到）`
+  )
+  appendCompareDiffLines(
+    lines,
+    summary,
+    'changed',
+    `字段变化 ${summary.changed} 人`
+  )
+  return lines
+}
+
+function appendCompareDiffLines(
+  lines: string[],
+  summary: CompareSummary,
+  type: CompareDiffDetail['type'],
+  title: string
+): void {
+  const details = summary.diffDetails.filter((detail) => detail.type === type)
+  if (details.length === 0) return
+  lines.push(title)
+  details.slice(0, 50).forEach((detail, index) => {
+    const identity = `${index + 1}. ${detail.name || '姓名空'} | 身份证号 ${detail.idCard || '空'}`
+    const changes = detail.changes?.length
+      ? ` | ${detail.changes.join('；')}`
+      : ''
+    lines.push(`${identity}${changes}`)
+  })
+  if (details.length > 50) {
+    lines.push(`其余 ${details.length - 50} 人未在悬浮窗口中展开`)
+  }
 }
 
 function formatCompareValue(value: unknown): string {

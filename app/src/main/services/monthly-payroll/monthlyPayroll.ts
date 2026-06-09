@@ -9,7 +9,8 @@ import type {
   MonthlyPayrollVoucherPageCounts,
   MonthlyPayrollWorkflowInput,
   RuleResult,
-  UnitSettings
+  UnitSettings,
+  WorkflowMessageTooltip
 } from '../../../shared/types'
 import { readUnitSettings } from '../unitSettings'
 import { readMonthlyPayrollPrintSettings } from '../printSettings'
@@ -33,10 +34,12 @@ import {
   applyIntegratedWriteBackPlan,
   applyTaxAndRecomputeIntegratedActive,
   buildIntegratedActiveBackpayAdjustmentPlan,
+  buildIntegratedActiveIdCardResolver,
   buildIntegratedActiveWriteBackPlan,
   buildIntegratedOtherWriteBackPlan,
   buildMonthlyPayrollWriteBackPreview,
   comparePayrollPeople,
+  formatCompareTooltipLines,
   formatCompareMessage,
   formatCompareWarning,
   getActiveCompareFields,
@@ -45,6 +48,8 @@ import {
   recomputeIntegratedOtherLikeWorksheet,
   summarizeIntegratedActive,
   survivorCompareFields,
+  type CompareSummary,
+  type IntegratedIdCardResolver,
   type IntegratedActiveRecomputeResult,
   type IntegratedSimplePaySummary
 } from './integratedPayroll'
@@ -133,6 +138,25 @@ const workflowName = '月度工资报账预处理'
 const generateWorkflowName = '月度工资报账汇总生成'
 // 财政凭证附件要求：保险凭证固定 7 页；工资凭证页数另按工资表、遗补、退休房补动态统计。
 const INSURANCE_VOUCHER_ATTACHMENT_PAGES = 7
+
+function buildCompareMessageTooltips(summaries: CompareSummary[]): WorkflowMessageTooltip[] {
+  const tooltips: WorkflowMessageTooltip[] = []
+  for (const summary of summaries) {
+    const lines = formatCompareTooltipLines(summary)
+    if (lines.length === 0) continue
+    tooltips.push({
+      message: formatCompareMessage(summary),
+      lines
+    })
+    if (summary.added + summary.removed + summary.changed > 0) {
+      tooltips.push({
+        message: formatCompareWarning(summary),
+        lines
+      })
+    }
+  }
+  return tooltips
+}
 const VOUCHER_ATTACHMENT_PAGES_COLUMN = '附件页数'
 const salaryPrintSummaryCache = new Map<string, MonthlyPayrollSalaryPrintPageSummary>()
 const RETIRED_HOUSING_REPORT_SHEET_NAME = '退休房补'
@@ -437,6 +461,7 @@ export async function preprocessMonthlyPayroll(
       comparePayrollPeople('遗补', salary.survivorPeople, '其他工资', survivorCompareFields, identityFallbackOptions),
       loadIntegratedActivePersonalInsuranceTotals()
     ])
+    const messageTooltips = buildCompareMessageTooltips([activeCompare, survivorCompare])
     const insuranceCheck = buildPersonalInsuranceCheck(socialSecurity, salary, integratedPersonalInsurance)
 
     const salaryActualPay = num(salary.active['实发工资合计'])
@@ -503,6 +528,7 @@ export async function preprocessMonthlyPayroll(
       warnings
     )
     result.monthlyPayrollWriteBack = writeBackPreview
+    result.messageTooltips = messageTooltips
     return result
   } catch (error) {
     return failRule(workflowName, error)
@@ -615,6 +641,7 @@ export async function generateMonthlyPayrollReportView(
   const reportRetired = useIntegratedDataSource
     ? { count: integratedRetiredAggregates.count, housing: integratedRetiredAggregates.应发工资小计 }
     : retired
+  const activeIdCardResolver = await buildIntegratedActiveIdCardResolver()
   const sheets = input.processScope === 'social'
     ? buildSocialOnlyReportSheets(
         socialSecurity,
@@ -633,7 +660,8 @@ export async function generateMonthlyPayrollReportView(
         integratedActiveHousingFund,
         retiredHousingPeople,
         useIntegratedDataSource ? integratedAggregates : undefined,
-        useIntegratedDataSource ? integratedBackpayRows : undefined
+        useIntegratedDataSource ? integratedBackpayRows : undefined,
+        activeIdCardResolver
     )
   const voucherPageCounts = await buildVoucherPageCounts(input, sheets)
   applyVoucherPageCounts(sheets, voucherPageCounts)
@@ -738,7 +766,8 @@ export async function generateMonthlyPayrollReportView(
   if (salaryImportPath && salary) {
     await writeSalaryImportWorkbook(salaryImportPath, salary, {
       includedFields: salaryImportFields,
-      includedIdCards: salaryImportIdCards
+      includedIdCards: salaryImportIdCards,
+      resolveIdCard: activeIdCardResolver
     })
   }
   if (payrollBackpayPath) {
@@ -864,7 +893,8 @@ function buildReportSheets(
     retired: IntegratedSimpleAggregates
     other: IntegratedSimpleAggregates
   },
-  integratedBackpayRows?: Array<Array<string | number>>
+  integratedBackpayRows?: Array<Array<string | number>>,
+  activeIdCardResolver?: IntegratedIdCardResolver
 ): MonthlyPayrollReportSheet[] {
   const active = { ...salary.active }
   const survivor = salary.survivor
@@ -1178,7 +1208,7 @@ function buildReportSheets(
         '支出一'
       ],
       columnWidths: [20, 6, 10, 9, 10, 10, 10, 10, 10, 10, 11, 12, 12, 9, 9, 10, 11, 10, 10, 9, 9, 9, 13, 9],
-      rows: integratedBackpayRows ?? buildBackpayRows(salary, tax)
+      rows: integratedBackpayRows ?? buildBackpayRows(salary, tax, activeIdCardResolver)
     }
   ]
 
@@ -1601,7 +1631,8 @@ function buildSocialOnlyReportSheets(
 
 function buildBackpayRows(
   salary: SalarySummary,
-  tax: TaxSummary | undefined
+  tax: TaxSummary | undefined,
+  activeIdCardResolver?: IntegratedIdCardResolver
 ): Array<Array<string | number>> {
   const year = new Date().getFullYear()
   const month = new Date().getMonth() + 1
@@ -1609,7 +1640,8 @@ function buildBackpayRows(
   const rowsWithoutId: Array<Array<string | number>> = []
 
   const ensureRow = (idCard: string, name: string): Array<string | number> => {
-    const key = normalizeIdCard(idCard)
+    const outputIdCard = activeIdCardResolver?.(idCard, name) ?? idCard
+    const key = normalizeIdCard(outputIdCard)
     const existing = rowsById.get(key)
     if (existing) return existing
     const row = createBackpayAdjustmentRow(key, name, year, month)

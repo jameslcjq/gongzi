@@ -449,26 +449,31 @@ async function handleExchangePackageNotifications(next: ExchangeStatus) {
   const freshPackages = pendingPackages.filter((file) => !seenExchangePackageKeys.has(getExchangePackageKey(file)))
   if (freshPackages.length === 0) return
 
-  freshPackages.forEach((file) => seenExchangePackageKeys.add(getExchangePackageKey(file)))
-
   const first = freshPackages[0]
+  seenExchangePackageKeys.add(getExchangePackageKey(first))
   const sourceText = '本机收件箱'
   const countText = freshPackages.length > 1 ? `等 ${freshPackages.length} 个` : ''
-  const previewMessage = await buildExchangePackagePreviewMessage(first.filePath)
 
   try {
+    const preview = await window.salaryApi.previewExchangePackage(first.filePath)
+    const previewMessage = formatExchangePackagePreview(preview)
     await ElMessageBox.confirm(
-      `发现${sourceText}里有待导入的工资业务包：${first.fileName}${countText}。\n${previewMessage}\n当前只会打开文件夹，不会自动导入或写入数据。`,
+      `发现${sourceText}里有待导入的工资业务包：${first.fileName}${countText}。\n${previewMessage}\n\n确认导入后，会把包内文件解压到本机工资数据目录，并生成一条待一体化执行的工资报账记录。`,
       '发现内网业务包',
       {
-        type: 'info',
-        confirmButtonText: '打开位置',
-        cancelButtonText: '稍后处理'
+        type: preview.ok ? 'warning' : 'error',
+        confirmButtonText: preview.ok ? '确认导入' : '关闭',
+        cancelButtonText: '稍后处理',
+        showCancelButton: preview.ok
       }
     )
-    await openExchangePackageLocation(first.filePath)
-  } catch {
-    // 用户选择稍后处理。
+    if (!preview.ok) return
+    const imported = await window.salaryApi.importMonthlyPayrollExchangePackage(first.filePath)
+    ElMessage.success(imported.message)
+    void refreshExchangeStatus()
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : '导入内网业务包失败')
   }
 }
 
@@ -477,15 +482,6 @@ function handleExchangeSyncMessages(next: ExchangeStatus) {
     if (!message || seenExchangeSyncMessages.has(message)) continue
     seenExchangeSyncMessages.add(message)
     ElMessage.success(message)
-  }
-}
-
-async function buildExchangePackagePreviewMessage(filePath: string): Promise<string> {
-  try {
-    const preview = await window.salaryApi.previewExchangePackage(filePath)
-    return formatExchangePackagePreview(preview)
-  } catch (error) {
-    return `预览失败：${error instanceof Error ? error.message : String(error)}`
   }
 }
 
@@ -505,13 +501,6 @@ function formatExchangePackagePreview(preview: ExchangePackagePreview): string {
 
 function getExchangePackageKey(file: ExchangeStatus['localInboxPackages'][number]): string {
   return `${file.location}|${file.filePath}|${file.size}|${file.modifiedAt}`
-}
-
-async function openExchangePackageLocation(filePath: string) {
-  const folder = filePath.replace(/[\\/][^\\/]*$/, '')
-  if (folder) {
-    await window.salaryApi.openLocalPath(folder)
-  }
 }
 
 function getImportLogKey(log: ExcelImportLog): string {

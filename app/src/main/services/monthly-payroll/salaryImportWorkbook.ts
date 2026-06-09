@@ -43,6 +43,7 @@ const SALARY_IMPORT_FIELD_COLUMNS: Record<string, number[]> = {
 export type SalaryImportWorkbookOptions = {
   includedFields?: string[]
   includedIdCards?: string[]
+  resolveIdCard?: (idCard: string, name: string) => string
 }
 
 export async function writeSalaryImportWorkbook(
@@ -61,7 +62,11 @@ export async function writeSalaryImportWorkbook(
     ? buildIncludedColumnIndexes(options.includedFields)
     : undefined
   const people = includedIdCards
-    ? salary.activePeople.filter((person) => includedIdCards.has(normalizeIdCard(person.idCard)))
+    ? salary.activePeople.filter((person) => {
+        const sourceIdCard = normalizeIdCard(person.idCard)
+        const outputIdCard = normalizeIdCard(options.resolveIdCard?.(person.idCard, person.name) ?? person.idCard)
+        return includedIdCards.has(sourceIdCard) || includedIdCards.has(outputIdCard)
+      })
     : salary.activePeople
   if (!people.length) return 0
 
@@ -79,7 +84,7 @@ export async function writeSalaryImportWorkbook(
     copyCells(template.values, row, 10, 11)
 
     row[6] = person.name
-    row[7] = person.idCard
+    row[7] = options.resolveIdCard?.(person.idCard, person.name) ?? person.idCard
     row[12] = num(person.values['序号']) || index + 1
     assignField('岗位工资', 13, num(person.values['岗位工资']))
     assignField('薪级工资', 14, num(person.values['薪级工资']))
