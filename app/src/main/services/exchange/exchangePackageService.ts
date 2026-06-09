@@ -285,6 +285,11 @@ export async function importMonthlyPayrollExchangePackage(filePath: string): Pro
   if (importedRun?.id) {
     await markRunExchangePackage(importedRun.id, packageId, 'package-built')
   }
+  const warnings = [...preview.warnings]
+  await deleteExchangeFileIfExists(localPackagePath, warnings, '已导入的本机业务包')
+  if (filePath.toLowerCase() !== localPackagePath.toLowerCase()) {
+    await deleteExchangeFileIfExists(filePath, warnings, '已导入的源业务包')
+  }
 
   return {
     ok: true,
@@ -292,7 +297,7 @@ export async function importMonthlyPayrollExchangePackage(filePath: string): Pro
     runId: importedRun?.id,
     extractDir,
     importedFiles,
-    warnings: preview.warnings,
+    warnings,
     message: `已导入 ${sourceRun.year}年${sourceRun.month}月工资业务包`
   }
 }
@@ -418,12 +423,16 @@ async function copyMediaPackageToInbox(
   const target = join(exchangeInboxFolder, `${sanitizePathSegment(packageId)}.ljgzpkg`)
   if (existsSync(target)) {
     const existingSha = await sha256File(target)
-    if (existingSha === preview.packageSha256) return null
+    if (existingSha === preview.packageSha256) {
+      await deleteExchangeFileIfExists(file.filePath, warnings, '摆渡盘源业务包')
+      return null
+    }
     warnings.push(`本机 inbox 已有同名业务包但校验值不同，未覆盖：${target}`)
     return null
   }
 
   await copyVerifiedFile(file.filePath, target, preview.packageSha256)
+  await deleteExchangeFileIfExists(file.filePath, warnings, '摆渡盘源业务包')
   return `已自动取回内网业务包到本机 inbox：${preview.fileName}`
 }
 
@@ -470,6 +479,18 @@ async function copyVerifiedFile(
       if (existsSync(tempPath)) await unlink(tempPath)
     } catch {}
     throw error
+  }
+}
+
+async function deleteExchangeFileIfExists(
+  filePath: string,
+  warnings: string[],
+  label: string
+): Promise<void> {
+  try {
+    if (existsSync(filePath)) await unlink(filePath)
+  } catch (error) {
+    warnings.push(`删除${label}失败：${filePath}，${error instanceof Error ? error.message : String(error)}`)
   }
 }
 

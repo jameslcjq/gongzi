@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260604-salary-quota-match-preserve-split-rows'
+  var VERSION = '20260609-salary-quota-match-residual-reselect'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -1587,22 +1587,43 @@ export function buildSalaryQuotaMatchScript(
               return item.label + '：' + formatAmount(item.amount)
             }).join('\\n')
         )
+        var remainingItemAmount = amount
         for (var a = 0; a < plan.allocations.length; a++) {
           var allocation = plan.allocations[a]
           itemPage = await waitForItemRows(8000)
           if (!itemPage || !itemPage.rows.length) {
             throw new Error('保存后没有重新找到工资单数据列表：' + itemName)
           }
-          row = findItemRow(itemPage.rows, itemName, amount, itemTypeText)
+          row = findItemRow(itemPage.rows, itemName, remainingItemAmount, itemTypeText)
           if (!row) {
             throw new Error('保存后没有重新找到工资单数据：' + itemName)
           }
           var beforeSaveAmount = getItemAmount(row)
+          if (!moneyEquals(beforeSaveAmount, remainingItemAmount)) {
+            throw new Error(
+              '重新读取工资单数据后金额不一致：' +
+                itemName +
+                '，预计剩余 ' +
+                formatAmount(remainingItemAmount) +
+                '，网页显示 ' +
+                formatAmount(beforeSaveAmount)
+            )
+          }
+          if (beforeSaveAmount + 0.01 < allocation.amount) {
+            throw new Error(
+              '当前工资项剩余金额小于本次挂接金额：' +
+                itemName +
+                '，剩余 ' +
+                formatAmount(beforeSaveAmount) +
+                '，本次需要 ' +
+                formatAmount(allocation.amount)
+            )
+          }
           status(
             '逐条处理：' +
               itemName +
-              '\\n工资项金额：' +
-              formatAmount(amount) +
+              '\\n当前剩余工资项金额：' +
+              formatAmount(beforeSaveAmount) +
               '\\n当前指标：' +
               allocation.label +
               '\\n调整金额：' +
@@ -1629,6 +1650,7 @@ export function buildSalaryQuotaMatchScript(
           await sleep(350)
           if (!(await clickSave(itemPage.doc))) throw new Error('保存失败：' + itemName + ' / ' + allocation.label)
           await waitForItemAmountToSettle(itemName, itemTypeText, beforeSaveAmount, allocation.amount)
+          remainingItemAmount = roundMoney(beforeSaveAmount - allocation.amount)
           await sleep(500)
         }
         matched += 1

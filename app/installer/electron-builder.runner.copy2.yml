@@ -1,0 +1,39 @@
+appId: com.laojiu.gzxt2.runner
+productName: 老九的工资系统2-内网执行端
+directories:
+  output: release
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+extraResources:
+  - from: ../docs/data
+    to: docs/data
+    filter:
+      - worksheets-retained.json
+  - from: installer/resources
+    to: .
+    filter:
+      - lookup-seeds.json
+      - license_public_key.pem
+  - from: native
+    to: native
+    filter:
+      - laojiu-automation-helper.exe
+asarUnpack:
+  - node_modules/sqlite3/**
+win:
+  icon: installer/assets/app-icon.ico
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 老九的工资系统2-内网执行端
+  artifactName: 老九的工资系统2内网执行端安装包-1.12.${ext}
+  installerIcon: installer/assets/app-icon.ico
+  uninstallerIcon: installer/assets/app-icon.ico
+  include: installer/installer.copy2.nsh
