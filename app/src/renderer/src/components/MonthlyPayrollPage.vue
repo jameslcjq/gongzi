@@ -2,16 +2,20 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, DocumentChecked, FolderOpened, Printer, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { pushInProgress, type PushStep } from '../integration/insurancePushQueue'
 import {
-  pendingPushQueue,
-  pendingPushAutomation,
-  pushInProgress,
-  requestSwitchToIntegration,
-  type PushQueueAutomation,
-  type PushStep
-} from '../integration/insurancePushQueue'
-import { appendPushLogLine } from '../integration/pushLogger'
-import type { InsuranceRecord } from '../integration/pushInsuranceScript'
+  appendInsurancePushStep,
+  appendSalaryPushSteps,
+  appendVoucherPushStep,
+  canPushAll,
+  confirmPushTargets,
+  enqueueIntegratedPush,
+  historyPushLabel,
+  pushStatusForTarget,
+  pushTargetText,
+  pushTargetsForRow,
+  reconciliationGuardMessage
+} from '../integration/integratedPushController'
 import {
   cachedMonthlyPayrollPrintersFallback,
   loadCachedMonthlyPayrollPrintOptions,
@@ -318,148 +322,6 @@ const pushingVoucherRunId = ref<number | null>(null)
 const pushingSalaryRunId = ref<number | null>(null)
 const pushingAllRunId = ref<number | null>(null)
 
-function historyPushLabel(row: MonthlyPayrollRun): string {
-  return `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
-}
-
-function pushStatusForTarget(
-  row: MonthlyPayrollRun,
-  target: MonthlyPayrollPushTarget
-): MonthlyPayrollRun['insurancePushStatus'] {
-  if (target === 'voucher') return row.voucherPushStatus
-  if (target === 'salary') return row.salaryPushStatus
-  return row.insurancePushStatus
-}
-
-function pushTargetText(target: MonthlyPayrollPushTarget): string {
-  if (target === 'voucher') return '凭证'
-  if (target === 'salary') return '工资'
-  return '保险'
-}
-
-function pushTargetsForRow(row: MonthlyPayrollRun): MonthlyPayrollPushTarget[] {
-  const targets: MonthlyPayrollPushTarget[] = []
-  if (row.salaryImportPath || row.payrollBackpayPath) targets.push('salary')
-  if (row.insuranceImportPath) targets.push('insurance')
-  if (row.voucherImportPath) targets.push('voucher')
-  return targets
-}
-
-function canPushAll(row: MonthlyPayrollRun): boolean {
-  return pushTargetsForRow(row).length > 0
-}
-
-function enqueueIntegratedPush(
-  steps: PushStep[],
-  stepHints: string[],
-  label: string,
-  automation?: PushQueueAutomation
-): void {
-  if (!steps.length) {
-    ElMessage.warning('没有可推送的文件')
-    return
-  }
-  // 正在推送时拒绝再次点击，避免覆盖当前队列、打断进行中的推送
-  if (pushInProgress.value || pendingPushQueue.value.length > 0) {
-    ElMessage.warning('正在推送中，请等待当前推送完成后再试')
-    return
-  }
-  ElMessage.info(
-    `已准备 ${steps.length} 步${label}（${stepHints.join('、')}），正在跳转到"一体化对接"...`
-  )
-  appendPushLogLine(
-    `==== 触发${label}：准备 ${steps.length} 步（${stepHints.join('、')}），切换到一体化对接 ====`
-  )
-  requestSwitchToIntegration()
-  const queuedSteps = steps.slice()
-  window.setTimeout(() => {
-    pendingPushAutomation.value = automation ?? null
-    pendingPushQueue.value = queuedSteps
-  }, 600)
-}
-
-async function appendInsurancePushStep(
-  row: MonthlyPayrollRun,
-  label: string,
-  steps: PushStep[],
-  stepHints: string[]
-): Promise<void> {
-  if (!row.insuranceImportPath) return
-  const parsed = await window.salaryApi.parseInsuranceImportXlsx(row.insuranceImportPath)
-  if (!parsed.ok) {
-    throw new Error('解析保险 xlsx 失败：' + parsed.reason)
-  }
-  if (!parsed.records.length) return
-  steps.push({
-    kind: 'insurance',
-    records: parsed.records as InsuranceRecord[],
-    label,
-    runId: row.id,
-    pushTarget: 'insurance'
-  })
-  stepHints.push(`保险 ${parsed.records.length} 条`)
-}
-
-async function appendVoucherPushStep(
-  row: MonthlyPayrollRun,
-  label: string,
-  steps: PushStep[],
-  stepHints: string[]
-): Promise<void> {
-  if (!row.voucherImportPath) return
-  const file = await window.salaryApi.readVoucherXlsx(row.voucherImportPath)
-  if (!file.ok) {
-    throw new Error('读取凭证 xlsx 失败：' + file.reason)
-  }
-  steps.push({
-    kind: 'voucher',
-    fileBase64: file.base64,
-    fileName: file.fileName,
-    label,
-    runId: row.id,
-    pushTarget: 'voucher'
-  })
-  stepHints.push(`凭证 ${(file.size / 1024).toFixed(1)} KB`)
-}
-
-async function appendSalaryPushSteps(
-  row: MonthlyPayrollRun,
-  label: string,
-  steps: PushStep[],
-  stepHints: string[]
-): Promise<void> {
-  if (row.salaryImportPath) {
-    const file = await window.salaryApi.readLocalFileBase64(row.salaryImportPath)
-    steps.push({
-      kind: 'salary-system-import',
-      mode: 'salary',
-      fileBase64: file.base64,
-      fileName: file.fileName,
-      fileSize: file.size,
-      month: String(row.month),
-      label,
-      runId: row.id,
-      pushTarget: 'salary'
-    })
-    stepHints.push(`工资导入 ${(file.size / 1024).toFixed(1)} KB`)
-  }
-
-  if (row.payrollBackpayPath) {
-    const file = await window.salaryApi.readLocalFileBase64(row.payrollBackpayPath)
-    steps.push({
-      kind: 'salary-system-import',
-      mode: 'backpay',
-      fileBase64: file.base64,
-      fileName: file.fileName,
-      fileSize: file.size,
-      label,
-      runId: row.id,
-      pushTarget: 'salary'
-    })
-    stepHints.push(`补发工资 ${(file.size / 1024).toFixed(1)} KB`)
-  }
-}
-
 async function pushAllToIntegrated(row: MonthlyPayrollRun): Promise<void> {
   const targets = pushTargetsForRow(row)
   if (!targets.length) {
@@ -553,40 +415,6 @@ async function pushSalaryImportsToIntegrated(row: MonthlyPayrollRun): Promise<vo
     setTimeout(() => {
       if (pushingSalaryRunId.value === row.id) pushingSalaryRunId.value = null
     }, 800)
-  }
-}
-
-async function confirmPushTargets(
-  row: MonthlyPayrollRun,
-  targets: MonthlyPayrollPushTarget[]
-): Promise<boolean> {
-  if (row.isOutdated) {
-    ElMessage.warning('这条报账记录已过期，请使用最新生成的记录重新推送')
-    return false
-  }
-  const guard = await window.salaryApi.assertMonthlyPayrollRunPushable(row.id)
-  if (!guard.ok) {
-    await ElMessageBox.alert(
-      reconciliationGuardMessage(guard),
-      '自动复核未通过',
-      { type: 'error', confirmButtonText: '知道了' }
-    )
-    return false
-  }
-  const repushTargets = targets.filter((target) => {
-    const status = pushStatusForTarget(row, target)
-    return status === 'success' || status === 'needs-repush'
-  })
-  if (!repushTargets.length) return true
-  try {
-    await ElMessageBox.confirm(
-      `${repushTargets.map(pushTargetText).join('、')}已经推送过或标记为需要重推，继续会重新推送并覆盖原推送状态。`,
-      '确认重新推送',
-      { type: 'warning', confirmButtonText: '重新推送', cancelButtonText: '取消' }
-    )
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -758,16 +586,6 @@ function reconciliationTagType(
   if (status === 'failed') return 'danger'
   if (status === 'warning') return 'warning'
   return 'info'
-}
-
-function reconciliationGuardMessage(guard: MonthlyPayrollPushGuardResult): string {
-  if (guard.ok) return ''
-  const issues = guard.reconciliation?.issues ?? []
-  const detailLines = issues.slice(0, 6).map((issue) => `· ${issue.message}`)
-  const suffix = issues.length > detailLines.length
-    ? [`· 还有 ${issues.length - detailLines.length} 条差异，请打开报表复核详情查看`]
-    : []
-  return [guard.reason, ...detailLines, ...suffix].join('\n')
 }
 
 function pushStatusText(status: MonthlyPayrollRun['insurancePushStatus']): string {
@@ -1029,6 +847,20 @@ function currentPayload(
       dataSourceMode: effectiveDataSourceMode.value
     }
   }
+}
+
+function resultLineTooltipLines(
+  run: WorkflowRunResult | null,
+  text: string
+): string[] {
+  return run?.messageTooltips?.find((item) => item.message === text)?.lines ?? []
+}
+
+function resultLineHasTooltip(
+  run: WorkflowRunResult | null,
+  text: string
+): boolean {
+  return resultLineTooltipLines(run, text).length > 0
 }
 
 async function confirmMonthlyPayrollWriteBack(
@@ -1949,8 +1781,40 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
         <p v-if="result.ok && result.warnings.length > 0" class="warning">
           预处理已完成，但存在需要先处理的提醒，系统未自动生成报表。
         </p>
-        <p v-for="message in result.messages" :key="message">{{ message }}</p>
-        <p v-for="warning in result.warnings" :key="warning" class="warning">{{ warning }}</p>
+        <p v-for="message in result.messages" :key="message">
+          <el-tooltip
+            v-if="resultLineHasTooltip(result, message)"
+            placement="top-start"
+            effect="light"
+            :show-after="200"
+            popper-class="payroll-diff-tooltip"
+          >
+            <template #content>
+              <div class="payroll-diff-tooltip__content">
+                <div v-for="line in resultLineTooltipLines(result, message)" :key="line">{{ line }}</div>
+              </div>
+            </template>
+            <span class="result-line-tooltip-trigger">{{ message }}</span>
+          </el-tooltip>
+          <span v-else>{{ message }}</span>
+        </p>
+        <p v-for="warning in result.warnings" :key="warning" class="warning">
+          <el-tooltip
+            v-if="resultLineHasTooltip(result, warning)"
+            placement="top-start"
+            effect="light"
+            :show-after="200"
+            popper-class="payroll-diff-tooltip"
+          >
+            <template #content>
+              <div class="payroll-diff-tooltip__content">
+                <div v-for="line in resultLineTooltipLines(result, warning)" :key="line">{{ line }}</div>
+              </div>
+            </template>
+            <span class="result-line-tooltip-trigger">{{ warning }}</span>
+          </el-tooltip>
+          <span v-else>{{ warning }}</span>
+        </p>
       </div>
     </div>
 
@@ -1962,8 +1826,40 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
         </el-tag>
       </div>
       <div class="result-lines">
-        <p v-for="message in generateResult.messages" :key="message">{{ message }}</p>
-        <p v-for="warning in generateResult.warnings" :key="warning" class="warning">{{ warning }}</p>
+        <p v-for="message in generateResult.messages" :key="message">
+          <el-tooltip
+            v-if="resultLineHasTooltip(generateResult, message)"
+            placement="top-start"
+            effect="light"
+            :show-after="200"
+            popper-class="payroll-diff-tooltip"
+          >
+            <template #content>
+              <div class="payroll-diff-tooltip__content">
+                <div v-for="line in resultLineTooltipLines(generateResult, message)" :key="line">{{ line }}</div>
+              </div>
+            </template>
+            <span class="result-line-tooltip-trigger">{{ message }}</span>
+          </el-tooltip>
+          <span v-else>{{ message }}</span>
+        </p>
+        <p v-for="warning in generateResult.warnings" :key="warning" class="warning">
+          <el-tooltip
+            v-if="resultLineHasTooltip(generateResult, warning)"
+            placement="top-start"
+            effect="light"
+            :show-after="200"
+            popper-class="payroll-diff-tooltip"
+          >
+            <template #content>
+              <div class="payroll-diff-tooltip__content">
+                <div v-for="line in resultLineTooltipLines(generateResult, warning)" :key="line">{{ line }}</div>
+              </div>
+            </template>
+            <span class="result-line-tooltip-trigger">{{ warning }}</span>
+          </el-tooltip>
+          <span v-else>{{ warning }}</span>
+        </p>
       </div>
     </div>
 
@@ -2785,6 +2681,23 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 
 .result-lines .warning {
   color: #b45309;
+}
+
+.result-line-tooltip-trigger {
+  cursor: help;
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px;
+}
+
+:global(.payroll-diff-tooltip) {
+  max-width: 560px;
+}
+
+:global(.payroll-diff-tooltip__content) {
+  display: grid;
+  gap: 4px;
+  line-height: 1.6;
+  white-space: normal;
 }
 
 .result-panel.failed .result-lines .warning {

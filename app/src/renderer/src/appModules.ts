@@ -1,3 +1,5 @@
+import { isRunnerFlavor } from '@shared/appFlavor'
+
 export type ModuleGroup = {
   key: string
   label: string
@@ -5,7 +7,20 @@ export type ModuleGroup = {
   hidden?: boolean
 }
 
-export const modules: ModuleGroup[] = [
+// 内网执行端版隐藏的模块：纯数据/报表管理类入口。
+// 保留 'integration'（一体化对接）与 'payroll'（工资业务：导入交换包/触发推送，
+// 第 2 阶段推送上工具栏后再视情况收敛）。
+const runnerHiddenModuleKeys = new Set([
+  'integrated',
+  'budget',
+  'annual',
+  'township',
+  'housing',
+  'pivot',
+  'hr'
+])
+
+const baseModules: ModuleGroup[] = [
   { key: 'integration', label: '一体化对接', tables: [] },
   { key: 'integrated', label: '工资数据', tables: ['在职工资', '退休工资', '其他工资'] },
   { key: 'payroll', label: '工资业务', tables: [] },
@@ -32,6 +47,12 @@ export const modules: ModuleGroup[] = [
     ]
   }
 ]
+
+export const modules: ModuleGroup[] = baseModules.map((module) =>
+  isRunnerFlavor && runnerHiddenModuleKeys.has(module.key)
+    ? { ...module, hidden: true }
+    : module
+)
 
 export const visibleModules = modules.filter((module) => !module.hidden)
 

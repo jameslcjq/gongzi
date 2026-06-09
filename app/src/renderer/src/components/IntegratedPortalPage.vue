@@ -51,12 +51,102 @@ import {
 import type {
   BudgetImportResult,
   MonthlyPayrollPushStatus,
+  MonthlyPayrollPushTarget,
+  MonthlyPayrollRun,
   SalaryQuotaMatchLocalSummary,
   UnitSettings
 } from '@shared/types'
+import { isRunnerFlavor } from '@shared/appFlavor'
+import {
+  assemblePushSteps,
+  canPushAll,
+  confirmPushTargets,
+  enqueueIntegratedPush,
+  historyPushLabel,
+  pushTargetsForRow
+} from '../integration/integratedPushController'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
 const showInternalTools = internalToolsEnabled
+
+// ===== 内网执行端：一体化工具栏直接推送 =====
+// 以"当前任务（已导入的报账记录）"为上下文，复用工资业务页同款组装逻辑（integratedPushController）。
+// 仅 runner 版渲染相关工具栏，完整版原有推送路径不受影响。
+const runnerTasks = ref<MonthlyPayrollRun[]>([])
+const currentRunnerTaskId = ref<number | null>(null)
+const runnerTasksLoading = ref(false)
+const runnerPushing = ref(false)
+const currentRunnerTask = computed(
+  () => runnerTasks.value.find((task) => task.id === currentRunnerTaskId.value) ?? null
+)
+
+async function loadRunnerTasks(): Promise<void> {
+  runnerTasksLoading.value = true
+  try {
+    const runs = await window.salaryApi.listMonthlyPayrollRuns()
+    runnerTasks.value = runs.filter((run: MonthlyPayrollRun) => !run.isOutdated)
+    if (
+      currentRunnerTaskId.value === null ||
+      !runnerTasks.value.some((task) => task.id === currentRunnerTaskId.value)
+    ) {
+      currentRunnerTaskId.value = runnerTasks.value[0]?.id ?? null
+    }
+  } catch (error) {
+    ElMessage.error('加载任务列表失败：' + (error instanceof Error ? error.message : String(error)))
+  } finally {
+    runnerTasksLoading.value = false
+  }
+}
+
+async function runnerPush(targets: MonthlyPayrollPushTarget[]): Promise<void> {
+  const row = currentRunnerTask.value
+  if (!row) {
+    ElMessage.warning('请先选择当前任务')
+    return
+  }
+  if (!targets.length) {
+    ElMessage.warning('该任务没有可推送的文件')
+    return
+  }
+  if (pushInProgress.value || pendingPushQueue.value.length > 0) {
+    ElMessage.warning('正在推送中，请等待当前推送完成后再试')
+    return
+  }
+  if (!(await confirmPushTargets(row, targets))) return
+  runnerPushing.value = true
+  try {
+    const label = historyPushLabel(row)
+    const { steps, stepHints } = await assemblePushSteps(row, targets, label)
+    enqueueIntegratedPush(
+      steps,
+      stepHints,
+      targets.length > 1 ? '全部推送' : '推送',
+      targets.length > 1
+        ? { mode: 'full-auto', label, runId: row.id, month: row.month }
+        : undefined
+    )
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    setTimeout(() => {
+      runnerPushing.value = false
+    }, 800)
+  }
+}
+
+function runnerPushAll(): void {
+  const row = currentRunnerTask.value
+  void runnerPush(row ? pushTargetsForRow(row) : [])
+}
+
+onMounted(() => {
+  if (isRunnerFlavor) void loadRunnerTasks()
+})
+
+// 推送结束后刷新任务推送状态标签
+watch(pushInProgress, (current, previous) => {
+  if (previous && !current && isRunnerFlavor) void loadRunnerTasks()
+})
 
 type SalaryExportFile = {
   filename: string
@@ -1818,6 +1908,59 @@ void nextTick(() => {
       </div>
     </header>
 
+    <div v-if="isRunnerFlavor" class="portal-runner-bar">
+      <span class="portal-runner-label">当前任务</span>
+      <el-select
+        v-model="currentRunnerTaskId"
+        size="small"
+        class="portal-runner-select"
+        placeholder="选择已导入的报账任务"
+        :loading="runnerTasksLoading"
+        no-data-text="暂无已导入任务，请先导入交换包"
+      >
+        <el-option
+          v-for="task in runnerTasks"
+          :key="task.id"
+          :value="task.id"
+          :label="historyPushLabel(task)"
+        />
+      </el-select>
+      <el-button size="small" :icon="Refresh" :loading="runnerTasksLoading" @click="loadRunnerTasks">
+        刷新
+      </el-button>
+      <span class="portal-runner-sep" />
+      <el-button
+        size="small"
+        type="primary"
+        :loading="runnerPushing"
+        :disabled="!currentRunnerTask || pushInProgress || !canPushAll(currentRunnerTask)"
+        @click="runnerPushAll"
+        >全部推送</el-button
+      >
+      <el-button
+        size="small"
+        :disabled="!currentRunnerTask || pushInProgress || !currentRunnerTask.voucherImportPath"
+        @click="runnerPush(['voucher'])"
+        >凭证</el-button
+      >
+      <el-button
+        size="small"
+        :disabled="!currentRunnerTask || pushInProgress || !currentRunnerTask.insuranceImportPath"
+        @click="runnerPush(['insurance'])"
+        >保险</el-button
+      >
+      <el-button
+        size="small"
+        :disabled="
+          !currentRunnerTask ||
+          pushInProgress ||
+          (!currentRunnerTask.salaryImportPath && !currentRunnerTask.payrollBackpayPath)
+        "
+        @click="runnerPush(['salary'])"
+        >工资</el-button
+      >
+    </div>
+
     <div class="portal-tabbar">
       <div
         v-for="tab in tabs"
@@ -1945,6 +2088,33 @@ void nextTick(() => {
 .portal-actions {
   display: flex;
   gap: 8px;
+}
+
+.portal-runner-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2, #f4f4f5);
+}
+
+.portal-runner-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.portal-runner-select {
+  min-width: 280px;
+}
+
+.portal-runner-sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 2px 6px;
+  background: var(--border);
 }
 
 .portal-tabbar {

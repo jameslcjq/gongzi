@@ -12,6 +12,7 @@
     "build": "npm run clean:build && npm run build:helper && vue-tsc --noEmit && vite build",
     "dist": "npm run build && electron-builder --win nsis",
     "dist:copy2": "npm run build && electron-builder --win nsis --config installer/electron-builder.copy2.yml",
+    "dist:runner": "set APP_FLAVOR=runner&& npm run build && electron-builder --win nsis --config installer/electron-builder.runner.yml",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test:monthly-payroll-reconciliation": "node scripts/run-monthly-payroll-reconciliation-test.mjs",
