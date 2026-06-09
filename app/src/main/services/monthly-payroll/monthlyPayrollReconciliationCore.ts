@@ -13,6 +13,8 @@ export type ActiveBackpayRow = {
   values: Record<string, string | number>
 }
 
+export type ActiveBackpayIdCardResolver = (idCard: string, name: string) => string
+
 export type ActiveBackpayCheckResult = {
   check: {
     key: string
@@ -29,6 +31,7 @@ export function reconcileActiveBackpayPeople(input: {
   salary?: SalarySummary
   dataSourceMode: MonthlyPayrollDataSourceMode
   allowIdentityFallback?: boolean
+  resolveIdCard?: ActiveBackpayIdCardResolver
   sheets: MonthlyPayrollReportSheet[]
   activeRows: ActiveBackpayRow[]
 }): ActiveBackpayCheckResult {
@@ -83,13 +86,15 @@ export function reconcileActiveBackpayPeople(input: {
 
   let checkedCount = 0
   for (const person of input.salary.activePeople) {
-    const idCard = normalizeIdCard(person.idCard)
+    const sourceIdCard = normalizeIdCard(person.idCard)
+    const idCard = normalizeIdCard(input.resolveIdCard?.(person.idCard, person.name) ?? person.idCard)
     const source = activeBackpayAdjustmentTotals(person)
-    if (!idCard || (source.increaseTotal === 0 && source.deductionTotal === 0)) continue
+    if (!sourceIdCard || (source.increaseTotal === 0 && source.deductionTotal === 0)) continue
     checkedCount += 1
     const dbRow = activeById.get(idCard) ??
+      activeById.get(sourceIdCard) ??
       (input.allowIdentityFallback ? uniqueActiveRowByName(activeByName, person.name) : undefined)
-    const reportRow = reportById.get(idCard)
+    const reportRow = reportById.get(idCard) ?? reportById.get(sourceIdCard)
     const reportTotals = reportRow ? backpayReportTotals(reportRow) : { increaseTotal: 0, deductionTotal: 0 }
     if (!dbRow) {
       issues.push({

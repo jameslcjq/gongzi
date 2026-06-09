@@ -852,7 +852,7 @@ async function confirmMonthlyPayrollIdentityFallback(
     : ''
   try {
     await ElMessageBox.confirm(
-      `发现 ${preview.identityConfirmableCount} 条工资表与本地工资数据身份证不一致，但姓名唯一匹配。确认后仅本次按姓名候选继续核对和回写，不会自动修改身份证号。${examples}`,
+      `发现 ${preview.identityConfirmableCount} 条工资表与本地工资数据身份证不一致，但姓名唯一匹配。确认后系统会记住这些身份匹配关系，以后工资导入、补发工资和复核都会按同一人处理；不会自动修改原始身份证号。${examples}`,
       '确认身份匹配',
       {
         type: 'warning',

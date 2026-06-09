@@ -12,6 +12,10 @@ import {
   integratedActivePayFields,
   integratedSimplePayFields
 } from './integratedPayrollRules'
+import {
+  readConfirmedIdentityAliasMap,
+  type ConfirmedIdentityAliasMap
+} from './monthlyPayrollIdentityAliases'
 import { activeBackpayAdjustmentTotals } from './salaryBackpayAdjustments'
 import {
   coerceComparableValue,
@@ -99,6 +103,7 @@ type IntegratedIdentityResolution = {
 
 type IntegratedIdentityFallbackOptions = {
   allowIdentityFallback?: boolean
+  confirmedIdentityAliases?: ConfirmedIdentityAliasMap
 }
 
 export type IntegratedIdCardResolver = (idCard: string, name: string) => string
@@ -381,10 +386,12 @@ export async function comparePayrollPeople(
   sourcePeople: PayrollPerson[],
   targetWorksheetName: string,
   compareFields: Array<[string, string]>,
-  options: { allowIdentityFallback?: boolean } = {}
+  options: IntegratedIdentityFallbackOptions = {}
 ): Promise<CompareSummary> {
   const targetRows = await loadIntegratedRows(targetWorksheetName)
   const targetById = new Map(targetRows.map((row) => [row.idCard, row]))
+  const confirmedIdentityAliases = options.confirmedIdentityAliases ??
+    await readConfirmedIdentityAliasMap(targetWorksheetName)
   const targetByName = new Map<string, IntegratedRow[]>()
   for (const target of targetRows) {
     const nameKey = normalizePersonName(target.name)
@@ -405,11 +412,17 @@ export async function comparePayrollPeople(
   for (const person of sourcePeople) {
     let target = targetById.get(person.idCard)
     if (!target) {
+      const confirmedTargetIdCard = confirmedIdentityAliases.get(normalizeIdCard(person.idCard))
+      target = confirmedTargetIdCard ? targetById.get(confirmedTargetIdCard) : undefined
+    }
+    if (!target) {
       const resolution = resolveIntegratedRowIdentityFallback(
         person,
         targetByName,
+        targetById,
         targetWorksheetName,
-        options.allowIdentityFallback ?? false
+        options.allowIdentityFallback ?? false,
+        confirmedIdentityAliases
       )
       if (resolution.review && identityReviewExamples.length < 5) {
         identityReviewExamples.push(formatIntegratedIdentityReview(resolution.review))
@@ -471,23 +484,16 @@ export async function comparePayrollPeople(
 export async function buildIntegratedActiveIdCardResolver(): Promise<IntegratedIdCardResolver> {
   const rows = await loadIntegratedRows('在职工资')
   const byIdCard = new Map(rows.map((row) => [normalizeIdCard(row.idCard), row.idCard]))
-  const byName = new Map<string, IntegratedRow[]>()
-  for (const row of rows) {
-    const nameKey = normalizePersonName(row.name)
-    if (!nameKey) continue
-    const grouped = byName.get(nameKey) ?? []
-    grouped.push(row)
-    byName.set(nameKey, grouped)
-  }
+  const confirmedIdentityAliases = await readConfirmedIdentityAliasMap('在职工资')
 
   return (idCard: string, name: string): string => {
+    void name
     const normalizedIdCard = normalizeIdCard(idCard)
     const exact = byIdCard.get(normalizedIdCard)
     if (exact) return exact
 
-    const nameKey = normalizePersonName(name)
-    const nameMatches = nameKey ? byName.get(nameKey) ?? [] : []
-    if (nameMatches.length === 1) return nameMatches[0].idCard
+    const confirmedTargetIdCard = confirmedIdentityAliases.get(normalizedIdCard)
+    if (confirmedTargetIdCard && byIdCard.has(confirmedTargetIdCard)) return confirmedTargetIdCard
 
     return normalizedIdCard || idCard
   }
@@ -540,6 +546,8 @@ export async function buildIntegratedActiveBackpayAdjustmentPlan(
     rowsByIdCard.set(idCard, grouped)
   }
   const identityIndex = buildIntegratedIdentityIndex(rowsByIdCard, nameColumn, batchColumn)
+  const confirmedIdentityAliases = options.confirmedIdentityAliases ??
+    await readConfirmedIdentityAliasMap('在职工资')
 
   const changes: IntegratedWriteBackChange[] = []
   const manual: IntegratedManualDifference[] = []
@@ -549,7 +557,8 @@ export async function buildIntegratedActiveBackpayAdjustmentPlan(
       worksheetName: '在职工资',
       person,
       identityIndex,
-      allowIdentityFallback: options.allowIdentityFallback ?? false
+      allowIdentityFallback: options.allowIdentityFallback ?? false,
+      confirmedIdentityAliases
     })
     if (identity.review) identityReviews.push(identity.review)
     const personRows = identity.rows
@@ -692,6 +701,8 @@ async function buildIntegratedWorksheetWriteBackPlan(
     rowsByIdCard.set(idCard, grouped)
   }
   const identityIndex = buildIntegratedIdentityIndex(rowsByIdCard, nameColumn, batchColumn)
+  const confirmedIdentityAliases = options.confirmedIdentityAliases ??
+    await readConfirmedIdentityAliasMap(worksheetName)
 
   const batchHintByField = new Map<string, string>()
   for (const item of writableFields) {
@@ -707,7 +718,8 @@ async function buildIntegratedWorksheetWriteBackPlan(
       worksheetName,
       person,
       identityIndex,
-      allowIdentityFallback: options.allowIdentityFallback ?? false
+      allowIdentityFallback: options.allowIdentityFallback ?? false,
+      confirmedIdentityAliases
     })
     if (identity.review) identityReviews.push(identity.review)
     const personRows = identity.rows
@@ -1087,10 +1099,17 @@ function resolveIntegratedIdentityRows(input: {
   person: PayrollPerson
   identityIndex: IntegratedIdentityIndex
   allowIdentityFallback: boolean
+  confirmedIdentityAliases: ConfirmedIdentityAliasMap
 }): IntegratedIdentityResolution {
   const idCard = normalizeIdCard(input.person.idCard)
   const exactRows = input.identityIndex.byIdCard.get(idCard)
   if (exactRows) return { rows: exactRows }
+
+  const confirmedTargetIdCard = input.confirmedIdentityAliases.get(idCard)
+  if (confirmedTargetIdCard) {
+    const confirmedRows = input.identityIndex.byIdCard.get(confirmedTargetIdCard)
+    if (confirmedRows) return { rows: confirmedRows }
+  }
 
   const nameKey = normalizePersonName(input.person.name)
   if (!nameKey) return {}
@@ -1109,6 +1128,9 @@ function resolveIntegratedIdentityRows(input: {
   }
 
   const candidate = candidates[0]
+  if (confirmedTargetIdCard && confirmedTargetIdCard === candidate.idCard) {
+    return { rows: candidate.rows }
+  }
   const review: MonthlyPayrollIdentityReview = {
     worksheetName: input.worksheetName,
     sourceName: input.person.name,
@@ -1124,9 +1146,18 @@ function resolveIntegratedIdentityRows(input: {
 function resolveIntegratedRowIdentityFallback(
   person: PayrollPerson,
   targetByName: Map<string, IntegratedRow[]>,
+  targetById: Map<string, IntegratedRow>,
   worksheetName: string,
-  allowIdentityFallback: boolean
+  allowIdentityFallback: boolean,
+  confirmedIdentityAliases: ConfirmedIdentityAliasMap
 ): { row?: IntegratedRow; review?: MonthlyPayrollIdentityReview } {
+  const sourceIdCard = normalizeIdCard(person.idCard)
+  const confirmedTargetIdCard = confirmedIdentityAliases.get(sourceIdCard)
+  if (confirmedTargetIdCard) {
+    const confirmedRow = targetById.get(confirmedTargetIdCard)
+    if (confirmedRow) return { row: confirmedRow }
+  }
+
   const nameKey = normalizePersonName(person.name)
   if (!nameKey) return {}
   const candidates = targetByName.get(nameKey) ?? []
@@ -1143,6 +1174,9 @@ function resolveIntegratedRowIdentityFallback(
     }
   }
   const candidate = candidates[0]
+  if (confirmedTargetIdCard && confirmedTargetIdCard === candidate.idCard) {
+    return { row: candidate }
+  }
   const review: MonthlyPayrollIdentityReview = {
     worksheetName,
     sourceName: person.name,

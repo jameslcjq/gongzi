@@ -385,6 +385,24 @@ async function ensureSystemTables(database: sqlite3.Database): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_monthly_payroll_source_versions_ym
       ON monthly_payroll_source_versions (year DESC, month DESC, kind, status, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS monthly_payroll_identity_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worksheet_name TEXT NOT NULL,
+      source_name TEXT,
+      source_id_card TEXT NOT NULL,
+      target_name TEXT,
+      target_id_card TEXT NOT NULL,
+      confirmed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (worksheet_name, source_id_card, target_id_card)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_monthly_payroll_identity_aliases_source
+      ON monthly_payroll_identity_aliases (worksheet_name, source_id_card);
+
+    CREATE INDEX IF NOT EXISTS idx_monthly_payroll_identity_aliases_target
+      ON monthly_payroll_identity_aliases (worksheet_name, target_id_card);
+
     CREATE TABLE IF NOT EXISTS exchange_packages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       package_id TEXT NOT NULL UNIQUE,

@@ -117,6 +117,7 @@ import {
   buildSalarySummaryFromIntegratedAggregates,
   buildSalaryWorkbookBusinessSummary
 } from './monthlyPayrollBusinessSummary'
+import { saveConfirmedIdentityAliases } from './monthlyPayrollIdentityAliases'
 import {
   applyTaxToSalarySummary,
   backupAndWriteTaxToSalaryWorkbook,
@@ -369,6 +370,9 @@ export async function preprocessMonthlyPayroll(
     let writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
     const blockedIdentityReviews = writeBackPlan.identityReviews.filter((review) => !review.confirmable)
     const confirmableIdentityReviews = writeBackPlan.identityReviews.filter((review) => review.confirmable)
+    const savedIdentityAliasCount = input.confirmIdentityFallback
+      ? await saveConfirmedIdentityAliases(confirmableIdentityReviews)
+      : 0
     let writeBackPreview = buildMonthlyPayrollWriteBackPreview(writeBackPlan, {
       requiresConfirmation: writeBackPlan.changes.length > 0 && !input.confirmWriteBack,
       requiresIdentityConfirmation: confirmableIdentityReviews.length > 0 && !input.confirmIdentityFallback,
@@ -484,7 +488,7 @@ export async function preprocessMonthlyPayroll(
         ? [`工资表金额差异已自动回写 ${writeBackPreview.syncableCount} 项，复核后${activeCompare.changed === 0 ? '在职工资已一致' : `仍有 ${activeCompare.changed} 人存在差异`}`]
         : []),
       ...(writeBackPreview.identityReviewCount > 0 && input.confirmIdentityFallback
-        ? [`身份核对：已人工确认 ${writeBackPreview.identityConfirmableCount} 条姓名唯一匹配，本次未自动修改身份证号`]
+        ? [`身份核对：已人工确认 ${writeBackPreview.identityConfirmableCount} 条姓名唯一匹配，已记住 ${savedIdentityAliasCount} 条身份匹配关系，本次未自动修改身份证号`]
         : []),
       `${writeBackPreview.applied ? '在职工资已按公式重算' : '在职工资当前汇总'} ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
       actualPayMatched

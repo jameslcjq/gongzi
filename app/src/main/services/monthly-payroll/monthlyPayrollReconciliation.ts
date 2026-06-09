@@ -17,8 +17,12 @@ import type {
   SocialSecuritySummary,
   TaxSummary
 } from './monthlyPayrollTypes'
-import { reconcileActiveBackpayPeople } from './monthlyPayrollReconciliationCore'
-import { formatMoney, num, roundMoney, text } from './monthlyPayrollUtils'
+import {
+  reconcileActiveBackpayPeople,
+  type ActiveBackpayIdCardResolver
+} from './monthlyPayrollReconciliationCore'
+import { readConfirmedIdentityAliasMap } from './monthlyPayrollIdentityAliases'
+import { formatMoney, normalizeIdCard, num, roundMoney, text } from './monthlyPayrollUtils'
 
 type ReconcileInput = {
   salary?: SalarySummary
@@ -43,13 +47,21 @@ export async function reconcileMonthlyPayrollReport(
     activeRows,
     activeAggregates,
     retiredAggregates,
-    otherAggregates
+    otherAggregates,
+    activeIdentityAliases
   ] = await Promise.all([
     loadIntegratedRows('在职工资').catch(() => []),
     Promise.resolve(input.integratedActiveAggregates ?? loadIntegratedActiveAggregates()),
     Promise.resolve(input.integratedRetiredAggregates ?? loadIntegratedSimpleAggregates('退休工资')),
-    Promise.resolve(input.integratedOtherAggregates ?? loadIntegratedSimpleAggregates('其他工资'))
+    Promise.resolve(input.integratedOtherAggregates ?? loadIntegratedSimpleAggregates('其他工资')),
+    readConfirmedIdentityAliasMap('在职工资')
   ])
+  const activeIdCards = new Set(activeRows.map((row) => normalizeIdCard(row.idCard)).filter(Boolean))
+  const resolveActiveIdCard: ActiveBackpayIdCardResolver = (idCard) => {
+    const sourceIdCard = normalizeIdCard(idCard)
+    const confirmedIdCard = activeIdentityAliases.get(sourceIdCard)
+    return confirmedIdCard && activeIdCards.has(confirmedIdCard) ? confirmedIdCard : sourceIdCard
+  }
 
   const issues: MonthlyPayrollReconciliationIssue[] = []
   const checks: MonthlyPayrollReconciliationCheck[] = []
@@ -71,6 +83,7 @@ export async function reconcileMonthlyPayrollReport(
     salary: input.salary,
     dataSourceMode: input.dataSourceMode,
     allowIdentityFallback: input.allowIdentityFallback,
+    resolveIdCard: resolveActiveIdCard,
     sheets: input.sheets,
     activeRows
   })
