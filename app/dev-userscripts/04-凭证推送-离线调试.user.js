@@ -49,6 +49,8 @@
   async function runPushVoucher(FILE_NAME, BASE64, RUN_LABEL) {
       const MENUID = "227b6262406c4afb836d98abe98d4f85"
       const IMPORT_PARAM = {"modelType":"29","displayMode":"0","currentModelId":"c6025c601352431c977b538e99c56c5f","incrementFlag":"1"}
+      var TRACE = []
+      var TRACE_T0 = Date.now()
 
       function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
       function normalize(v) { return String(v || '').replace(/\s+/g, '') }
@@ -75,6 +77,7 @@
         else if (kind === 'warn') el.style.background = 'rgba(200,140,0,0.95)'
         else el.style.background = 'rgba(33,33,33,0.92)'
         console.log('[voucher-push]', text)
+        try { TRACE.push('+' + ((Date.now() - TRACE_T0) / 1000).toFixed(1) + 's ' + text) } catch (e) {}
       }
       function clearStatusLater(ms) {
         setTimeout(function () {
@@ -212,19 +215,6 @@
         return !!findVoucherWindow(win)
       }
 
-      function directOpenVoucherPage(root) {
-        var url = '/gld-web/gl/html/voucher/VoucherInput.html?menuid=' + MENUID + '&moduleid=' + MENUID
-        try {
-          root.location.href = url
-          return true
-        } catch (e) {}
-        try {
-          window.location.href = url
-          return true
-        } catch (e) {}
-        return false
-      }
-
       async function waitForVoucherPage(root, timeoutMs) {
         var deadline = Date.now() + (timeoutMs || 60000)
         while (Date.now() < deadline) {
@@ -234,10 +224,51 @@
         return isOnVoucherPage(root)
       }
 
-      async function openVoucherPage(root) {
-        if (isOnVoucherPage(root)) return true
+      function injectVoucherIframe(root) {
+        try {
+          var doc = (root && root.document) || document
+          var existing = doc.getElementById('payroll-voucher-iframe')
+          if (existing) return existing
+          var url = '/gld-web/gl/html/voucher/VoucherInput.html?menuid=' + MENUID + '&moduleid=' + MENUID
+          var ifr = doc.createElement('iframe')
+          ifr.id = 'payroll-voucher-iframe'
+          ifr.src = url
+          ifr.style.cssText = 'position:fixed;left:-99999px;top:0;width:1200px;height:800px;border:0;z-index:-1;'
+          doc.body.appendChild(ifr)
+          return ifr
+        } catch (e) { return null }
+      }
 
-        status('🧭 自动导航：中科单位核算 → 凭证管理 → 凭证录入 ...')
+      // 在页内注入同源 iframe 加载凭证录入页，等 onload 后确认是否真的落在凭证录入（而非被重定向到登录/SSO）
+      async function openVoucherViaIframe(root) {
+        var ifr = injectVoucherIframe(root)
+        if (!ifr) return false
+        await new Promise(function (resolve) {
+          var done = false
+          function fin() { if (!done) { done = true; resolve() } }
+          try { ifr.addEventListener('load', fin) } catch (e) {}
+          setTimeout(fin, 30000)
+        })
+        await sleep(2000)
+        try {
+          var w = ifr.contentWindow
+          if (w && looksLikeVoucherEntry(w)) return true
+        } catch (e) {}
+        return false
+      }
+
+      async function openVoucherPage(root) {
+        if (isOnVoucherPage(root)) return 'ok'
+
+        // iframe 优先：SmartFin 菜单已变，点菜单只会狂弹窗且慢；页内同源 iframe 直达凭证录入已验证可用
+        status('🧭 在页内直接打开凭证录入(iframe) ...')
+        if (await openVoucherViaIframe(root)) {
+          await sleep(800)
+          return 'ok'
+        }
+
+        // iframe 没成功，再退回点菜单（兼容老门户）
+        status('🧭 iframe 未成功，改走菜单导航：中科单位核算 → 凭证管理 → 凭证录入 ...', 'warn')
         if (!textExistsIn(root, '凭证管理')) {
           await clickAnyAndWait(root, ['中科单位核算', '单位核算', '会计核算'], '凭证管理', 60000)
         }
@@ -252,18 +283,9 @@
         }
         if (await waitForVoucherPage(root, 10000)) {
           await sleep(1500)
-          return true
+          return 'ok'
         }
-
-        status('🧭 菜单未稳定打开凭证录入，改用凭证录入地址直达 ...', 'warn')
-        if (!directOpenVoucherPage(root)) {
-          throw new Error('无法自动打开“凭证录入”页面。请确认已登录核算模块后重试。')
-        }
-        if (!(await waitForVoucherPage(root, 60000))) {
-          throw new Error('已尝试直达“凭证录入”，但页面仍未加载完成。请稍后重试或检查一体化登录状态。')
-        }
-        await sleep(1500)
-        return true
+        return 'fail'
       }
 
       try {
@@ -274,7 +296,17 @@
         var root = window.top || window
 
         if (!isOnVoucherPage(root)) {
-          await openVoucherPage(root)
+          var nav = await openVoucherPage(root)
+          if (nav !== 'ok') {
+            status('❌ 未能打开“凭证录入”页面', 'err')
+            clearStatusLater(10000)
+            return {
+              ok: false,
+              reason: '未能打开“凭证录入”页面：菜单中未找到入口，页内直接打开(iframe)也未成功（一体化可能已升级为 SmartFin，需按新菜单适配；详见日志“门户结构诊断”）',
+              trace: TRACE,
+              traceText: TRACE.join('\n')
+            }
+          }
         }
 
         status('📤 推送凭证：' + RUN_LABEL + ' ...')
@@ -365,12 +397,12 @@
 
         status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\n' + detailText : '') + '\n一体化返回：' + rawText, 'ok')
         clearStatusLater(12000)
-        return { ok: true, response: json }
+        return { ok: true, response: json, trace: TRACE, traceText: TRACE.join('\n') }
       } catch (error) {
         var msg = error && error.message ? error.message : String(error)
         status('❌ ' + msg, 'err')
         clearStatusLater(12000)
-        return { ok: false, reason: msg }
+        return { ok: false, reason: msg, trace: TRACE, traceText: TRACE.join('\n') }
       }
   }
 

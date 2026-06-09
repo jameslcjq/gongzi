@@ -287,7 +287,7 @@ function quotaUserScript(coreScript) {
   const patched = coreScript.replace(/var LOCAL_SUMMARY = \{[\s\S]*?\}\n  var PERSONNEL_EXPENSE_CODES/, `${localSummaryReader}\n  var PERSONNEL_EXPENSE_CODES`)
   return `${metadata({
     name: '工资系统-额度匹配调试（离线）',
-    version: '2026.06.09c',
+    version: '2026.06.09d',
     description: '离线油猴调试版：在一体化生成支付页面测试额度匹配、修改、保存、重新选行。'
   })}
 ${patched}

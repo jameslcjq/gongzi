@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260609c-salary-quota-match-pay-money-guard'
+  var VERSION = '20260609d-salary-quota-match-owning-grid-pay-money'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -1278,37 +1278,62 @@ export function buildSalaryQuotaMatchScript(
     }
   }
 
-  function selectDatagridRow(row, field) {
+  function datagridFields(jq, el) {
+    var fields = []
+    try {
+      fields = fields.concat(jq(el).datagrid('getColumnFields') || [])
+      fields = fields.concat(jq(el).datagrid('getColumnFields', true) || [])
+    } catch (error) {}
+    return fields
+  }
+
+  function datagridOwnsRow(jq, el, row) {
+    try {
+      var panel = jq(el).datagrid('getPanel')
+      return !!(panel && panel[0] && panel[0].contains(row))
+    } catch (error) {
+      return false
+    }
+  }
+
+  function findDatagridForRow(row, field) {
     if (!row) return false
     var doc = row.ownerDocument
     var jq = doc ? getJq(doc) : null
     var index = rowIndex(row, 0)
-    var selected = false
-    try {
-      clickElement(row)
-      selected = true
-    } catch (error) {}
-    if (!doc || !jq) return selected
+    if (!doc || !jq) return null
     var candidates = Array.prototype.slice.call(doc.querySelectorAll('table[id],div[id]'))
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i]
       try {
         if (!jq(el).data('datagrid')) continue
-        var fields = []
-        try {
-          fields = fields.concat(jq(el).datagrid('getColumnFields') || [])
-          fields = fields.concat(jq(el).datagrid('getColumnFields', true) || [])
-        } catch (error) {}
+        if (!datagridOwnsRow(jq, el, row)) continue
+        var fields = datagridFields(jq, el)
         if (field && fields.length && fields.indexOf(field) < 0) continue
         var rows = jq(el).datagrid('getRows') || []
         if (!rows[index]) continue
-        try {
-          jq(el).datagrid('scrollTo', index)
-        } catch (error) {}
-        jq(el).datagrid('selectRow', index)
-        selected = true
+        return { grid: el, jq: jq, index: index, rows: rows, fields: fields }
       } catch (error) {}
     }
+    return null
+  }
+
+  function selectDatagridRow(row, field) {
+    if (!row) return false
+    var selected = false
+    try {
+      clickElement(row)
+      selected = true
+    } catch (error) {}
+    var info = findDatagridForRow(row, field)
+    if (!info) return selected
+    try {
+      info.jq(info.grid).datagrid('scrollTo', info.index)
+    } catch (error) {}
+    try {
+      info.jq(info.grid).datagrid('selectRow', info.index)
+      selected = true
+    } catch (error) {}
     return selected
   }
 
@@ -1325,62 +1350,22 @@ export function buildSalaryQuotaMatchScript(
   }
 
   function findDatagridEditor(row, field) {
-    var doc = row && row.ownerDocument
-    var jq = doc ? getJq(doc) : null
-    if (!doc || !jq) return null
-    var index = rowIndex(row, 0)
-    var candidates = Array.prototype.slice.call(doc.querySelectorAll('table[id],div[id]'))
-    for (var i = 0; i < candidates.length; i++) {
-      var el = candidates[i]
-      try {
-        if (!jq(el).data('datagrid')) continue
-        var fields = []
-        try {
-          fields = fields.concat(jq(el).datagrid('getColumnFields') || [])
-          fields = fields.concat(jq(el).datagrid('getColumnFields', true) || [])
-        } catch (error) {}
-        if (fields.length && fields.indexOf(field) < 0) continue
-        var rows = jq(el).datagrid('getRows') || []
-        if (!rows[index]) continue
-        var editor = jq(el).datagrid('getEditor', { index: index, field: field })
-        if (!editor) {
-          try {
-            jq(el).datagrid('selectRow', index)
-            jq(el).datagrid('beginEdit', index)
-            editor = jq(el).datagrid('getEditor', { index: index, field: field })
-          } catch (error) {}
-        }
-        if (editor && editor.target) {
-          return { grid: el, editor: editor, index: index, rows: rows, jq: jq }
-        }
-      } catch (error) {}
+    var info = findDatagridForRow(row, field)
+    if (!info) return null
+    try {
+      var editor = info.jq(info.grid).datagrid('getEditor', { index: info.index, field: field })
+      if (!editor) {
+        info.jq(info.grid).datagrid('selectRow', info.index)
+        info.jq(info.grid).datagrid('beginEdit', info.index)
+        editor = info.jq(info.grid).datagrid('getEditor', { index: info.index, field: field })
+      }
+      if (editor && editor.target) {
+        return { grid: info.grid, editor: editor, index: info.index, rows: info.rows, jq: info.jq, field: field }
+      }
+    } catch (error) {
+      return null
     }
     return null
-  }
-
-  function domElementOf(target) {
-    if (!target) return null
-    if (target.nodeType === 1) return target
-    if (target[0] && target[0].nodeType === 1) return target[0]
-    return null
-  }
-
-  function editorBelongsToCell(editorInfo, cell) {
-    var target = domElementOf(editorInfo && editorInfo.editor && editorInfo.editor.target)
-    if (!target || !cell) return false
-    if (cell.contains(target)) return true
-    try {
-      var jq = editorInfo && editorInfo.jq
-      if (jq) {
-        var wrapper = jq(target).closest('.textbox,.combo,.numberbox,.datagrid-editable')
-        if (wrapper && wrapper[0] && cell.contains(wrapper[0])) return true
-      }
-    } catch (error) {}
-    try {
-      var fieldCell = target.closest && target.closest('[field]')
-      if (fieldCell === cell) return true
-    } catch (error) {}
-    return false
   }
 
   function setEditorValue(editorInfo, value) {
@@ -1412,7 +1397,7 @@ export function buildSalaryQuotaMatchScript(
     } catch (error) {}
     try {
       if (editorInfo.rows && editorInfo.rows[editorInfo.index]) {
-        editorInfo.rows[editorInfo.index][CONFIG.quotaAmountField] = value
+        editorInfo.rows[editorInfo.index][editorInfo.field || CONFIG.quotaAmountField] = value
       }
     } catch (error) {}
     return ok
@@ -1445,9 +1430,12 @@ export function buildSalaryQuotaMatchScript(
       cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }))
     } catch (error) {}
     await sleep(250)
-    var doc = row.ownerDocument
     var editorInfo = findDatagridEditor(row, CONFIG.quotaAmountField)
-    if (editorInfo && editorBelongsToCell(editorInfo, cell) && setEditorValue(editorInfo, amount)) {
+    if (!editorInfo) {
+      status('未能从当前可挂接指标行定位到“挂接金额”字段编辑器，已停止，避免误填“部门经济分类”等其他列。', 'err')
+      return false
+    }
+    if (setEditorValue(editorInfo, amount)) {
       await sleep(150)
       var actual = parseAmount(currentEditorValue(editorInfo))
       if (Math.abs(actual - amount) <= 0.01) return true
@@ -1458,40 +1446,9 @@ export function buildSalaryQuotaMatchScript(
           (currentEditorValue(editorInfo) || '空'),
         'warn'
       )
-    } else if (editorInfo) {
-      status('已放弃一个不属于“挂接金额”列的编辑器，避免误填“部门经济分类”等其他列。', 'warn')
     }
-
-    // 只在「挂接金额」(pay_money) 单元格内查找编辑框，绝不跨列/跨文档兜底：
-    // 点了页面“修改”后，可挂接指标行里“部门经济分类”等下拉列同样可编辑，且在列顺序里
-    // 排在“挂接金额”之前；doc 级兜底会抓到第一列（部门经济分类），把金额误填进去，
-    // 整行被写坏导致无法保存。
-    var inputs = Array.prototype.slice.call(
-      cell.querySelectorAll('input.textbox-text, input[type="text"], textarea')
-    ).filter(isVisible)
-    if (!inputs.length) {
-      inputs = Array.prototype.slice.call(cell.querySelectorAll('input, textarea')).filter(function (node) {
-        return isVisible(node) && node.type !== 'hidden'
-      })
-    }
-    var input = inputs[0]
-    if (!input || !('value' in input)) {
-      status('未能在“挂接金额”列定位到可编辑输入框，已停止本次填写，避免误填“部门经济分类”等其他列。', 'err')
-      return false
-    }
-    input.focus()
-    input.value = String(amount)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-    try {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
-      input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }))
-    } catch (error) {}
-    try {
-      input.blur()
-    } catch (error) {}
-    await sleep(150)
-    return true
+    status('已通过“挂接金额”字段编辑器写入，但读回金额仍不一致，已停止保存。', 'err')
+    return false
   }
 
   async function clickModify(doc) {
