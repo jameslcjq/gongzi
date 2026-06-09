@@ -65,6 +65,7 @@ import {
   historyPushLabel,
   pushTargetsForRow
 } from '../integration/integratedPushController'
+import { importExchangePackageInteractive } from '../integration/exchangePackageImport'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
 const showInternalTools = internalToolsEnabled
@@ -76,6 +77,18 @@ const runnerTasks = ref<MonthlyPayrollRun[]>([])
 const currentRunnerTaskId = ref<number | null>(null)
 const runnerTasksLoading = ref(false)
 const runnerPushing = ref(false)
+const runnerImporting = ref(false)
+
+async function runnerImportPackage(): Promise<void> {
+  runnerImporting.value = true
+  try {
+    if (await importExchangePackageInteractive()) {
+      await loadRunnerTasks()
+    }
+  } finally {
+    runnerImporting.value = false
+  }
+}
 const currentRunnerTask = computed(
   () => runnerTasks.value.find((task) => task.id === currentRunnerTaskId.value) ?? null
 )
@@ -1909,6 +1922,15 @@ void nextTick(() => {
     </header>
 
     <div v-if="isRunnerFlavor" class="portal-runner-bar">
+      <el-button
+        size="small"
+        type="success"
+        :icon="Download"
+        :loading="runnerImporting"
+        @click="runnerImportPackage"
+        >导入交换包</el-button
+      >
+      <span class="portal-runner-sep" />
       <span class="portal-runner-label">当前任务</span>
       <el-select
         v-model="currentRunnerTaskId"

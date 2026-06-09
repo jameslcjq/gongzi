@@ -16,6 +16,7 @@ import {
   pushTargetsForRow,
   reconciliationGuardMessage
 } from '../integration/integratedPushController'
+import { importExchangePackageInteractive } from '../integration/exchangePackageImport'
 import {
   cachedMonthlyPayrollPrintersFallback,
   loadCachedMonthlyPayrollPrintOptions,
@@ -38,7 +39,6 @@ import {
 } from '../monthly-payroll/reportPresentation'
 import type {
   ImportWatcherStatus,
-  ExchangePackagePreview,
   MonthlyPayrollDataSourceMode,
   MonthlyPayrollExchangeStatus,
   MonthlyPayrollSettings,
@@ -270,51 +270,12 @@ async function buildExchangeReceiptForRun(row: MonthlyPayrollRun): Promise<void>
 async function chooseAndImportExchangePackage(): Promise<void> {
   importingExchangePackage.value = true
   try {
-    const picked = await window.salaryApi.chooseExchangePackage()
-    if (!picked) return
-
-    const preview = await window.salaryApi.previewExchangePackage(picked.filePath)
-    const message = formatExchangePreviewMessage(preview)
-    await ElMessageBox.confirm(
-      `${message}\n\n确认导入后，会把包内文件解压到本机工资数据目录，并生成一条待一体化执行的工资报账记录。`,
-      '导入内网业务包',
-      {
-        type: preview.ok ? 'warning' : 'error',
-        confirmButtonText: preview.ok ? '确认导入' : '关闭',
-        cancelButtonText: '取消',
-        showCancelButton: preview.ok
-      }
-    )
-    if (!preview.ok) return
-
-    const imported = await window.salaryApi.importMonthlyPayrollExchangePackage(picked.filePath)
-    ElMessage.success(imported.message)
-    await refreshHistory({ autoOpenCurrentMonth: true })
-  } catch (error) {
-    if (error === 'cancel') return
-    ElMessage.error(error instanceof Error ? error.message : '导入内网业务包失败')
+    if (await importExchangePackageInteractive()) {
+      await refreshHistory({ autoOpenCurrentMonth: true })
+    }
   } finally {
     importingExchangePackage.value = false
   }
-}
-
-function formatExchangePreviewMessage(preview: ExchangePackagePreview): string {
-  const manifest = preview.manifest
-  const unit = [manifest?.unitCode, manifest?.unitName].filter(Boolean).join(' ') || '单位未知'
-  const period = manifest?.year && manifest?.month ? `${manifest.year}年${manifest.month}月` : '年月未知'
-  const packageId = manifest?.packageId || '包号未知'
-  const checksum = preview.ok
-    ? `校验通过：${preview.checksumSummary.matched}/${preview.checksumSummary.declared}`
-    : `校验异常：缺失 ${preview.checksumSummary.missing}，不一致 ${preview.checksumSummary.mismatched}，未声明 ${preview.checksumSummary.unchecked}`
-  const details = [...preview.errors, ...preview.warnings].filter(Boolean)
-  return [
-    `文件：${preview.fileName}`,
-    `单位：${unit}`,
-    `年月：${period}`,
-    `包号：${packageId}`,
-    checksum,
-    details.length ? `问题：${details.slice(0, 5).join('；')}` : ''
-  ].filter(Boolean).join('\n')
 }
 
 const pushingInsuranceRunId = ref<number | null>(null)
