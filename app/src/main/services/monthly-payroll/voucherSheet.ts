@@ -232,11 +232,30 @@ export function buildInsuranceVoucherUsage(
   activeTax: number,
   total: number
 ): string {
-  void active
-  void socialSecurity
-  void activeTax
-  void total
-  return '五险一金、个税'
+  const rows: Array<[string, number]> = socialSecurity
+    ? [
+        ['职业年金（单位）', sumSocialByCanonicalName(socialSecurity, '职业年金单位')],
+        ['职业年金（个人）', sumSocialByCanonicalName(socialSecurity, '职业年金个人')],
+        ['养老保险费（单位）', sumSocialByCanonicalName(socialSecurity, '养老保险单位')],
+        ['养老保险费（个人）', sumSocialByCanonicalName(socialSecurity, '养老保险个人')],
+        ['医疗保险（个人）', sumSocialByCanonicalName(socialSecurity, '医保个人')],
+        ['医疗保险（单位）', sumSocialByCanonicalName(socialSecurity, '医保单位')],
+        ['生育保险', sumSocialByCanonicalName(socialSecurity, '生育保险')],
+        ['失业保险（单位）', sumSocialByCanonicalName(socialSecurity, '失业保险单位')],
+        ['失业保险（个人）', sumSocialByCanonicalName(socialSecurity, '失业保险个人')],
+        ['工伤保险', sumSocialByCanonicalName(socialSecurity, '工伤保险')]
+      ]
+    : []
+  rows.push(
+    ['公积金（个人）', num(active['住房公积金'])],
+    ['公积金（单位）', num(active['住房公积金'])],
+    ['个税', activeTax],
+    ['合计', total]
+  )
+  return rows
+    .filter(([label, amount]) => label === '合计' || amount !== 0)
+    .map(([label, amount]) => `${label}${formatVoucherAmount(amount)}`)
+    .join('\n')
 }
 
 export function buildSalaryVoucherUsage(
@@ -257,7 +276,7 @@ export function buildSalaryVoucherUsage(
     ['交通补贴', num(active['交通补贴'])],
     ['教龄津贴', num(active['教龄津贴'])],
     ['住房补贴', num(active['住房补贴'])],
-    ['五险一金', activeInsurance],
+    ['五险一金、个税', activeInsurance],
     ['合计', total]
   ].map(([label, amount]) => `${label}${formatVoucherAmount(Number(amount))}`).join('\n')
 }

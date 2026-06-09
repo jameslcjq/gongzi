@@ -48,6 +48,7 @@ Desktop.ini
 tmp/
 temp/
 .tmp-userscript-build/
+app/.codex-dev/
 *.bak
 *.backup
 *.swp

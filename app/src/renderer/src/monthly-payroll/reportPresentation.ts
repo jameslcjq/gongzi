@@ -22,7 +22,10 @@ export function formatCurrency(value: unknown): string {
 }
 
 export function voucherUsageLines(row: unknown[]): string[] {
-  return String(row[8] ?? '').split('\n').filter(Boolean)
+  const usage = String(row[8] ?? '')
+  const lines = usage.split('\n').filter(Boolean)
+  if (!isSalaryVoucher(row)) return lines
+  return lines.map((line) => line.replace(/^五险一金(?!、个税)(?=-?[\d,])/, '五险一金、个税'))
 }
 
 export function isSalaryVoucher(row: unknown[]): boolean {
@@ -32,7 +35,7 @@ export function isSalaryVoucher(row: unknown[]): boolean {
 export function voucherAmount(value: unknown): string {
   const n = Number(value || 0)
   if (!Number.isFinite(n) || n === 0) return ''
-  return `¥${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function voucherUpperAmount(row: unknown[], amountIndex: number): string {

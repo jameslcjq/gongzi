@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { UnitSettings } from '../src/shared/types'
-import { buildInsuranceVoucherUsage, buildVoucherSheet } from '../src/main/services/monthly-payroll/voucherSheet'
+import { buildInsuranceVoucherUsage, buildSalaryVoucherUsage, buildVoucherSheet } from '../src/main/services/monthly-payroll/voucherSheet'
 
 const unit: UnitSettings = {
   unitFullName: '测试单位',
@@ -58,6 +58,41 @@ const taxWithholdingRow = sheet.rows.find((row) => row[7] === '代扣个人所�
 assert.ok(taxWithholdingRow)
 assert.equal(taxWithholdingRow[6], 40)
 
-assert.equal(buildInsuranceVoucherUsage({}, undefined, 40, 300), '五险一金、个税')
+const insuranceUsage = buildInsuranceVoucherUsage(
+  { 住房公积金: 30 },
+  {
+    rowCount: 1,
+    byItem: {
+      '养老保险（个人）': 100,
+      '养老保险（单位）': 200
+    }
+  },
+  40,
+  400
+)
+assert.match(insuranceUsage, /^养老保险费（单位）200$/m)
+assert.match(insuranceUsage, /^养老保险费（个人）100$/m)
+assert.match(insuranceUsage, /^公积金（个人）30$/m)
+assert.match(insuranceUsage, /^公积金（单位）30$/m)
+assert.match(insuranceUsage, /^个税40$/m)
+assert.match(insuranceUsage, /^合计400$/m)
+
+const salaryUsage = buildSalaryVoucherUsage(
+  {
+    基础性绩效: 0,
+    乡镇补贴: 0,
+    边远乡镇补贴: 0,
+    交通补贴: 0,
+    教龄津贴: 0,
+    住房补贴: 0
+  },
+  0,
+  0,
+  1000,
+  260,
+  1260
+)
+assert.match(salaryUsage, /^五险一金、个税260$/m)
+assert.doesNotMatch(salaryUsage, /^五险一金260$/m)
 
 console.log('monthly payroll voucher sheet tests passed')

@@ -83,6 +83,7 @@ const generateResult = ref<WorkflowRunResult | null>(null)
 const report = ref<MonthlyPayrollReportResult | null>(null)
 const activeReportSheet = ref('')
 const printPageRangeText = ref('')
+const showA4DebugBorder = ref(false)
 const history = ref<MonthlyPayrollRun[]>([])
 const historyLoading = ref(false)
 const sourceVersions = ref<MonthlyPayrollSourceVersion[]>([])
@@ -1087,7 +1088,11 @@ function currentPrintRequest(printerName: string, sheetName = activeSheet.value?
       pageSize: { width: 230000, height: 132000 }
     }
   }
-  return { printerName }
+  return {
+    printerName,
+    scaleFactor: 100,
+    pageSize: { width: 210000, height: 297000 }
+  }
 }
 
 type PrintPageSelection =
@@ -2130,6 +2135,10 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
                 @change="savePrintSettings"
               />
             </label>
+            <label class="a4-debug-toggle">
+              <span>A4边框</span>
+              <el-switch v-model="showA4DebugBorder" size="small" />
+            </label>
           </div>
           <label class="print-page-range">
             <span>打印页码</span>
@@ -2223,7 +2232,7 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
           <span class="voucher-item amount-number transfer-number">{{ voucherAmount(row[6]) }}</span>
 
           <span
-            v-if="voucherPrintTotalPagesForRow(row) !== null && !voucherPrintTotalPagesLoading"
+            v-if="voucherPrintTotalPagesForRow(row) !== null"
             class="voucher-item voucher-total-pages"
           >
             {{ voucherPrintTotalPagesForRow(row) }}
@@ -2237,7 +2246,13 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
           v-for="(page, pageIdx) in activePages"
           :key="pageIdx"
           class="print-page"
-          :class="[reportSheetClass(activeSheet.name), { 'custom-styled': isCustomStyledSheet(activeSheet.name) }]"
+          :class="[
+            reportSheetClass(activeSheet.name),
+            {
+              'custom-styled': isCustomStyledSheet(activeSheet.name),
+              'a4-debug': showA4DebugBorder
+            }
+          ]"
           :data-print-page-index="pageIdx + 1"
           :style="reportPageStyle"
         >
@@ -2833,8 +2848,18 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 
 .report-offset-controls {
   display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
   gap: 8px;
   width: 100%;
+}
+
+.a4-debug-toggle {
+  min-width: 88px;
+}
+
+.a4-debug-toggle .el-switch {
+  justify-self: start;
 }
 
 .print-page-range {
@@ -2877,6 +2902,11 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
   padding-top: 18mm;
   background: #fff;
   box-sizing: border-box;
+}
+
+.print-page.a4-debug {
+  outline: 1px dashed #8a8f98;
+  outline-offset: -1px;
 }
 
 .print-area {
@@ -3263,25 +3293,25 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 }
 
 .unit-name {
-  left: 42.33mm;
+  left: 40.33mm;
   top: 35.22mm;
   width: 37.04mm;
 }
 
 .voucher-year {
-  left: 124.80mm;
+  left: 122.80mm;
   top: 35.22mm;
   width: 9.26mm;
 }
 
 .voucher-month {
-  left: 143.53mm;
+  left: 141.53mm;
   top: 35.22mm;
   width: 9.26mm;
 }
 
 .voucher-day {
-  left: 157.23mm;
+  left: 155.23mm;
   top: 35.22mm;
   width: 9.26mm;
 }
@@ -3335,11 +3365,12 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 
 .voucher-total-pages {
   left: 215.34mm;
-  top: 50.35mm;
+  top: 51.35mm;
   width: 45mm;
   font-size: 10.5pt;
   font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', SimHei, sans-serif;
   line-height: 1;
+  z-index: 2;
 }
 
 .salary-voucher .amount-upper {
@@ -3408,6 +3439,10 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
     justify-content: center;
     align-items: flex-start;
     page-break-after: always;
+  }
+
+  .print-page.a4-debug {
+    outline: 0 !important;
   }
 
   .print-page.sheet-auto,
