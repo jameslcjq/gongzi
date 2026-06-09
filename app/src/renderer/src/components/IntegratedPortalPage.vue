@@ -66,6 +66,11 @@ import {
   pushTargetsForRow
 } from '../integration/integratedPushController'
 import { importExchangePackageInteractive } from '../integration/exchangePackageImport'
+import {
+  archiveRunInteractive,
+  buildReceiptInteractive,
+  canArchiveRun
+} from '../integration/monthlyRunLifecycle'
 
 const portalUrl = 'http://172.24.147.202/portal/login'
 const showInternalTools = internalToolsEnabled
@@ -78,6 +83,8 @@ const currentRunnerTaskId = ref<number | null>(null)
 const runnerTasksLoading = ref(false)
 const runnerPushing = ref(false)
 const runnerImporting = ref(false)
+const runnerArchiving = ref(false)
+const runnerReceiptBuilding = ref(false)
 
 async function runnerImportPackage(): Promise<void> {
   runnerImporting.value = true
@@ -87,6 +94,35 @@ async function runnerImportPackage(): Promise<void> {
     }
   } finally {
     runnerImporting.value = false
+  }
+}
+
+async function runnerArchive(): Promise<void> {
+  const row = currentRunnerTask.value
+  if (!row) {
+    ElMessage.warning('请先选择当前任务')
+    return
+  }
+  runnerArchiving.value = true
+  try {
+    if (await archiveRunInteractive(row)) await loadRunnerTasks()
+  } finally {
+    runnerArchiving.value = false
+  }
+}
+
+async function runnerBuildReceipt(): Promise<void> {
+  const row = currentRunnerTask.value
+  if (!row) {
+    ElMessage.warning('请先选择当前任务')
+    return
+  }
+  runnerReceiptBuilding.value = true
+  try {
+    await buildReceiptInteractive(row)
+    await loadRunnerTasks()
+  } finally {
+    runnerReceiptBuilding.value = false
   }
 }
 const currentRunnerTask = computed(
@@ -1980,6 +2016,22 @@ void nextTick(() => {
         "
         @click="runnerPush(['salary'])"
         >工资</el-button
+      >
+      <span class="portal-runner-sep" />
+      <el-button
+        size="small"
+        type="warning"
+        :loading="runnerArchiving"
+        :disabled="!currentRunnerTask || pushInProgress || !canArchiveRun(currentRunnerTask)"
+        @click="runnerArchive"
+        >月结</el-button
+      >
+      <el-button
+        size="small"
+        :loading="runnerReceiptBuilding"
+        :disabled="!currentRunnerTask || !currentRunnerTask.archivedAt"
+        @click="runnerBuildReceipt"
+        >生成回执</el-button
       >
     </div>
 

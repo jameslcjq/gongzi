@@ -7,11 +7,12 @@ export type ModuleGroup = {
   hidden?: boolean
 }
 
-// 内网执行端版隐藏的模块：纯数据/报表管理类入口。
-// 保留 'integration'（一体化对接）与 'payroll'（工资业务：导入交换包/触发推送，
-// 第 2 阶段推送上工具栏后再视情况收敛）。
+// 内网执行端版隐藏的模块：纯数据/报表管理类入口 + 工资业务页。
+// 导入交换包、推送、月结、生成回执已全部搬到「一体化对接」工具栏，
+// 执行端只保留 'integration' 一个模块，收敛成单页。
 const runnerHiddenModuleKeys = new Set([
   'integrated',
+  'payroll',
   'budget',
   'annual',
   'township',

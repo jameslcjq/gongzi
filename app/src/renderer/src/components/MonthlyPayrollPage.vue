@@ -18,6 +18,11 @@ import {
 } from '../integration/integratedPushController'
 import { importExchangePackageInteractive } from '../integration/exchangePackageImport'
 import {
+  archiveRunInteractive,
+  buildReceiptInteractive,
+  canArchiveRun
+} from '../integration/monthlyRunLifecycle'
+import {
   cachedMonthlyPayrollPrintersFallback,
   loadCachedMonthlyPayrollPrintOptions,
   updateCachedMonthlyPayrollPrintOptions
@@ -244,24 +249,11 @@ async function buildExchangePackageForRun(row: MonthlyPayrollRun): Promise<void>
 }
 
 async function buildExchangeReceiptForRun(row: MonthlyPayrollRun): Promise<void> {
-  if (!row.archivedAt) {
-    ElMessage.warning('请先完成月结后再生成回执')
-    return
-  }
   buildingExchangeReceiptId.value = row.id
   try {
-    const result = await window.salaryApi.buildMonthlyPayrollExchangeReceipt(row.id)
-    ElMessage.success(result.copiedToMedia ? `已生成并复制回执到摆渡目录：${result.receiptId}` : `已生成内网执行回执：${result.receiptId}`)
-    if (result.warnings.length > 0) {
-      await ElMessageBox.alert(result.warnings.join('\n'), '回执生成提醒', {
-        type: 'warning',
-        confirmButtonText: '知道了'
-      })
+    if (await buildReceiptInteractive(row)) {
+      await refreshHistory({ autoOpenCurrentMonth: true })
     }
-    await refreshHistory({ autoOpenCurrentMonth: true })
-    await window.salaryApi.openLocalPath((result.mediaPath || result.receiptPath).replace(/[\\/][^\\/]*$/, ''))
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '生成内网执行回执失败')
   } finally {
     buildingExchangeReceiptId.value = null
   }
@@ -1218,23 +1210,13 @@ async function archiveHistoryRun(row: MonthlyPayrollRun | null): Promise<void> {
     ElMessage.warning('请先生成或选择一条历史报表')
     return
   }
-  if (!canArchiveHistoryRun(row)) {
-    ElMessage.warning('社保文件未补齐，当前只是工资阶段结果，不能月结')
-    return
-  }
+  archivingId.value = row.id
   try {
-    await ElMessageBox.confirm(
-      `${row.year}年${row.month}月结后，本月不能再次进行工资报账或重新生成报表；系统只归档最后有效的工资、社保、个税源文件和最终导出的保险导入、凭证、补发工资等文件。月结完成后会清零在职工资、退休工资、其他工资中的补发工资、补扣工资，用于下月业务初始化。`,
-      '工资月结',
-      { type: 'warning', confirmButtonText: '确认月结', cancelButtonText: '取消' }
-    )
-    archivingId.value = row.id
-    const archived = await window.salaryApi.archiveMonthlyPayrollRun(row.id)
-    ElMessage.success(`已月结 ${archived.files.length} 个文件`)
-    await refreshHistory()
-    await loadHistoryReport(archived.run, false)
-  } catch (error) {
-    if (error instanceof Error) ElMessage.error(error.message)
+    const archivedRun = await archiveRunInteractive(row)
+    if (archivedRun) {
+      await refreshHistory()
+      await loadHistoryReport(archivedRun, false)
+    }
   } finally {
     archivingId.value = null
   }
@@ -1270,7 +1252,7 @@ async function cancelHistoryMonthClose(row: MonthlyPayrollRun): Promise<void> {
 }
 
 function canArchiveHistoryRun(row: MonthlyPayrollRun | null): boolean {
-  return Boolean(row && !row.archivedAt && row.sourceSocialPath && row.insuranceImportPath)
+  return Boolean(row && canArchiveRun(row))
 }
 
 async function onMonthChange(): Promise<void> {
@@ -3287,19 +3269,19 @@ function formatVoucherCell(row: unknown[], value: unknown, colIndex: number): st
 }
 
 .voucher-year {
-  left: 119.80mm;
+  left: 124.80mm;
   top: 35.22mm;
   width: 9.26mm;
 }
 
 .voucher-month {
-  left: 137.53mm;
+  left: 143.53mm;
   top: 35.22mm;
   width: 9.26mm;
 }
 
 .voucher-day {
-  left: 150.23mm;
+  left: 157.23mm;
   top: 35.22mm;
   width: 9.26mm;
 }
