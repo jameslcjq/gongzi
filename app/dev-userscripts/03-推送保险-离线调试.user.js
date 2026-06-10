@@ -45,7 +45,7 @@
       const MENUID = "1a4a2a50831b467088f25dbbf13d5453"
       var TRACE = []
       var TRACE_T0 = Date.now()
-
+    
       function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
       function normalize(v) { return String(v || '').replace(/\s+/g, '') }
       function isInsurancePageText(text) {
@@ -67,7 +67,7 @@
         } catch (e) {}
         return false
       }
-
+    
       function ensureStatus() {
         let el = document.getElementById('insurance-push-status')
         if (el) return el
@@ -97,7 +97,7 @@
           if (el && el.parentNode) el.parentNode.removeChild(el)
         }, ms || 10000)
       }
-
+    
       function isVisible(el) {
         try {
           var style = el.ownerDocument.defaultView.getComputedStyle(el)
@@ -105,7 +105,7 @@
           return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
         } catch (e) { return true }
       }
-
+    
       function textExistsIn(win, text) {
         try {
           var body = win.document.body
@@ -117,7 +117,7 @@
         } catch (e) {}
         return false
       }
-
+    
       function clickTextInWin(win, text) {
         try {
           var wanted = normalize(text)
@@ -145,7 +145,7 @@
         } catch (e) {}
         return false
       }
-
+    
       async function clickAndWait(root, text, waitText, timeoutMs) {
         if (waitText && textExistsIn(root, waitText)) return true
         var clicked = clickTextInWin(root, text)
@@ -157,13 +157,13 @@
         }
         return false
       }
-
+    
       function isTemplateslistUrl(url) {
         var value = String(url || '')
         if (!/pay-voucher-web\/record\/templateslist/i.test(value)) return false
         return value.indexOf(MENUID) >= 0 || /[?&]viewCode=zfm621198001(?:&|$)/i.test(value) || /[?&]myMenuId=2020120616061(?:&|$)/i.test(value)
       }
-
+    
       function isInjectedFrameElement(frame) {
         try {
           return !!frame && frame.id === 'payroll-templateslist-iframe'
@@ -171,7 +171,7 @@
           return false
         }
       }
-
+    
       function isInjectedFrameWindow(win) {
         try {
           return isInjectedFrameElement(win.frameElement)
@@ -179,7 +179,7 @@
           return false
         }
       }
-
+    
       async function clickUntil(root, text, ready, timeoutMs, intervalMs) {
         var deadline = Date.now() + (timeoutMs || 60000)
         var clickedOnce = false
@@ -192,7 +192,7 @@
         }
         return ready() || clickedOnce
       }
-
+    
       // 同时扫：① frame.location.href（同域才读得到）  ② DOM 里所有 <iframe> 的 src 属性（跨域也能读）。
       function pageReady(win) {
         try {
@@ -213,7 +213,7 @@
         } catch (e) {}
         return false
       }
-
+    
       function menuFrameReady(win) {
         if (isInjectedFrameWindow(win)) return false
         try {
@@ -235,13 +235,13 @@
         } catch (e) {}
         return false
       }
-
+    
       function frameworkPageReady(root) {
         if (!menuFrameReady(root)) return false
         // 自动录入必须回到原一体化菜单框架中，不能把临时 iframe 当成目标页。
         return textExistsIn(root, '集中支付') && textExistsIn(root, '直接支付外部数据')
       }
-
+    
       function removeTemplateslistIframe(win, seen) {
         seen = seen || []
         if (!win || seen.indexOf(win) >= 0) return
@@ -257,7 +257,7 @@
           }
         } catch (e) {}
       }
-
+    
       // 找到承载 templateslist 的 window（用于在该 window 上下文执行 fetch，确保 menuid 会话正确）
       function findTemplateslistWindow(win) {
         try {
@@ -285,7 +285,7 @@
         } catch (e) {}
         return null
       }
-
+    
       function injectTemplateslistIframe(root, forceReload, visibleFrame) {
         try {
           var doc = (root && root.document) || document
@@ -329,7 +329,7 @@
           return ifr
         } catch (e) { return null }
       }
-
+    
       // 菜单点不动时（门户升级为 SmartFin），页内注入同源 iframe 直达"直接支付外部数据"页(templateslist)，
       // onload 后确认确实落在该页（而非被重定向到登录/SSO）；之后上传按该 iframe 的 fetch 上下文进行。
       async function openDirectPayViaIframe(root, forceReload, visibleFrame) {
@@ -348,11 +348,11 @@
         } catch (e) {}
         return pageReady(root)
       }
-
+    
       async function openDirectPayPage(root, ready) {
         ready = ready || function () { return pageReady(root) }
         if (ready()) return true
-
+    
         status('🧭 自动导航：进入预算执行模块 ...')
         if (!textExistsIn(root, '集中支付') && textExistsIn(root, '预算执行')) {
           await clickUntil(root, '预算执行', function () {
@@ -363,7 +363,7 @@
         if (!textExistsIn(root, '集中支付')) {
           throw new Error('当前页面找不到“集中支付”菜单。请确认已登录一体化系统，并打开过预算执行入口。')
         }
-
+    
         status('🧭 自动导航：集中支付 → 支付管理 ...')
         await clickUntil(root, '集中支付', function () {
           return ready() || textExistsIn(root, '支付管理')
@@ -372,7 +372,7 @@
         if (!textExistsIn(root, '支付管理')) {
           throw new Error('没有展开“集中支付 → 支付管理”。请确认当前账号有直接支付外部数据权限。')
         }
-
+    
         status('🧭 自动导航：支付管理 → 直接支付外部数据 ...')
         await clickUntil(root, '支付管理', function () {
           return ready() || textExistsIn(root, '直接支付外部数据') || textExistsIn(root, '直接支付录入')
@@ -392,17 +392,17 @@
         await sleep(1500)
         return true
       }
-
+    
       try {
         if (!RECORDS.length && !OPEN_ONLY) {
           status('❌ 没有可推送的记录', 'err')
           clearStatusLater(5000)
           return { ok: false, reason: '记录为空', trace: TRACE, traceText: TRACE.join('\n') }
         }
-
+    
         var root = window.top || window
         var readyForOpen = MENU_ONLY ? function () { return frameworkPageReady(root) } : function () { return pageReady(root) }
-
+    
         if (MENU_ONLY) {
           removeTemplateslistIframe(root)
           if (!readyForOpen() || (OPEN_ONLY && FORCE_RELOAD)) {
@@ -439,19 +439,19 @@
             traceText: TRACE.join('\n')
           }
         }
-
+    
         if (OPEN_ONLY) {
           status(MENU_ONLY ? '✅ 已在原系统菜单框架中打开"直接支付外部数据"，准备交给自动录入' : '✅ 已打开"直接支付外部数据"页面，准备交给自动录入', 'ok')
           clearStatusLater(5000)
           return { ok: true, recordCount: 0, opened: true, trace: TRACE, traceText: TRACE.join('\n') }
         }
-
+    
         status('📤 推送 ' + RECORDS.length + ' 条保险记录到一体化...')
         var progressKey = 'pushInsurance' + Date.now()
         var postUrl =
           '/pay-voucher-server/grp/fes/pay/raw/savePayRawData?menuid=' + MENUID +
           '&progress_key=' + progressKey
-
+    
         // 优先在 templateslist iframe 里发请求（更接近原浏览器行为：referer/cookie 上下文一致）
         var execWin = findTemplateslistWindow(root)
         if (!execWin) {
@@ -463,7 +463,7 @@
         } catch (e) {
           throw new Error('无法在“直接支付外部数据”页面上下文发起推送，请手动打开该页面后重试。')
         }
-
+    
         var postRes = await fetchFn(postUrl, {
           method: 'POST',
           credentials: 'include',
@@ -490,7 +490,7 @@
         if (postCode && postCode !== '200' && postCode !== '0000') {
           throw new Error('savePayRawData 返回 ' + postJson.status_code + ': ' + (postJson.reason || postJson.message || ''))
         }
-
+    
         // 2. 轮询 progress
         status('⏳ 服务端处理中...')
         var progressUrl =
@@ -521,7 +521,7 @@
         if (!completed) {
           throw new Error('直接支付外部数据处理进度未完成，最后进度：' + (lastPct || '未返回') + (lastProgressText ? '，' + lastProgressText : ''))
         }
-
+    
         status('✅ 完成！已推送 ' + RECORDS.length + ' 条到 直接支付外部数据', 'ok')
         clearStatusLater(8000)
         return { ok: true, recordCount: RECORDS.length, trace: TRACE, traceText: TRACE.join('\n') }

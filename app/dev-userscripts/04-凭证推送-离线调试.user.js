@@ -51,10 +51,10 @@
       const IMPORT_PARAM = {"modelType":"29","displayMode":"0","currentModelId":"c6025c601352431c977b538e99c56c5f","incrementFlag":"1"}
       var TRACE = []
       var TRACE_T0 = Date.now()
-
+    
       function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
       function normalize(v) { return String(v || '').replace(/\s+/g, '') }
-
+    
       function ensureStatus() {
         let el = document.getElementById('voucher-push-status')
         if (el) return el
@@ -85,7 +85,7 @@
           if (el && el.parentNode) el.parentNode.removeChild(el)
         }, ms || 10000)
       }
-
+    
       function isVisible(el) {
         try {
           var style = el.ownerDocument.defaultView.getComputedStyle(el)
@@ -93,7 +93,7 @@
           return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
         } catch (e) { return true }
       }
-
+    
       function textExistsIn(win, text) {
         try {
           var body = win.document.body
@@ -105,7 +105,7 @@
         } catch (e) {}
         return false
       }
-
+    
       function clickTextInWin(win, text) {
         try {
           var wanted = normalize(text)
@@ -133,7 +133,7 @@
         } catch (e) {}
         return false
       }
-
+    
       async function clickAndWait(root, text, waitText, timeoutMs) {
         if (waitText && textExistsIn(root, waitText)) return true
         var clicked = clickTextInWin(root, text)
@@ -145,7 +145,7 @@
         }
         return true
       }
-
+    
       async function clickUntil(root, text, ready, timeoutMs) {
         var deadline = Date.now() + (timeoutMs || 60000)
         var clickedOnce = false
@@ -158,7 +158,7 @@
         }
         return ready() || clickedOnce
       }
-
+    
       async function clickAnyAndWait(root, texts, waitText, timeoutMs) {
         var deadline = Date.now() + (timeoutMs || 60000)
         while (Date.now() < deadline) {
@@ -171,11 +171,11 @@
         }
         return ''
       }
-
+    
       function isVoucherEntryUrl(url) {
         return /gld-web\/gl\/html\/voucher\/VoucherInput\.html/i.test(String(url || ''))
       }
-
+    
       function looksLikeVoucherEntry(win) {
         try {
           if (isVoucherEntryUrl(win.location.href)) return true
@@ -186,7 +186,7 @@
         } catch (e) {}
         return false
       }
-
+    
       // 必须定位到真正的凭证录入页，避免在 BookSet/核算首页上下文误传。
       function findVoucherWindow(win) {
         try {
@@ -210,11 +210,11 @@
         } catch (e) {}
         return null
       }
-
+    
       function isOnVoucherPage(win) {
         return !!findVoucherWindow(win)
       }
-
+    
       async function waitForVoucherPage(root, timeoutMs) {
         var deadline = Date.now() + (timeoutMs || 60000)
         while (Date.now() < deadline) {
@@ -223,7 +223,7 @@
         }
         return isOnVoucherPage(root)
       }
-
+    
       function injectVoucherIframe(root) {
         try {
           var doc = (root && root.document) || document
@@ -238,7 +238,7 @@
           return ifr
         } catch (e) { return null }
       }
-
+    
       // 在页内注入同源 iframe 加载凭证录入页，等 onload 后确认是否真的落在凭证录入（而非被重定向到登录/SSO）
       async function openVoucherViaIframe(root) {
         var ifr = injectVoucherIframe(root)
@@ -256,17 +256,17 @@
         } catch (e) {}
         return false
       }
-
+    
       async function openVoucherPage(root) {
         if (isOnVoucherPage(root)) return 'ok'
-
+    
         // iframe 优先：SmartFin 菜单已变，点菜单只会狂弹窗且慢；页内同源 iframe 直达凭证录入已验证可用
         status('🧭 在页内直接打开凭证录入(iframe) ...')
         if (await openVoucherViaIframe(root)) {
           await sleep(800)
           return 'ok'
         }
-
+    
         // iframe 没成功，再退回点菜单（兼容老门户）
         status('🧭 iframe 未成功，改走菜单导航：中科单位核算 → 凭证管理 → 凭证录入 ...', 'warn')
         if (!textExistsIn(root, '凭证管理')) {
@@ -287,14 +287,14 @@
         }
         return 'fail'
       }
-
+    
       try {
         if (!BASE64) {
           throw new Error('凭证文件为空')
         }
-
+    
         var root = window.top || window
-
+    
         if (!isOnVoucherPage(root)) {
           var nav = await openVoucherPage(root)
           if (nav !== 'ok') {
@@ -308,9 +308,9 @@
             }
           }
         }
-
+    
         status('📤 推送凭证：' + RUN_LABEL + ' ...')
-
+    
         // 解 base64 → Blob → FormData
         var binary = atob(BASE64)
         var bytes = new Uint8Array(binary.length)
@@ -318,7 +318,7 @@
         var blob = new Blob([bytes], {
           type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         })
-
+    
         var execWin = findVoucherWindow(root)
         if (!execWin) {
           throw new Error('当前未处于“凭证录入”页面，已停止上传，避免把文件发到错误模块。')
@@ -326,7 +326,7 @@
         var fetchFn = (execWin && execWin.fetch) ? execWin.fetch.bind(execWin) : fetch
         var FormDataCtor = (execWin && execWin.FormData) ? execWin.FormData : FormData
         var FileCtor = (execWin && execWin.File) ? execWin.File : File
-
+    
         var file
         try {
           file = new FileCtor([blob], FILE_NAME, { type: blob.type })
@@ -337,10 +337,10 @@
         var formData = new FormDataCtor()
         formData.append('file', file, FILE_NAME)
         formData.append('param', JSON.stringify(IMPORT_PARAM))
-
+    
         var url = '/gld-account-server/importAccount/gl_import_file_json?menuid=' + MENUID
         status('⏳ 上传中（服务端处理可能需要 20-30 秒）...')
-
+    
         var res = await fetchFn(url, {
           method: 'POST',
           credentials: 'include',
@@ -351,18 +351,18 @@
         try { text = await res.text() } catch (e) { text = '' }
         var json
         try { json = text ? JSON.parse(text) : null } catch (e) { json = null }
-
+    
         if (!json && /^\s*</.test(text || '')) {
           throw new Error('凭证导入接口返回了页面内容，不是导入结果。请确认已停在“凭证录入”页面后重试。')
         }
         if (!json) {
           throw new Error('凭证导入接口没有返回可识别的导入结果。')
         }
-
+    
         if (json && json.status_code && String(json.status_code) !== '200' && String(json.status_code) !== '0000') {
           throw new Error('凭证导入失败：' + (json.reason || json.message || JSON.stringify(json)))
         }
-
+    
         // 解析一体化返回的导入明细（不同版本字段名不一，做容错）：
         //  1) 真实判断是否导入成功——成功 0 条 / 有失败行 → 视为失败，不再"假成功"；
         //  2) 把返回内容显示在浮窗，便于核对与排错（之前只看 HTTP/status_code，会出现"显示成功但查无凭证"）。
@@ -387,14 +387,14 @@
         var detailText = detailParts.join('，')
         var rawText = JSON.stringify(json)
         if (rawText && rawText.length > 240) rawText = rawText.slice(0, 240) + '...'
-
+    
         if ((okCount !== null && okCount <= 0) || (failCount !== null && failCount > 0)) {
           throw new Error(
             '凭证导入未真正成功：' + (detailText || '一体化返回成功 0 条 / 存在失败行') +
             '\n一体化返回：' + rawText
           )
         }
-
+    
         status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\n' + detailText : '') + '\n一体化返回：' + rawText, 'ok')
         clearStatusLater(12000)
         return { ok: true, response: json, trace: TRACE, traceText: TRACE.join('\n') }

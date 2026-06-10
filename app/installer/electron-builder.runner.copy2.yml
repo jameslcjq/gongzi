@@ -33,7 +33,7 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 老九的工资系统2-内网执行端
-  artifactName: 老九的工资系统2内网执行端安装包-1.12.${ext}
+  artifactName: 老九的工资系统2内网执行端安装包-${version}.${ext}
   installerIcon: installer/assets/app-icon.ico
   uninstallerIcon: installer/assets/app-icon.ico
   include: installer/installer.copy2.nsh
