@@ -57,6 +57,7 @@ import type {
   UnitSettings
 } from '@shared/types'
 import { isRunnerFlavor } from '@shared/appFlavor'
+import { PORTAL_HOST } from '@shared/portalHost'
 import {
   assemblePushSteps,
   canPushAll,
@@ -72,7 +73,7 @@ import {
   canArchiveRun
 } from '../integration/monthlyRunLifecycle'
 
-const portalUrl = 'http://172.24.147.202/portal/login'
+const portalUrl = `http://${PORTAL_HOST}/portal/login`
 const showInternalTools = internalToolsEnabled
 
 // ===== 内网执行端：一体化工具栏直接推送 =====
@@ -1558,9 +1559,40 @@ function onStartLoading(tabId: string): void {
 
 // 推送进行中，把推送脚本的 console 日志（[insurance-push]/[voucher-push]/[salary-system-import]）
 // 实时转发到面板与日志文件——解决"推送中看不到进度、以为没在工作"。
-function onConsoleMessage(event: { message?: string } | undefined): void {
+// 自动化脚本日志前缀：这些 console 输出无论是否在推送流程中，都转发主进程落盘（R-07/A3），
+// 现场排障不再依赖看不见的控制台。
+const automationLogPrefixes = [
+  '[salary-quota-match]',
+  '[insurance-push]',
+  '[voucher-push]',
+  '[salary-system-import]',
+  '[auto-voucher-entry]',
+  '[salary-send-review]',
+  '[salary-export]',
+  '[voucher-merge]'
+]
+let webviewLogWindowStart = 0
+let webviewLogWindowCount = 0
+
+function forwardWebviewLogToDisk(raw: string, level: number): void {
+  const isAutomation = automationLogPrefixes.some((prefix) => raw.startsWith(prefix))
+  if (!isAutomation && level < 2) return
+  // 限流：每分钟最多 200 行，防止异常页面刷屏写满磁盘
+  const now = Date.now()
+  if (now - webviewLogWindowStart > 60000) {
+    webviewLogWindowStart = now
+    webviewLogWindowCount = 0
+  }
+  if (webviewLogWindowCount >= 200) return
+  webviewLogWindowCount += 1
+  void window.salaryApi.appendAppLog('webview', raw.slice(0, 2000)).catch(() => {})
+}
+
+function onConsoleMessage(event: { message?: string; level?: number } | undefined): void {
+  const rawForDisk = String(event?.message ?? '')
+  if (rawForDisk) forwardWebviewLogToDisk(rawForDisk, Number(event?.level ?? 0))
   if (!processingPushQueue.value) return
-  const raw = String(event?.message ?? '')
+  const raw = rawForDisk
   let label = ''
   if (raw.startsWith('[insurance-push]')) label = '保险'
   else if (raw.startsWith('[voucher-push]')) label = '凭证'

@@ -1,4 +1,5 @@
 import { app, ipcMain as electronIpcMain, shell, type IpcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { assertTrustedIpcSender } from './ipcGuard'
 import { getDatabase, getDatabasePath, run } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
 import {
@@ -72,7 +73,7 @@ import {
   loadTraffic002Total
 } from '../services/monthly-payroll/monthlyPayrollDataLoaders'
 import { computeSalaryQuotaMatchLocalSummary } from '../services/monthly-payroll/quotaMatchLocalSummary'
-import { payrollInstance } from '../config/paths'
+import { assertInsideBusinessRoots, payrollInstance } from '../config/paths'
 import type { PayrollInstanceSummary } from '../../shared/payrollInstance'
 import {
   applyAnnualAdjustment,
@@ -89,6 +90,7 @@ import {
 import { getUnitSettingsLockState, readUnitSettings, writeUnitSettings } from '../services/unitSettings'
 import { resolveSchoolUnitSettings } from '../services/schoolLookup'
 import { appendPushLog, ensurePushLogDir } from '../services/pushLog'
+import { appendMainLog } from '../services/mainLog'
 import {
   readMonthlyPayrollPrintSettings,
   writeMonthlyPayrollPrintSettings
@@ -251,6 +253,7 @@ const LICENSE_FREE_CHANNELS = new Set([
   'integration:save-recording',
   'portal-recorder:save',
   'salary-quota-match:local-summary',
+  'app-log:append',
   'unit-settings:get',
   'unit-settings:lock-state',
   'unit-settings:set',
@@ -270,6 +273,7 @@ export function createLicensedIpcMain(): Pick<IpcMain, 'handle'> {
   return {
     handle(channel, listener) {
       electronIpcMain.handle(channel, async (event, ...args) => {
+        assertTrustedIpcSender(event)
         await assertLicenseForChannel(channel)
         return listener(event, ...args)
       })
@@ -652,6 +656,7 @@ export function registerAppIpc(): void {
       if (!['.xls', '.xlsx', '.csv'].includes(ext)) {
         throw new Error('只允许读取 Excel/CSV 导入文件')
       }
+      assertInsideBusinessRoots(filePath, '导入文件')
       const buffer = readFileSync(filePath)
       const stat = statSync(filePath)
       return {
@@ -970,6 +975,7 @@ export function registerAppIpc(): void {
       try {
         const { readFileSync } = await import('node:fs')
         const { basename } = await import('node:path')
+        assertInsideBusinessRoots(payload.filePath, '凭证文件')
         const buf = readFileSync(payload.filePath)
         return {
           ok: true,
@@ -1059,6 +1065,11 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('app:open-path', async (_event, path: string): Promise<string> => {
     return shell.openPath(path)
+  })
+
+  // 渲染层/webview 自动化日志统一落盘到主进程日志文件（R-07/A3）
+  ipcMain.handle('app-log:append', (_event, source: string, line: string): void => {
+    appendMainLog('info', `renderer:${String(source || 'unknown').slice(0, 40)}`, String(line ?? '').slice(0, 2000))
   })
 
   // 一体化推送过程日志：渲染进程逐行写入，按天分文件，便于内网排查

@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
+import { assertTrustedIpcSender } from './ipcGuard'
 import fs from 'node:fs/promises'
 import {
   claimTrialLicense,
@@ -22,7 +23,17 @@ function fail(error: unknown) {
 }
 
 export function registerLicenseIpc(): void {
-  ipcMain.handle('license:status', async () => {
+  const rawHandle = ipcMain.handle.bind(ipcMain)
+  // 与 createLicensedIpcMain 同样的 sender 守卫：授权通道只允许主窗口调用。
+  const guarded = {
+    handle(channel: string, listener: Parameters<typeof rawHandle>[1]): void {
+      rawHandle(channel, async (event, ...args) => {
+        assertTrustedIpcSender(event)
+        return listener(event, ...args)
+      })
+    }
+  }
+  guarded.handle('license:status', async () => {
     try {
       return ok(await getCachedLicenseStatus())
     } catch (error) {
@@ -30,7 +41,7 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:check', async (_event, licenseKey?: string) => {
+  guarded.handle('license:check', async (_event, licenseKey?: string) => {
     try {
       return ok(await verifyLicense(licenseKey || ''))
     } catch (error) {
@@ -38,7 +49,7 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle(
+  guarded.handle(
     'license:claimTrial',
     async (_event, customerName: string, customerCode?: string) => {
       try {
@@ -49,7 +60,7 @@ export function registerLicenseIpc(): void {
     }
   )
 
-  ipcMain.handle('license:getKey', async () => {
+  guarded.handle('license:getKey', async () => {
     try {
       return ok(getSavedLicenseKey())
     } catch (error) {
@@ -57,7 +68,7 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:saveKey', async (_event, licenseKey: string) => {
+  guarded.handle('license:saveKey', async (_event, licenseKey: string) => {
     try {
       saveLicenseKey(licenseKey || '')
       return ok()
@@ -66,7 +77,7 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:getServerUrl', async () => {
+  guarded.handle('license:getServerUrl', async () => {
     try {
       return ok(getLicenseServerUrl())
     } catch (error) {
@@ -74,11 +85,11 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:setServerUrl', async () =>
+  guarded.handle('license:setServerUrl', async () =>
     fail(new Error('授权服务器地址不允许在客户端修改'))
   )
 
-  ipcMain.handle('license:deviceInfo', async (_event, licenseKey?: string) => {
+  guarded.handle('license:deviceInfo', async (_event, licenseKey?: string) => {
     try {
       return ok(await getLicenseDeviceInfo(licenseKey || ''))
     } catch (error) {
@@ -86,7 +97,7 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:exportMachineRequest', async (event, licenseKey?: string) => {
+  guarded.handle('license:exportMachineRequest', async (event, licenseKey?: string) => {
     try {
       const request = await exportMachineRequest(licenseKey || '')
       const parent = BrowserWindow.fromWebContents(event.sender) || undefined
@@ -107,7 +118,7 @@ export function registerLicenseIpc(): void {
     }
   })
 
-  ipcMain.handle('license:importOffline', async (event) => {
+  guarded.handle('license:importOffline', async (event) => {
     try {
       const parent = BrowserWindow.fromWebContents(event.sender) || undefined
       const options: OpenDialogOptions = {

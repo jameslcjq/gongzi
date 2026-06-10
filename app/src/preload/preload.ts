@@ -396,6 +396,8 @@ const salaryApi = {
     ipcRenderer.invoke('performance-payroll:generate-from-local', input),
   openLocalPath: (path: string): Promise<string> => ipcRenderer.invoke('app:open-path', path),
   appendPushLog: (line: string): Promise<void> => ipcRenderer.invoke('push-log:append', line),
+  appendAppLog: (source: string, line: string): Promise<void> =>
+    ipcRenderer.invoke('app-log:append', source, line),
   openPushLogFolder: (): Promise<string> => ipcRenderer.invoke('push-log:open-folder'),
   listPrinters: (): Promise<PrinterSummary[]> => ipcRenderer.invoke('print:list-printers'),
   printCurrentView: (request?: PrintRequest): Promise<void> =>

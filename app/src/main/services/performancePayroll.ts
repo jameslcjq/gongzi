@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { session, type Session } from 'electron'
 import * as XLSX from 'xlsx'
 import { getMonthlyOutputPath, portalPartitionPrefix } from '../config/paths'
+import { portalBaseUrl } from '../../shared/portalHost'
 import { readUnitSettings } from './unitSettings'
 import type {
   IntegratedHistorySalaryDataset,
@@ -45,7 +46,7 @@ const headers = [
   '备注'
 ]
 
-const portalBase = 'http://172.24.147.202'
+const portalBase = portalBaseUrl(process.env)
 const historyMenuId = 'ede8c46b689746e48544943b30fb6772'
 
 type HistoryAgency = {

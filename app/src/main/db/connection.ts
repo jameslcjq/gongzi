@@ -955,26 +955,34 @@ async function refreshPersonnelStatusIndex(database: sqlite3.Database): Promise<
   for (const row of otherRows) append(row, '其他工资', 'inOther')
 
   const now = new Date().toISOString()
-  await run(database, `DELETE FROM personnel_status_index`)
-  for (const [idCard, entry] of entries) {
-    const status = entry.inActive
-      ? activePersonnelStatus
-      : entry.inRetired
-        ? retiredPersonnelStatus
-        : otherPersonnelStatus
-    await run(
-      database,
-      `INSERT INTO personnel_status_index (id_card, name, status, source_tables, is_conflict, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        idCard,
-        entry.name,
-        status,
-        Array.from(entry.sourceTables).join(','),
-        entry.inActive && entry.inRetired ? 1 : 0,
-        now
-      ]
-    )
+  // 全删全插必须在一个事务里：①崩溃/断电不会留下空索引窗口；②逐行 INSERT 提速一个数量级。
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    await run(database, `DELETE FROM personnel_status_index`)
+    for (const [idCard, entry] of entries) {
+      const status = entry.inActive
+        ? activePersonnelStatus
+        : entry.inRetired
+          ? retiredPersonnelStatus
+          : otherPersonnelStatus
+      await run(
+        database,
+        `INSERT INTO personnel_status_index (id_card, name, status, source_tables, is_conflict, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          idCard,
+          entry.name,
+          status,
+          Array.from(entry.sourceTables).join(','),
+          entry.inActive && entry.inRetired ? 1 : 0,
+          now
+        ]
+      )
+    }
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK').catch(() => undefined)
+    throw error
   }
 }
 

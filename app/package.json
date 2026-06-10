@@ -16,6 +16,9 @@
     "dist:runner:copy2": "set APP_FLAVOR=runner&& npm run build && electron-builder --win nsis --config installer/electron-builder.runner.copy2.yml",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:scripts": "node scripts/check-injection-scripts.mjs",
     "test:monthly-payroll-reconciliation": "node scripts/run-monthly-payroll-reconciliation-test.mjs",
     "test:monthly-payroll-voucher": "node scripts/run-monthly-payroll-voucher-sheet-test.mjs"
   },
@@ -98,6 +101,7 @@
     "vite": "^5.4.21",
     "vite-plugin-electron": "^0.29.1",
     "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^4.1.8",
     "vue-tsc": "^2.2.0"
   }
 }

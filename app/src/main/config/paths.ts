@@ -41,6 +41,23 @@ export const exchangeTempFolder = join(exchangeRoot, 'temp')
 export const automationDebugRoot =
   process.env.PAYROLL_AUTOMATION_DEBUG_ROOT || join(dataRoot, 'debug', 'automation')
 
+// 文件读取类 IPC 的路径白名单：只允许读业务目录树内的文件，
+// 防止任意盘符路径经渲染层（或未来被误暴露的通道）外带文件内容。
+const businessReadRoots = [dataRoot, importFolder, outputRoot, tempRoot, exchangeRoot]
+
+export function assertInsideBusinessRoots(filePath: string, label = '文件'): void {
+  const normalized = normalize(filePath || '').toLowerCase()
+  const ok = businessReadRoots.some((root) => {
+    const prefix = normalize(root).toLowerCase()
+    return normalized === prefix || normalized.startsWith(prefix + '\\') || normalized.startsWith(prefix + '/')
+  })
+  if (!ok) {
+    throw new Error(
+      `${label}路径不在业务目录内，已拒绝读取：${filePath}。允许的根目录：数据目录、工资导入、工资数据、temp、交换目录`
+    )
+  }
+}
+
 export function getDataPath(...segments: string[]): string {
   return join(dataRoot, ...segments)
 }

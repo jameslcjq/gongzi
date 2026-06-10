@@ -1,4 +1,4 @@
-import { app, BrowserWindow, type Session, type DownloadItem } from 'electron'
+import { app, BrowserWindow, dialog, type Session, type DownloadItem } from 'electron'
 import { mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDatabase } from './db/connection'
@@ -13,8 +13,28 @@ import {
   startExcelImportWatcher
 } from './services/excelImportWatcher'
 import { applyAnnualTownshipYearIncreaseIfNeeded } from './services/township-allowance/townshipAllowance'
+import { appendMainLog, installMainProcessLogging } from './services/mainLog'
+import { runDailyAutoBackup } from './services/backup'
+import { resolvePortalHost } from '../shared/portalHost'
 
 const isDev = process.env.NODE_ENV === 'development'
+
+// 单实例锁：同一安装实例双开会导致同一 SQLite 双进程写、导入监听把同一文件导两遍、
+// 一体化自动化重复执行。锁按 userData 目录生效——实例2/内网执行端各有独立 userData
+// （见 config/paths 的 payrollInstance），相互不受影响；这里只挡“同一实例开第二次”。
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
+let mainWindowRef: BrowserWindow | null = null
+
+app.on('second-instance', () => {
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+    if (mainWindowRef.isMinimized()) mainWindowRef.restore()
+    mainWindowRef.focus()
+  }
+})
 
 // 防止给同一个 session 重复挂 will-download 监听
 const hookedSessions = new WeakSet<Session>()
@@ -47,7 +67,8 @@ function installDownloadInterception(targetSession: Session, hostWindow: Browser
       const url = item.getURL()
       const filename = item.getFilename() || 'download.bin'
       // 只拦一体化里的两个入库来源：导出工资、预算人员信息；其它 Excel 走默认另存为。
-      const isPortalSource = /172\.24\.147\.202|portal|sal-|bim\//i.test(url)
+      const portalHostPattern = resolvePortalHost(process.env).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const isPortalSource = new RegExp(`${portalHostPattern}|portal|sal-|bim\\/`, 'i').test(url)
       const isImportable = /\.(xls|xlsx|csv)$/i.test(filename)
       if (!isPortalSource || !isImportable || !shouldAutoCapturePortalWorkbook(filename)) {
         return // 让它正常走默认下载行为（操作系统的另存为对话框）
@@ -130,6 +151,8 @@ function createWindow(): void {
     }
   })
 
+  mainWindowRef = mainWindow
+
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
@@ -161,10 +184,24 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return
+  installMainProcessLogging()
+  appendMainLog('info', 'startup', `应用启动 ${appDisplayName} v${app.getVersion()}`)
   ensureBusinessFolders()
   ensureImportFolderDesktopShortcut()
   try {
     await getDatabase()
+  } catch (error) {
+    // 数据库打不开继续跑只会让后续每个操作散点报错——明示并退出（R-07 fail-fast）。
+    appendMainLog('fatal', 'startup', '数据库初始化失败', error)
+    dialog.showErrorBox(
+      '数据库初始化失败',
+      `工资数据库无法打开，程序无法继续运行。\n\n${error instanceof Error ? error.message : String(error)}\n\n请检查数据目录是否可写、磁盘是否已满，或从备份恢复后重试。`
+    )
+    app.quit()
+    return
+  }
+  try {
     const townshipAnnualIncrease = await applyAnnualTownshipYearIncreaseIfNeeded()
     if (townshipAnnualIncrease.applied) {
       console.info(
@@ -175,8 +212,12 @@ app.whenReady().then(async () => {
       }
     }
   } catch (error) {
-    console.error('数据库初始化失败', error)
+    console.error('乡镇补贴年度递增检查失败', error)
   }
+  // 每日自动备份（保留最近 14 份），失败只记日志不打扰启动
+  runDailyAutoBackup().catch((error) => {
+    console.error('每日自动备份失败', error)
+  })
   registerAppIpc()
   registerLicenseIpc()
   registerMailIpc()

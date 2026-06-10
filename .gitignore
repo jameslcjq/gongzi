@@ -73,3 +73,8 @@ app/.codex-dev/
 
 # Optional local automation/worktree folders
 .claude/
+
+# 注入脚本语法校验器临时目录
+app/.tmp-script-check/
+app/.tmp-userscript-build/
+app/.codex-dev/

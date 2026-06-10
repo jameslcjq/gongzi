@@ -105,6 +105,28 @@ export async function createBackup(): Promise<BackupSummary> {
   }
 }
 
+// 每日自动备份（R-10）：启动时检查，最近 24 小时内没有备份就自动建一份；
+// 并把数据库备份裁剪到最近 keep 份（手动备份与自动备份同等对待，只按时间排序）。
+export async function runDailyAutoBackup(keep = 14): Promise<BackupSummary | null> {
+  const backups = listBackups()
+  const newest = backups[0]
+  const dayMs = 24 * 60 * 60 * 1000
+  let created: BackupSummary | null = null
+  if (!newest || Date.now() - new Date(newest.createdAt).getTime() > dayMs) {
+    created = await createBackup()
+    console.info(`每日自动备份完成：${created.fileName}`)
+  }
+  const afterList = listBackups()
+  for (const extra of afterList.slice(keep)) {
+    try {
+      await rm(extra.filePath, { force: true })
+    } catch {
+      /* 清理失败不影响业务 */
+    }
+  }
+  return created
+}
+
 export async function restoreBackup(fileName: string): Promise<BackupSummary> {
   const folder = getBackupFolder()
   const sourcePath = join(folder, fileName)
@@ -127,6 +149,15 @@ export async function restoreBackup(fileName: string): Promise<BackupSummary> {
 
   if (confirmation.response !== 0) {
     throw new Error('用户取消恢复')
+  }
+
+  // 恢复前先给"当前库"留快照（R-10）：万一选错了备份文件，这一步是唯一的后悔药。
+  const preRestoreName = `salary-system-恢复前快照-${buildTimestamp()}.sqlite`
+  try {
+    const checkpointed = await checkpointDatabase()
+    await copyFile(checkpointed, join(folder, preRestoreName))
+  } catch (error) {
+    console.warn('恢复前快照创建失败（继续恢复）', error)
   }
 
   await closeDatabase()

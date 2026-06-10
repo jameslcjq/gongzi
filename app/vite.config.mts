@@ -7,7 +7,12 @@ import { resolve } from 'node:path'
 // 构建期应用变体：APP_FLAVOR=runner 产出内网执行端版，否则完整版。
 // 注入为全局常量 __APP_FLAVOR__，供 src/shared/appFlavor.ts 读取。
 const appFlavor = process.env.APP_FLAVOR === 'runner' ? 'runner' : 'full'
-const flavorDefine = { __APP_FLAVOR__: JSON.stringify(appFlavor) }
+// 一体化门户主机：构建期可用 PAYROLL_PORTAL_HOST 覆盖（见 src/shared/portalHost.ts）。
+const portalHost = process.env.PAYROLL_PORTAL_HOST || '172.24.147.202'
+const flavorDefine = {
+  __APP_FLAVOR__: JSON.stringify(appFlavor),
+  __PORTAL_HOST__: JSON.stringify(portalHost)
+}
 
 export default defineConfig({
   define: flavorDefine,
