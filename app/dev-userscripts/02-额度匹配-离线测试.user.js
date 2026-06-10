@@ -13,7 +13,7 @@
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = false
   var SHOW_PAGE_BUTTON = true
-  var VERSION = '20260609d-salary-quota-match-owning-grid-pay-money'
+  var VERSION = '20260610j-salary-quota-match-edit-health-guard'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = (function () {
@@ -217,6 +217,21 @@
             ? 'rgba(180,45,45,.96)'
             : 'rgba(32,38,46,.96)'
     console.log('[salary-quota-match]', text)
+    // 若录制模式已开启（__exportRecorder 存在），把每一步状态写进录制时间线，
+    // 便于事后与点击/请求/编辑器事件对齐定位。
+    try {
+      var rec = window.__exportRecorder
+      if (rec && rec.events) {
+        rec.events.push({
+          t: Date.now() - (rec.startedAt || Date.now()),
+          frameUrl: location.href,
+          kind: 'quota-status',
+          level: kind || 'info',
+          version: VERSION,
+          text: String(text).slice(0, 600)
+        })
+      }
+    } catch (error) {}
   }
 
   function isVisible(el) {
@@ -428,17 +443,6 @@
       if (btn) return btn
     }
     return null
-  }
-
-  function clickDialogButton(labels) {
-    var docs = getReachableDocs()
-    for (var d = 0; d < docs.length; d++) {
-      for (var i = 0; i < labels.length; i++) {
-        var btn = findButton(docs[d], labels[i])
-        if (btn && clickElement(btn)) return true
-      }
-    }
-    return false
   }
 
   function getCell(row, field) {
@@ -1251,7 +1255,8 @@
   async function waitForItemRows(maxWait) {
     var start = Date.now()
     while (Date.now() - start < (maxWait || CONFIG.maxWaitTime)) {
-      clickDialogButton(['确定', '确认', '是', 'OK'])
+      // 只点弹窗内的确定/确认；绝不点工具栏“确定”（编辑态下点了会提交/关闭编辑，引发重复提交）。
+      clickWindowConfirm()
       var docs = getReachableDocs()
       for (var i = 0; i < docs.length; i++) {
         var rows = getItemRows(docs[i])
@@ -1351,21 +1356,77 @@
     return true
   }
 
-  function findDatagridEditor(row, field) {
-    var info = findDatagridForRow(row, field)
-    if (!info) return null
+  function getColumnEditorOption(jq, el, field) {
     try {
-      var editor = info.jq(info.grid).datagrid('getEditor', { index: info.index, field: field })
-      if (!editor) {
-        info.jq(info.grid).datagrid('selectRow', info.index)
-        info.jq(info.grid).datagrid('beginEdit', info.index)
-        editor = info.jq(info.grid).datagrid('getEditor', { index: info.index, field: field })
-      }
-      if (editor && editor.target) {
-        return { grid: info.grid, editor: editor, index: info.index, rows: info.rows, jq: info.jq, field: field }
-      }
+      var opt = jq(el).datagrid('getColumnOption', field)
+      return opt && opt.editor ? opt : null
     } catch (error) {
       return null
+    }
+  }
+
+  // 可挂接指标网格 = 唯一把“挂接金额”(pay_money) 列配成可编辑(textbox)的 easyui datagrid。
+  // 真实页面里 tableContent(工资项)、tableSalaryDetailed 等都没有 pay_money 编辑器，
+  // 只有可挂接指标网格(如 tableSalaryLinkuQota)有，所以可据此唯一锁定，避免在错误网格
+  // 上取到编辑器，或因 getPanel().contains 判定失败而取不到编辑器。
+  function findQuotaAmountGrid(doc, jq, row) {
+    var candidates = Array.prototype.slice.call(doc.querySelectorAll('table[id],div[id]'))
+    var first = null
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i]
+      try {
+        if (!jq(el).data('datagrid')) continue
+      } catch (error) {
+        continue
+      }
+      if (!getColumnEditorOption(jq, el, CONFIG.quotaAmountField)) continue
+      if (row && datagridOwnsRow(jq, el, row)) return el
+      if (!first) first = el
+    }
+    return first
+  }
+
+  function beginEditAndGetEditor(jq, grid, index, field) {
+    var editor = null
+    try {
+      editor = jq(grid).datagrid('getEditor', { index: index, field: field })
+    } catch (error) {}
+    if (!editor) {
+      try { jq(grid).datagrid('selectRow', index) } catch (error) {}
+      try { jq(grid).datagrid('beginEdit', index) } catch (error) {}
+      try {
+        editor = jq(grid).datagrid('getEditor', { index: index, field: field })
+      } catch (error) {}
+    }
+    return editor
+  }
+
+  function findDatagridEditor(row, field) {
+    var doc = row && row.ownerDocument
+    var jq = doc ? getJq(doc) : null
+    if (!doc || !jq) return null
+    var index = rowIndex(row, -1)
+
+    // 优先：挂接金额用“唯一拥有 pay_money 编辑器的网格”直接定位，按该行 datagrid-row-index
+    // 取编辑器。只命中 pay_money 这一个 textbox，绝不会碰到 dep_bgt_eco_id(部门经济分类 combotree)。
+    if (field === CONFIG.quotaAmountField && index >= 0) {
+      var quotaGrid = findQuotaAmountGrid(doc, jq, row)
+      if (quotaGrid) {
+        var quotaEditor = beginEditAndGetEditor(jq, quotaGrid, index, field)
+        if (quotaEditor && quotaEditor.target) {
+          var quotaRows = []
+          try { quotaRows = jq(quotaGrid).datagrid('getRows') || [] } catch (error) {}
+          return { grid: quotaGrid, editor: quotaEditor, index: index, rows: quotaRows, jq: jq, field: field }
+        }
+      }
+    }
+
+    // 兜底：用“拥有该行的网格”定位（其它字段，或上面未命中时）。
+    var info = findDatagridForRow(row, field)
+    if (!info) return null
+    var fallbackEditor = beginEditAndGetEditor(jq, info.grid, info.index, field)
+    if (fallbackEditor && fallbackEditor.target) {
+      return { grid: info.grid, editor: fallbackEditor, index: info.index, rows: info.rows, jq: info.jq, field: field }
     }
     return null
   }
@@ -1424,32 +1485,114 @@
     return ''
   }
 
+  // 保险丝：编辑态健康检查（实测规律：部门经济分类显示成纯数字 id ⇔ 编辑器是程序化建的坏编辑器 ⇔ 保存必败）。
+  // 健康编辑态下该格显示“30102 津贴补贴”这类名称；若读到纯数字(≤4位)就判定坏态，保存前安全停止。
+  function quotaEditUnhealthyDisplay(row) {
+    try {
+      var cell = getCell(row, 'dep_bgt_eco_id')
+      if (!cell) return ''
+      var input = cell.querySelector('input.textbox-text, input.combo-text, input[type="text"]')
+      var text = compactText(input && input.value !== '' ? input.value : (cell.innerText || cell.textContent || ''))
+      if (!text) return ''
+      if (/^\d{1,4}$/.test(text)) return text
+      return ''
+    } catch (error) {
+      return ''
+    }
+  }
+
+  // 只在“挂接金额”(pay_money) 单元格内读回金额，永不读其它列。
+  // 编辑器可能在 setValue 触发提交时被 easyui 销毁，故同时从隐藏值/可见输入/单元格文本兜底读回。
+  function readPayMoneyCellValue(row) {
+    var cell = getCell(row, CONFIG.quotaAmountField)
+    if (!cell) return null
+    var hidden = cell.querySelector('input.textbox-value')
+    if (hidden && hidden.value !== '') {
+      var hv = parseAmountValue(hidden.value)
+      if (hv != null) return hv
+    }
+    var textInput = cell.querySelector('input.textbox-text, input[type="text"], textarea')
+    if (textInput && textInput.value !== '') {
+      var tv = parseAmountValue(textInput.value)
+      if (tv != null) return tv
+    }
+    return parseAmountValue(getCellText(row, CONFIG.quotaAmountField))
+  }
+
   async function enterAmount(row, amount) {
     var cell = getCell(row, CONFIG.quotaAmountField)
     if (!cell) return false
-    clickElement(cell)
-    try {
-      cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }))
-    } catch (error) {}
-    await sleep(250)
-    var editorInfo = findDatagridEditor(row, CONFIG.quotaAmountField)
-    if (!editorInfo) {
-      status('未能从当前可挂接指标行定位到“挂接金额”字段编辑器，已停止，避免误填“部门经济分类”等其他列。', 'err')
+    var doc = row.ownerDocument
+    var jq = doc ? getJq(doc) : null
+    var grid = jq ? findQuotaAmountGrid(doc, jq, row) : null
+    var index = rowIndex(row, -1)
+    if (!jq || !grid || index < 0) {
+      status('未能定位“可挂接指标”网格或行号，已停止。', 'err')
       return false
     }
-    if (setEditorValue(editorInfo, amount)) {
-      await sleep(150)
-      var actual = parseAmount(currentEditorValue(editorInfo))
-      if (Math.abs(actual - amount) <= 0.01) return true
-      status(
-        '已尝试写入额度编辑器，但读回金额不一致。目标：' +
-          formatAmount(amount) +
-          '，读回：' +
-          (currentEditorValue(editorInfo) || '空'),
-        'warn'
-      )
+
+    // 像人手那样“点入挂接金额(调整金额)单元格”触发页面自己的行编辑，让页面把整行编辑器建好
+    // （部门经济分类 combotree 会带数据、正确显示名称）。
+    // 绝不调用 datagrid('beginEdit')：程序化 beginEdit 绕过页面初始化，会让 combotree 只显示
+    // 原始 id（如 3/6）且无有效选中，触发页面校验异常（gov_bgt_eco_id undefined）并导致保存失败。
+    var editor = null
+    for (var attempt = 0; attempt < 3 && !(editor && editor.target); attempt++) {
+      try { clickElement(cell) } catch (error) {}
+      try {
+        cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }))
+      } catch (error) {}
+      var waitUntil = Date.now() + 1600
+      while (Date.now() < waitUntil) {
+        try { editor = jq(grid).datagrid('getEditor', { index: index, field: CONFIG.quotaAmountField }) } catch (error) {}
+        if (editor && editor.target) break
+        await sleep(200)
+      }
     }
-    status('已通过“挂接金额”字段编辑器写入，但读回金额仍不一致，已停止保存。', 'err')
+    if (!editor || !editor.target) {
+      status('点击“挂接金额”后页面未进入编辑（未取到金额编辑器），已停止。', 'err')
+      return false
+    }
+
+    var editorInfo = {
+      grid: grid,
+      editor: editor,
+      index: index,
+      rows: (function () { try { return jq(grid).datagrid('getRows') || [] } catch (error) { return [] } })(),
+      jq: jq,
+      field: CONFIG.quotaAmountField
+    }
+    if (!setEditorValue(editorInfo, amount)) {
+      status('写入“挂接金额”字段编辑器失败，已停止保存。', 'err')
+      return false
+    }
+    await sleep(150)
+    // 读回：先读编辑器；读不到/不一致再从“挂接金额”单元格 DOM 兜底（editor 可能已随提交销毁）。
+    var readBack = parseAmountValue(currentEditorValue(editorInfo))
+    if (readBack == null || Math.abs(readBack - amount) > 0.01) {
+      var cellBack = readPayMoneyCellValue(row)
+      if (cellBack != null) readBack = cellBack
+    }
+    if (readBack != null && Math.abs(readBack - amount) <= 0.01) {
+      // 保存前最后一道保险：部门经济分类若显示成纯数字 id，说明编辑态损坏，保存必败且可能提交脏数据。
+      var unhealthy = quotaEditUnhealthyDisplay(row)
+      if (unhealthy) {
+        status(
+          '编辑态异常：当前指标行“部门经济分类”显示为数字 id（' +
+            unhealthy +
+            '）而不是名称，判定行编辑器未被页面正常初始化，已停止保存。请手动完成本笔并保留页面现场。',
+          'err'
+        )
+        return false
+      }
+      return true
+    }
+    status(
+      '已写入“挂接金额”，但读回金额不一致，已停止保存。目标：' +
+        formatAmount(amount) +
+        '，读回：' +
+        (readBack == null ? '空' : formatAmount(readBack)),
+      'err'
+    )
     return false
   }
 
@@ -1461,32 +1604,58 @@
     return true
   }
 
+  // 只点“弹窗内”的确定/确认（easyui window/messager/dialog），不碰工具栏“确定”，避免重复提交。
+  function clickWindowConfirm() {
+    var docs = getReachableDocs()
+    for (var d = 0; d < docs.length; d++) {
+      var wins = docs[d].querySelectorAll('.window, .messager-window, .panel-window, .dialog, .messager-body')
+      for (var w = 0; w < wins.length; w++) {
+        if (!isVisible(wins[w])) continue
+        var nodes = wins[w].querySelectorAll('a,button,input[type="button"],.l-btn,.l-btn-text,span.l-btn-text')
+        for (var n = 0; n < nodes.length; n++) {
+          var node = nodes[n]
+          var host = node.classList && node.classList.contains('l-btn-text') ? (node.closest('.l-btn') || node) : node
+          if (!isVisible(host)) continue
+          var v = node.tagName === 'INPUT' ? (node.value || '') : (node.innerText || node.textContent || node.title || '')
+          var t = normalizeText(v)
+          if (t === '确定' || t === '确认' || t === '是' || t === 'OK' || t === 'ok') {
+            if (clickElement(host)) return true
+          }
+        }
+      }
+    }
+    return false
+  }
+
   async function clickSave(doc) {
+    // 本页“可挂接指标”的提交按钮是“确定”（点“修改”进入编辑后才出现）；个别页面可能是“保存”。
+    var saveLabel = '保存'
     var btn = findButton(doc, '保存') || findButtonAcross('保存', doc)
     if (!btn) {
-      status('保存前没有找到“保存”按钮。当前可见按钮：' + (visibleButtonTexts(doc) || '未读取到'), 'err')
+      saveLabel = '确定'
+      btn = findButton(doc, '确定') || findButtonAcross('确定', doc)
+    }
+    if (!btn) {
+      status('提交前没有找到“确定/保存”按钮。当前可见按钮：' + (visibleButtonTexts(doc) || '未读取到'), 'err')
       return false
     }
-    status('已找到“保存”按钮，正在保存...')
+    status('已找到“' + saveLabel + '”按钮，正在提交...')
     clickElement(btn)
+    await sleep(900)
+    // 提交后若弹确认框，只点弹窗内的确定/确认（避免误点工具栏“确定”导致重复提交）。
     var start = Date.now()
-    var noConfirmDeadline = start + 4000
-    var maxWait = Math.min(CONFIG.saveWaitTime, 12000)
+    var maxWait = Math.min(CONFIG.saveWaitTime, 8000)
+    var confirmed = false
     while (Date.now() - start < maxWait) {
-      if (clickDialogButton(['确定', '确认', '是', 'OK'])) {
-        status('已确认保存，等待一体化页面写入...')
-        await sleep(1200)
-        return true
+      if (clickWindowConfirm()) {
+        confirmed = true
+        await sleep(900)
+      } else {
+        break
       }
-      if (Date.now() >= noConfirmDeadline) {
-        status('已点击“保存”，未出现确认弹窗，正在重新读取页面...')
-        await sleep(1200)
-        return true
-      }
-      await sleep(350)
     }
-    status('已点击“保存”，等待超时前未发现确认弹窗，继续重新读取页面...', 'warn')
-    await sleep(1200)
+    status(confirmed ? '已确认提交，等待一体化页面写入...' : '已点击“' + saveLabel + '”，等待一体化页面写入...')
+    await sleep(1000)
     return true
   }
 
@@ -1497,13 +1666,13 @@
     status('额度已处理，准备生成支付申请...')
     clickElement(btn)
     await sleep(1200)
-    clickDialogButton(['确定', '确认', '是', 'OK'])
+    clickWindowConfirm()
     await sleep(900)
     var savePay = findButton(doc, '生成支付申请') || findButtonAcross('生成支付申请', doc)
     if (savePay) {
       clickElement(savePay)
       await sleep(900)
-      clickDialogButton(['确定', '确认', '是', 'OK'])
+      clickWindowConfirm()
     }
     return true
   }
@@ -1512,6 +1681,7 @@
     if (running) return { ok: false, message: '额度匹配正在运行' }
     running = true
     try {
+      status('自动额度匹配开始运行（脚本版本 ' + VERSION + '）...')
       var page = await waitForSalaryPage()
       if (!page) return { ok: false, code: 'not-page', message: '请先进入“工资发放/生成支付”的额度匹配页面' }
       ensureSalaryBatch001(page)
@@ -1521,7 +1691,7 @@
         status('已找到“额度匹配”，开始生成发放明细...')
         clickElement(createBtn)
         await sleep(1200)
-        clickDialogButton(['确定', '确认', '是', 'OK'])
+        clickWindowConfirm()
       }
 
       var itemPage = await waitForItemRows()
@@ -1733,3 +1903,4 @@
   if (AUTO_START) return start()
   return { ok: true, message: 'installed' }
 })()
+

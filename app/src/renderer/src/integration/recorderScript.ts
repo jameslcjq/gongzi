@@ -193,18 +193,43 @@ export function buildRecorderInstallScript(sessionId = ''): string {
     return undefined
   }
 
+  // easyui 网格上下文：点的是哪个网格、哪一行、哪一列(field)。排查“有没有点进挂接金额格子”全靠它。
+  function gridContextOf(el) {
+    try {
+      const td = el.closest ? el.closest('td[field]') : null
+      if (!td) return null
+      const out = { field: td.getAttribute('field') || '' }
+      const tr = td.closest('tr')
+      if (tr) {
+        const ri = tr.getAttribute('datagrid-row-index')
+        if (ri !== null && ri !== '') out.rowIndex = ri
+      }
+      const wrap = td.closest('.datagrid-wrap')
+      if (wrap) {
+        const src = wrap.querySelector('.easyui-datagrid[id], table[id]')
+        if (src && src.id) out.gridId = src.id
+      }
+      return out
+    } catch (e) {
+      return null
+    }
+  }
+
   function pushElementEvent(kind, ev, extra) {
     try {
       const el = toElement(ev && ev.target)
       if (!el) return
-      push(kind, Object.assign({
+      const base = {
         selector: buildSelector(el),
         text: elementText(el),
         tagName: el.tagName,
         id: el.id || '',
         name: el.name || '',
         value: elementValue(el)
-      }, extra || {}))
+      }
+      const grid = gridContextOf(el)
+      if (grid) base.grid = grid
+      push(kind, Object.assign(base, extra || {}))
     } catch (e) {}
   }
 
@@ -252,6 +277,44 @@ export function buildRecorderInstallScript(sessionId = ''): string {
   document.addEventListener('dblclick', function (ev) {
     pushElementEvent('dblclick', ev)
   }, true)
+
+  // -------- easyui 行内编辑器生死记录 ----------
+  // 记录 .datagrid-editable 出现/消失（editor-open/editor-close），带 field/行号/当时显示文本。
+  // “部门经济分类编辑器打开时显示纯数字 id(如 6)”= 行编辑器未被页面正常初始化的铁证。
+  try {
+    const describeEditableCell = function (cell) {
+      const out = { field: '', rowIndex: '', display: '' }
+      try {
+        const td = cell.closest ? cell.closest('td[field]') : null
+        if (td) out.field = td.getAttribute('field') || ''
+        const tr = td && td.closest ? td.closest('tr') : null
+        if (tr) out.rowIndex = tr.getAttribute('datagrid-row-index') || ''
+        const input = cell.querySelector('input.textbox-text, input.combo-text, input[type="text"], select, textarea')
+        const raw = input && input.value !== '' ? input.value : (cell.innerText || cell.textContent || '')
+        out.display = String(raw || '').replace(/\\s+/g, ' ').trim().slice(0, 80)
+      } catch (e) {}
+      return out
+    }
+    const scanEditorNodes = function (nodes, kind) {
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i]
+        if (!node || node.nodeType !== 1) continue
+        let cells = []
+        try {
+          if (node.classList && node.classList.contains('datagrid-editable')) cells = [node]
+          else if (node.getElementsByClassName) cells = Array.prototype.slice.call(node.getElementsByClassName('datagrid-editable'))
+        } catch (e) {}
+        for (let j = 0; j < cells.length && j < 20; j++) push(kind, describeEditableCell(cells[j]))
+      }
+    }
+    const editorObserver = new MutationObserver(function (mutations) {
+      for (let i = 0; i < mutations.length; i++) {
+        scanEditorNodes(mutations[i].addedNodes, 'editor-open')
+        scanEditorNodes(mutations[i].removedNodes, 'editor-close')
+      }
+    })
+    editorObserver.observe(document.documentElement || document.body, { childList: true, subtree: true })
+  } catch (e) {}
 
   window.addEventListener('hashchange', function () {
     push('navigation', {
