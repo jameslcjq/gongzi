@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>额度匹配离线仿真页（salSalaryAuditSCZF mock）</title>
+<!-- easyui 与 jquery 用 npm 包内自带文件（离线可用）；文件名含 salSalaryAuditSCZF 以满足脚本的 URL 识别 -->
+<link rel="stylesheet" href="../../node_modules/jquery-easyui/css/easyui.css">
+<style>
+  body { margin: 0; font: 13px/1.5 "Microsoft YaHei", sans-serif; background: #f5f6f7; }
+  #mock-banner { background: #7c3aed; color: #fff; padding: 6px 14px; font-weight: 700; }
+  #toolbar { background: #fff; border-bottom: 1px solid #ddd; padding: 8px 12px; display: flex; gap: 18px; align-items: center; }
+  #toolbar a { color: #1f6feb; text-decoration: none; cursor: pointer; }
+  #toolbar a.tb-hidden { display: none; }
+  .grid-title { padding: 6px 12px 2px; font-weight: 700; }
+  #batch-area { padding: 6px 12px; background: #fff; }
+</style>
+</head>
+<body>
+<div id="mock-banner">⚠ 离线仿真页 —— 模拟一体化"工资发放/生成支付"额度匹配页面，仅供注入脚本回归，非真实系统</div>
+
+<div id="batch-area">
+  工资批次：
+  <!-- 复刻真实页的批次 combo 结构：脚本 ensureSalaryBatch001 靠它读取 [001]工资 -->
+  <span class="textbox combo" style="display:inline-block;border:1px solid #ccc;padding:2px 6px;background:#fff">
+    <input class="textbox-text" type="text" value="[001]工资" readonly style="border:0;width:120px">
+    <input id="salbatch_id" name="salbatch_id" class="textbox-value" type="hidden" value="1">
+  </span>
+</div>
+
+<div id="toolbar">
+  <a id="btn-quota-match">额度匹配</a>
+  <a id="btn-modify">修改</a>
+  <a id="btn-save" class="tb-hidden">保存</a>
+  <a id="btn-create-pay">生成支付</a>
+  <a id="btn-undo">撤销匹配</a>
+  <a id="btn-query">查询</a>
+  <a id="btn-back">退回</a>
+  <a id="btn-verify-view">核销过程查看</a>
+</div>
+
+<div class="grid-title">工资单</div>
+<div id="tableContent" style="height:240px"></div>
+
+<div class="grid-title">可挂接指标/计划</div>
+<div id="tableSalaryLinkuQota" style="height:300px"></div>
+
+<script src="../../node_modules/jquery-easyui/js/jquery.min.js"></script>
+<script src="../../node_modules/jquery-easyui/js/jquery.easyui.min.js"></script>
+<script src="mock.js"></script>
+<!-- 额度匹配脚本本体：油猴头是 // 注释，可直接当普通脚本加载；mock.js 已先写好 localStorage 工资汇总 -->
+<script src="../../dev-userscripts/02-额度匹配-离线测试.user.js"></script>
+</body>
+</html>

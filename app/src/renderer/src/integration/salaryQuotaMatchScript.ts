@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260610j-salary-quota-match-edit-health-guard'
+  var VERSION = '20260611k-salary-quota-match-dep-display-probe'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -1489,7 +1489,19 @@ export function buildSalaryQuotaMatchScript(
     try {
       var cell = getCell(row, 'dep_bgt_eco_id')
       if (!cell) return ''
-      var input = cell.querySelector('input.textbox-text, input.combo-text, input[type="text"]')
+      // 编辑态下 td 里第一个 input 是 easyui 的原始隐藏编辑输入(.datagrid-editable-input)，
+      // 它永远存裸 id（如 6）——不能拿它判定显示状态（仿真页实跑抓到的误报）。
+      // 必须取"可见的"显示输入(combo-text/textbox-text)，全部排除后再退回单元格文本。
+      var input = null
+      var candidates = cell.querySelectorAll('input.combo-text, input.textbox-text, input[type="text"]')
+      for (var i = 0; i < candidates.length; i++) {
+        var candidate = candidates[i]
+        if (candidate.type === 'hidden') continue
+        if (candidate.classList && candidate.classList.contains('datagrid-editable-input')) continue
+        if (candidate.offsetWidth <= 0 && candidate.offsetHeight <= 0) continue
+        input = candidate
+        break
+      }
       var text = compactText(input && input.value !== '' ? input.value : (cell.innerText || cell.textContent || ''))
       if (!text) return ''
       if (/^\\d{1,4}$/.test(text)) return text
