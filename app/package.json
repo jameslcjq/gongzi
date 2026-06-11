@@ -1,6 +1,6 @@
 {
   "name": "salary-system-electron",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "private": true,
   "productName": "老九的工资系统",
   "description": "独立版工资系统 Electron 桌面程序",

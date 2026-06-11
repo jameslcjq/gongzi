@@ -276,18 +276,6 @@ async function pushAnnualAdjustmentToIntegrated() {
 
 <template>
   <section class="annual-page">
-    <header class="annual-header">
-      <div>
-        <h1>社保个税</h1>
-        <p>按工资表人员匹配五险一金个人缴纳部分，并同步更新本地在职工资。</p>
-      </div>
-      <div class="annual-actions">
-        <el-button type="primary" :disabled="!canUpdateInsurance" :loading="adjustmentLoading" @click="applyAdjustment">
-          更新五险一金
-        </el-button>
-      </div>
-    </header>
-
     <div class="annual-grid">
       <section class="annual-panel">
         <div class="panel-title-row">
@@ -295,6 +283,15 @@ async function pushAnnualAdjustmentToIntegrated() {
           <div class="watcher-actions">
             <el-button size="small" :loading="props.loading" @click="emit('refresh')">刷新</el-button>
             <el-button size="small" @click="emit('openFolder')">打开文件夹</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="!canUpdateInsurance"
+              :loading="adjustmentLoading"
+              @click="applyAdjustment"
+            >
+              更新五险一金
+            </el-button>
           </div>
         </div>
         <div class="watcher-folder">
@@ -452,29 +449,6 @@ async function pushAnnualAdjustmentToIntegrated() {
 .annual-page {
   padding: 20px;
   color: #1f2937;
-}
-
-.annual-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-
-.annual-header h1 {
-  margin: 0;
-  font-size: 24px;
-}
-
-.annual-header p {
-  margin: 6px 0 0;
-  color: #64748b;
-}
-
-.annual-actions {
-  display: flex;
-  gap: 8px;
 }
 
 .annual-grid {

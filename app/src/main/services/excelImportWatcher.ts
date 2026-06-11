@@ -155,9 +155,8 @@ async function readRecentImportLogs(): Promise<ExcelImportLog[]> {
 async function importExcelFile(filePath: string): Promise<void> {
   const extension = extname(filePath).toLowerCase()
   if (!importableExtensions.has(extension) || basename(filePath).startsWith('~$')) return
-  const reservedWorkflowName = reservedWorkflowWorksheetName(filePath)
-  if (reservedWorkflowName) {
-    pushReservedWorkflowLog(filePath, reservedWorkflowName)
+  if (reservedWorkflowWorksheetName(filePath)) {
+    // 专项处理文件保留给业务模块使用，不在导入监控里刷提示。
     return
   }
 
@@ -189,7 +188,7 @@ async function importExcelFile(filePath: string): Promise<void> {
   } catch (error) {
     const reservedWorkflowNameAfterFailure = reservedWorkflowWorksheetName(filePath)
     if (reservedWorkflowNameAfterFailure) {
-      pushReservedWorkflowLog(filePath, reservedWorkflowNameAfterFailure)
+      // 专项处理文件保留给业务模块使用，不在导入监控里刷提示。
       return
     }
     moveProcessedFile(filePath, 'failed')
@@ -205,19 +204,6 @@ async function importExcelFile(filePath: string): Promise<void> {
       await persistFailedLog(basename(filePath), message)
     }
   }
-}
-
-function pushReservedWorkflowLog(filePath: string, worksheetName: string): void {
-  // 工资报账源文件会在业务页展示，导入监控里不刷保留提示。
-  if (worksheetName === '工资报账') return
-  pushMemoryLog({
-    fileName: basename(filePath),
-    worksheetName,
-    ok: true,
-    importedRows: 0,
-    message: '已识别为专项处理文件，保留在监控文件夹供业务模块使用',
-    createdAt: new Date().toISOString()
-  })
 }
 
 function scanExistingImportFiles(path: string): void {
