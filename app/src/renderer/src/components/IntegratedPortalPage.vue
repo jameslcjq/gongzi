@@ -741,7 +741,10 @@ async function runOneStep(
     ElMessage.info(`【凭证】开始：${step.label}（${step.fileName}）`)
     const r = (await execStepScript(
       wv,
-      buildPushVoucherScript(step.fileName, step.fileBase64, step.label),
+      buildPushVoucherScript(step.fileName, step.fileBase64, step.label, {
+        unitFullName: step.targetUnitFullName,
+        unitImportCode: step.targetUnitImportCode
+      }),
       '凭证'
     )) as { ok: boolean; reason?: string; trace?: string[]; traceText?: string }
     maybeLogStepTrace(runId, '凭证', r?.trace, r?.traceText)

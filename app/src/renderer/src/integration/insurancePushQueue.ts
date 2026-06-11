@@ -26,6 +26,8 @@ export type VoucherPushStep = {
   fileBase64: string
   fileName: string
   label: string
+  targetUnitFullName?: string
+  targetUnitImportCode?: string
   runId?: number
   pushTarget?: MonthlyPayrollPushTarget
 }

@@ -125,11 +125,20 @@ export async function appendVoucherPushStep(
   if (!file.ok) {
     throw new Error('读取凭证 xlsx 失败：' + file.reason)
   }
+  let targetUnitImportCode = ''
+  try {
+    const unit = await window.salaryApi.getUnitSettings()
+    targetUnitImportCode = (unit.unitImportCode || '').trim()
+  } catch (error) {
+    console.warn('读取单位设置失败，凭证推送继续使用历史记录单位名称校验账套', error)
+  }
   steps.push({
     kind: 'voucher',
     fileBase64: file.base64,
     fileName: file.fileName,
     label,
+    targetUnitFullName: row.unitFullName,
+    targetUnitImportCode,
     runId: row.id,
     pushTarget: 'voucher'
   })
