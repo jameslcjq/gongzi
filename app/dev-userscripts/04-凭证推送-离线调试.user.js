@@ -110,16 +110,6 @@
         return [account.code || account.agency_code || '', accountName(account)].filter(Boolean).join(' ')
       }
     
-      function mapAccountSet(item) {
-        return {
-          id: item && item.id !== undefined ? String(item.id) : '',
-          code: String((item && item.code) || ''),
-          agency_code: String((item && item.agency_code) || ''),
-          name: String((item && (item.name || item.text || item.agency_name)) || ''),
-          agency_name: String((item && item.agency_name) || '')
-        }
-      }
-    
       function accountCodeMatchesTarget(account, expectedCode) {
         if (!expectedCode) return false
         var codes = [
@@ -163,267 +153,29 @@
         }
       }
     
-      async function fetchAccountSets(fetchFn) {
-        var result = await fetchJsonWithTimeout(
-          fetchFn,
-          '/new-framework-engin2/userAcctSets?time=' + Date.now(),
-          { method: 'GET', credentials: 'include' },
-          10000
-        )
-        if (!result.ok || !result.json || String(result.json.status_code) !== '0000') {
-          throw new Error('读取一体化账套列表失败，已停止上传。HTTP=' + result.http + '；返回=' + shortText(result.text))
-        }
-        var rows = Array.isArray(result.json.data) ? result.json.data : []
-        return rows.map(mapAccountSet).filter(function (item) { return !!(item.id || item.code || item.name) })
-      }
-    
-      function pickTargetAccount(accounts) {
-        var expectedCode = normalizeCode(TARGET_UNIT.unitImportCode)
-        var expectedName = normalize(TARGET_UNIT.unitFullName)
-        if (!expectedCode && !expectedName) {
-          throw new Error('凭证推送缺少目标单位编码/名称，已停止上传，避免导入到错误账套。')
-        }
-    
-        if (expectedCode) {
-          var codeMatches = accounts.filter(function (account) {
-            return accountCodeMatchesTarget(account, expectedCode)
-          })
-          if (codeMatches.length === 1) return codeMatches[0]
-          if (codeMatches.length > 1) {
-            throw new Error('目标单位编码匹配到多个一体化账套，已停止上传：' + codeMatches.map(accountLabel).join('；'))
+      // 业务决策（2026-06-12）：凭证导入“默认账套”（打开中科单位核算后的当前账套），不自动切换账套。
+      // 当前账套用录制证实的会话接口读取，仅用于展示与留痕；读不到也不阻塞导入。
+      async function resolveDefaultAccount(fetchFn) {
+        try {
+          var result = await fetchJsonWithTimeout(
+            fetchFn,
+            '/gld-account-server/public/getSession?menuid=' + MENUID,
+            { method: 'POST', credentials: 'include' },
+            10000
+          )
+          var data = result.ok && result.json && String(result.json.status_code) === '0000' ? result.json.data : null
+          if (!data) return null
+          var account = {
+            id: data.bookSetId !== undefined && data.bookSetId !== null ? String(data.bookSetId) : '',
+            code: String(data.bookSetCode || ''),
+            agency_code: String(data.agency_code || ''),
+            name: String(data.bookSetName || ''),
+            agency_name: String(data.agency_name || '')
           }
-        }
-    
-        if (expectedName) {
-          var nameMatches = accounts.filter(function (account) {
-            return accountNameMatchesTarget(account, expectedName)
-          })
-          if (nameMatches.length === 1) return nameMatches[0]
-          if (nameMatches.length > 1) {
-            throw new Error('目标单位名称匹配到多个一体化账套，已停止上传：' + nameMatches.map(accountLabel).join('；'))
-          }
-        }
-    
-        throw new Error(
-          '当前一体化账号未找到目标账套，已停止上传。目标：' + targetUnitLabel() +
-          '；可用账套：' + accounts.map(accountLabel).join('；')
-        )
-      }
-    
-      function collectCurrentAccountTexts(root) {
-        var texts = []
-        function add(value) {
-          var text = compact(value)
-          if (text && texts.indexOf(text) < 0) texts.push(text)
-        }
-        function scan(win) {
-          try {
-            var doc = win.document
-            if (!doc) return
-            var nodes = Array.prototype.slice.call(doc.querySelectorAll([
-              'div.usermess-list input',
-              'div.usermess-list .textbox-value',
-              '.usermess-list span.textbox input',
-              'input[id^="_easyui_textbox_input"]'
-            ].join(',')))
-            nodes.forEach(function (el) {
-              try {
-                var value = el.value || el.getAttribute('value') || el.textContent || ''
-                if (/[0-9]{4,}|[一-龥]/.test(String(value || ''))) add(value)
-              } catch (e) {}
-            })
-            var bodyText = doc.body ? String(doc.body.innerText || doc.body.textContent || '') : ''
-            var re = /当前账套\s*[：:]?\s*([^\n\r]+)/g
-            var match
-            while ((match = re.exec(bodyText))) add(match[1])
-          } catch (e) {}
-          try {
-            for (var i = 0; i < win.frames.length; i++) scan(win.frames[i])
-          } catch (e) {}
-        }
-        scan(root)
-        return texts
-      }
-    
-      function identifyAccountFromTexts(accounts, texts) {
-        for (var ti = 0; ti < texts.length; ti++) {
-          var text = normalize(texts[ti])
-          if (!text) continue
-          var exactCode = accounts.filter(function (account) {
-            var code = normalizeCode(account.code)
-            return code && normalizeCode(text).indexOf(code) >= 0
-          })
-          if (exactCode.length === 1) return exactCode[0]
-          var exactAgencyCode = accounts.filter(function (account) {
-            var code = normalizeCode(account.agency_code)
-            return code && normalizeCode(text).indexOf(code) >= 0
-          })
-          if (exactAgencyCode.length === 1) return exactAgencyCode[0]
-          var nameMatches = accounts.filter(function (account) {
-            var name = normalize(accountName(account))
-            return name && text.indexOf(name) >= 0
-          })
-          if (nameMatches.length === 1) return nameMatches[0]
-        }
-        return null
-      }
-    
-      function getCurrentAccountState(root, accounts) {
-        var texts = collectCurrentAccountTexts(root)
-        var account = identifyAccountFromTexts(accounts, texts)
-        return { account: account, texts: texts }
-      }
-    
-      async function ensureAccountingShell(root) {
-        if (collectCurrentAccountTexts(root).length) return true
-        if (!textExistsIn(root, '凭证管理')) {
-          status('🧭 打开中科单位核算，准备确认当前账套 ...')
-          await clickAnyAndWait(root, ['中科单位核算', '单位核算', '会计核算'], '凭证管理', 60000)
-          await sleep(1800)
-        }
-        return collectCurrentAccountTexts(root).length > 0 || textExistsIn(root, '凭证管理')
-      }
-    
-      function findAccountSwitchWindow(root) {
-        function scan(win) {
-          try {
-            var doc = win.document
-            if (doc && doc.querySelector('div.usermess-list')) return win
-          } catch (e) {}
-          try {
-            for (var i = 0; i < win.frames.length; i++) {
-              var found = scan(win.frames[i])
-              if (found) return found
-            }
-          } catch (e) {}
+          return account.id || account.code || account.name ? account : null
+        } catch (e) {
           return null
         }
-        return scan(root)
-      }
-    
-      function textMatchesAccount(text, account) {
-        var normalized = normalize(text)
-        var code = normalizeCode(text)
-        var name = normalize(accountName(account))
-        return (account.code && code.indexOf(normalizeCode(account.code)) >= 0) ||
-          (account.agency_code && code.indexOf(normalizeCode(account.agency_code)) >= 0) ||
-          (name && normalized.indexOf(name) >= 0)
-      }
-    
-      async function clickAccountComboItem(root, targetAccount) {
-        var ctx = findAccountSwitchWindow(root)
-        if (!ctx) return false
-        try {
-          var doc = ctx.document
-          var arrow = doc.querySelector('div.usermess-list .combo-arrow, div.usermess-list a.textbox-icon')
-          if (arrow) {
-            arrow.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-            arrow.click()
-          }
-        } catch (e) {}
-        await sleep(600)
-    
-        var candidates = []
-        function scan(win) {
-          try {
-            var nodes = Array.prototype.slice.call(win.document.querySelectorAll('.combobox-item,.tree-node,li,td,div,span'))
-            nodes.forEach(function (el) {
-              var text = compact(el.innerText || el.textContent || el.title || '')
-              if (!text || text.length > 120 || !isVisible(el)) return
-              if (textMatchesAccount(text, targetAccount)) candidates.push({ el: el, text: text })
-            })
-          } catch (e) {}
-          try {
-            for (var i = 0; i < win.frames.length; i++) scan(win.frames[i])
-          } catch (e) {}
-        }
-        scan(root)
-        candidates.sort(function (a, b) { return a.text.length - b.text.length })
-        var picked = candidates[0]
-        if (!picked) return false
-        try {
-          picked.el.scrollIntoView({ block: 'center', inline: 'center' })
-          picked.el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-          picked.el.click()
-          return true
-        } catch (e) {
-          return false
-        }
-      }
-    
-      function tryEasyuiAccountSwitch(root, targetAccount) {
-        var ctx = findAccountSwitchWindow(root)
-        if (!ctx) return false
-        try {
-          var jq = ctx.jQuery || ctx.$
-          if (!jq) return false
-          var input = ctx.document.querySelector('div.usermess-list input[id^="_easyui_textbox_input"], div.usermess-list input')
-          if (!input) return false
-          var combo = jq(input).closest('span.combo,span.textbox').prev('input,select')
-          if (!combo || !combo.length || !combo.combobox) return false
-          var values = [targetAccount.id, targetAccount.code, targetAccount.agency_code, accountLabel(targetAccount)].filter(Boolean)
-          for (var i = 0; i < values.length; i++) {
-            try { combo.combobox('select', values[i]) } catch (e) {}
-            try { combo.combobox('setValue', values[i]) } catch (e) {}
-          }
-          try { combo.combobox('setText', accountLabel(targetAccount)) } catch (e) {}
-          try { combo.trigger('change') } catch (e) {}
-          return true
-        } catch (e) {
-          return false
-        }
-      }
-    
-      async function switchToAccountSet(root, targetAccount, currentState) {
-        var currentLabel = currentState && currentState.account
-          ? accountLabel(currentState.account)
-          : (currentState && currentState.texts && currentState.texts[0]) || '未识别'
-        var targetLabel = accountLabel(targetAccount)
-        var ok = confirm(
-          '凭证导入前需要切换单位核算账套。\n\n当前账套：' + currentLabel +
-          '\n目标账套：' + targetLabel +
-          '\n\n确认后将尝试自动切换，切换确认成功后才会上传凭证。'
-        )
-        if (!ok) throw new Error('用户取消账套切换，已停止上传凭证。')
-    
-        status('⚠ 当前账套不是目标单位，正在切换到：' + targetLabel, 'warn')
-        var clicked = await clickAccountComboItem(root, targetAccount)
-        var easyui = tryEasyuiAccountSwitch(root, targetAccount)
-        if (!clicked && !easyui) {
-          throw new Error('未能自动触发账套切换，请手动切到 ' + targetLabel + ' 后重试。')
-        }
-    
-        var deadline = Date.now() + 30000
-        while (Date.now() < deadline) {
-          await sleep(1000)
-          var state = getCurrentAccountState(root, [targetAccount])
-          if (state.account && accountMatchesTarget(state.account)) {
-            status('✅ 当前账套已确认：' + accountLabel(state.account), 'ok')
-            await sleep(800)
-            return
-          }
-        }
-        throw new Error('账套切换后未能确认当前账套为 ' + targetLabel + '，已停止上传。')
-      }
-    
-      async function ensureTargetAccountSet(root, fetchFn) {
-        await ensureAccountingShell(root)
-        var accounts = await fetchAccountSets(fetchFn)
-        if (!accounts.length) throw new Error('未读取到一体化账套列表，已停止上传。')
-        var targetAccount = pickTargetAccount(accounts)
-        var current = getCurrentAccountState(root, accounts)
-        if (!current.account) {
-          throw new Error(
-            '未能读取“中科单位核算”的当前账套，已停止上传。目标账套：' + accountLabel(targetAccount) +
-            '；页面识别文本：' + (current.texts.join('；') || '无')
-          )
-        }
-        if (accountMatchesTarget(current.account)) {
-          status('✅ 当前账套已确认：' + accountLabel(current.account))
-          return targetAccount
-        }
-        await switchToAccountSet(root, targetAccount, current)
-        return targetAccount
       }
     
       function textExistsIn(win, text) {
@@ -757,7 +509,11 @@
           addImportAttempt(attempts, attemptSeen, detected, modelCandidates[i].source)
         }
         if (!attempts.length) {
-          throw new Error('未能从一体化导入页读取凭证导入模板ID，已停止上传。请手动打开“导入”窗口确认模板后再试。')
+          // 扫不到模板ID时回退脚本内置模板（2026-06-11 录制证实：手动成功导入用的就是这个 currentModelId）
+          addImportAttempt(attempts, attemptSeen, cloneImportParam(), '内置模板回退')
+        }
+        if (!attempts.length) {
+          throw new Error('未能确定凭证导入模板ID，已停止上传。请手动打开“导入”窗口确认模板后再试。')
         }
         return attempts
       }
@@ -810,7 +566,7 @@
               if (setId && setIds.indexOf(setId) < 0) setIds.push(setId)
             })
             if (targetAccount && targetAccount.id && setIds.length && setIds.indexOf(String(targetAccount.id)) < 0) {
-              return '⚠ 凭证列表回查账套异常：当前列表 set_id=' + setIds.join(',') + '，目标=' + targetAccount.id + '。为避免重复上传，未自动重试，请人工核对。'
+              return '⚠ 凭证列表回查账套异常：当前列表 set_id=' + setIds.join(',') + '，会话账套=' + targetAccount.id + '。为避免重复上传，未自动重试，请人工核对。'
             }
             return '凭证列表回查：期间 ' + period + ' 月，读取到 ' + rows.length + ' 条，账套 ' + (setIds.join(',') || '未返回')
           } catch (e) {}
@@ -842,12 +598,19 @@
         } catch (e) { return null }
       }
     
-      function injectImportIframe(root) {
+      function removeManagedImportIframe(root) {
         try {
           var doc = (root && root.document) || document
           var existing = doc.getElementById('payroll-voucher-import-iframe')
-          if (existing) return existing
-          var url = '/gld-web/gl/html/common/Import.html?modelType=29&mode=0&menuid=' + MENUID
+          if (existing && existing.parentNode) existing.parentNode.removeChild(existing)
+        } catch (e) {}
+      }
+    
+      function injectImportIframe(root) {
+        try {
+          var doc = (root && root.document) || document
+          removeManagedImportIframe(root)
+          var url = '/gld-web/gl/html/common/Import.html?modelType=29&mode=0&menuid=' + MENUID + '&_payrollTs=' + Date.now()
           var ifr = doc.createElement('iframe')
           ifr.id = 'payroll-voucher-import-iframe'
           ifr.src = url
@@ -858,8 +621,6 @@
       }
     
       async function openImportPage(root) {
-        var existing = findImportWindow(root)
-        if (existing && looksLikeImportPage(existing)) return existing
         var ifr = injectImportIframe(root)
         if (!ifr) return null
         await new Promise(function (resolve) {
@@ -868,12 +629,15 @@
           try { ifr.addEventListener('load', fin) } catch (e) {}
           setTimeout(fin, 30000)
         })
-        await sleep(1800)
-        try {
-          var w = ifr.contentWindow
-          if (w && looksLikeImportPage(w)) return w
-        } catch (e) {}
-        return findImportWindow(root)
+        var deadline = Date.now() + 15000
+        while (Date.now() < deadline) {
+          try {
+            var w = ifr.contentWindow
+            if (w && looksLikeImportPage(w)) return w
+          } catch (e) {}
+          await sleep(500)
+        }
+        return null
       }
     
       // 在页内注入同源 iframe 加载凭证录入页，等 onload 后确认是否真的落在凭证录入（而非被重定向到登录/SSO）
@@ -932,7 +696,20 @@
     
         var root = window.top || window
         var rootFetch = (root && root.fetch) ? root.fetch.bind(root) : fetch
-        var targetAccount = await ensureTargetAccountSet(root, rootFetch)
+        // 导入目标 = 默认账套（不切换）。读出账套信息用于展示/留痕；与本程序单位不一致时黄色提醒但继续。
+        var defaultAccount = await resolveDefaultAccount(rootFetch)
+        if (defaultAccount) {
+          status('凭证将导入默认账套：' + accountLabel(defaultAccount))
+          if ((TARGET_UNIT.unitImportCode || TARGET_UNIT.unitFullName) && !accountMatchesTarget(defaultAccount)) {
+            status(
+              '⚠ 默认账套（' + accountLabel(defaultAccount) + '）与本程序单位（' + targetUnitLabel() + '）不一致，按业务约定仍导入默认账套。',
+              'warn'
+            )
+            await sleep(1500)
+          }
+        } else {
+          status('⚠ 未能读取当前默认账套信息（getSession），继续按默认账套导入。', 'warn')
+        }
     
         if (!isOnVoucherPage(root)) {
           var nav = await openVoucherPage(root)
@@ -953,7 +730,7 @@
           throw new Error('当前未处于“凭证录入”页面，已停止上传，避免把文件发到错误模块。')
         }
     
-        status('📤 推送凭证：' + RUN_LABEL + '\n目标账套：' + accountLabel(targetAccount) + ' ...')
+        status('📤 推送凭证：' + RUN_LABEL + '\n导入账套：' + (defaultAccount ? accountLabel(defaultAccount) : '默认账套（会话信息未读取到）') + ' ...')
     
         var importWin = await openImportPage(root)
         if (!importWin) {
@@ -1043,15 +820,24 @@
         var totalCount = pickNum(detailObj, ['totalCount', 'total_count', 'total', 'count'])
         var retMsg = (json && (json.reason || json.message || json.msg)) ||
           (detailObj && (detailObj.reason || detailObj.message || detailObj.msg)) || ''
+        var validationFailCount = pickNumFromText(retMsg, [/数据读取校验失败条数[：:]\s*(\d+)/, /校验失败条数[：:]\s*(\d+)/])
         if (okCount === null) okCount = pickNumFromText(retMsg, [/成功(?:数)?[：:]\s*(\d+)/, /新增数[：:]\s*(\d+)/])
         var newCount = pickNumFromText(retMsg, [/新增数[：:]\s*(\d+)/])
-        if (failCount === null) failCount = pickNumFromText(retMsg, [/失败(?:条数|数)?[：:]\s*(\d+)/])
+        if (failCount === null) {
+          failCount = pickNumFromText(retMsg, [
+            /导入失败数[：:]\s*(\d+)/,
+            /失败数[：:]\s*(\d+)/,
+            /(?:^|[，,;；\s])失败[：:]\s*(\d+)/,
+            /(?:^|[，,;；\s])失败条数[：:]\s*(\d+)/
+          ])
+        }
         if (totalCount === null) totalCount = pickNumFromText(retMsg, [/总数[：:]\s*(\d+)/, /共\s*(\d+)/])
         var detailParts = []
         if (totalCount !== null) detailParts.push('共 ' + totalCount)
         if (okCount !== null) detailParts.push('成功 ' + okCount)
         if (newCount !== null) detailParts.push('新增 ' + newCount)
         if (failCount !== null) detailParts.push('失败 ' + failCount)
+        if (validationFailCount !== null) detailParts.push('校验提示 ' + validationFailCount)
         if (retMsg) detailParts.push(String(retMsg))
         var detailText = detailParts.join('，')
         var rawText = JSON.stringify(json)
@@ -1065,9 +851,9 @@
           )
         }
     
-        var verifyText = await verifyVoucherListTarget(fetchFn, targetAccount)
+        var verifyText = await verifyVoucherListTarget(fetchFn, defaultAccount)
         status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\n' + detailText : '') +
-          '\n目标账套：' + accountLabel(targetAccount) +
+          '\n导入账套：' + (defaultAccount ? accountLabel(defaultAccount) : '默认账套（会话信息未读取到）') +
           '\n模板ID：' + (usedImportParam.currentModelId || '无模板ID') +
           (verifyText ? '\n' + verifyText : '') +
           '\n一体化返回：' + rawText, 'ok')
