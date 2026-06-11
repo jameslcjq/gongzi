@@ -10,6 +10,7 @@ import {
   type HousingFundDetailRow
 } from './detailImport'
 import { loadIntegratedRows } from './integratedPayroll'
+import { sumLatestAmountByBatch } from './batchTotals'
 import { readMonthlyPayrollSettings } from './monthlyPayrollSettings'
 import { resolvePayrollPeriod } from './monthlyPayrollRuns'
 import {
@@ -143,6 +144,27 @@ export async function loadTraffic002Total(): Promise<number> {
     return roundMoney(rows.reduce((sum, row) => sum + num(row.values['交通费']), 0))
   } catch {
     return 0
+  }
+}
+
+// A4 批次预检：在职工资「实发合计」按工资批次编码逐批次汇总（每行按实际批次归集，
+// 不做任何"交通费固定归 002"之类的假设）。用于额度匹配前置校验的批次交叉核对。
+export async function loadActiveActualPayTotalsByBatch(): Promise<Record<string, number>> {
+  try {
+    const worksheet = getWorksheetByName('在职工资')
+    const columns = getWorksheetLocalColumns(worksheet)
+    const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
+    const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
+    const actualColumn = columns.find((column) => column.field.name === '实发合计')?.columnName
+    if (!idColumn || !actualColumn) return {}
+    const database = await getDatabase()
+    const rows = await all<Record<string, unknown>>(
+      database,
+      `SELECT * FROM ${tableNameOf(worksheet)}`
+    )
+    return sumLatestAmountByBatch(rows, idColumn, batchColumn, actualColumn)
+  } catch {
+    return {}
   }
 }
 

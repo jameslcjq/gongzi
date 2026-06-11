@@ -529,6 +529,12 @@ export type SalaryQuotaMatchLocalSummary = {
   actualPayTotal: number
   /** 002 数币批次的交通费合计，前置校验时从实发合计中扣除 */
   traffic002Total: number
+  /**
+   * A4 批次预检：在职工资「实发合计」按工资批次编码逐批次汇总（如 {"001":x,"002":y}）。
+   * 用于前置校验交叉核对——002 批次实发若不等于 002 交通费合计，说明 002 里混入了
+   * 交通费以外的项目，"实发合计−002交通费"的口径即失真，应停止自动匹配。
+   */
+  activeBatchActualPayTotals?: Record<string, number>
   message?: string
 }
 
@@ -902,6 +908,7 @@ export type AnnualAdjustmentPreviewInput = {
 
 export type AnnualAdjustmentApplyInput = AnnualAdjustmentPreviewInput & {
   confirmIntegratedWriteBack: boolean
+  confirmNameIdCardMismatch?: boolean
 }
 
 export type AnnualAdjustmentSourceRow = {
@@ -912,6 +919,7 @@ export type AnnualAdjustmentSourceRow = {
   rate: string
   amount: number
   fieldName: string
+  targetIdCard?: string
   status: 'matched' | 'id-conflict' | 'missing' | 'skipped'
   reason: string
 }
@@ -953,6 +961,7 @@ export type AnnualAdjustmentApplyResult = {
   housingMissingLogPath?: string
   salaryApplied: number
   integratedApplied: number
+  integratedInserted?: number
   integratedManualCount: number
   warnings: string[]
 }

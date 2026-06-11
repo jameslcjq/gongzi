@@ -4,7 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type {
   AnnualAdjustmentApplyResult,
   AnnualAdjustmentFilePick,
-  AnnualAdjustmentPreview,
+  AnnualAdjustmentPreviewInput,
+  AnnualAdjustmentSourceRow,
   ImportWatcherStatus,
   PersonalTaxImportGenerateResult,
   SocialInsuranceBaseExportResult
@@ -26,7 +27,6 @@ const emit = defineEmits<{
 }>()
 
 const taxTemplateFile = ref<AnnualAdjustmentFilePick | null>(null)
-const preview = ref<AnnualAdjustmentPreview | null>(null)
 const result = ref<AnnualAdjustmentApplyResult | null>(null)
 const taxResult = ref<PersonalTaxImportGenerateResult | null>(null)
 const socialBaseTemplateFile = ref<AnnualAdjustmentFilePick | null>(null)
@@ -80,15 +80,11 @@ const selectedSocialBaseFields = ref<string[]>([...selectedIncomeFields.value])
 
 const detectedFiles = computed(() => props.importWatcher?.annualAdjustment)
 
-const canPreview = computed(
+const canUpdateInsurance = computed(
   () =>
     Boolean(detectedFiles.value?.salaryWorkbookPath) &&
     (Boolean(detectedFiles.value?.housingAccountWorkbookPath) ||
       Boolean(detectedFiles.value?.insuranceDetailWorkbookPaths.length))
-)
-
-const blockedRows = computed(
-  () => preview.value?.sourceRows.filter((row) => row.status !== 'matched') ?? []
 )
 
 async function chooseTaxTemplateFile() {
@@ -113,67 +109,77 @@ async function chooseSocialBaseTemplateFile() {
   }
 }
 
-function buildInput() {
+function buildInput(): AnnualAdjustmentPreviewInput {
   const files = detectedFiles.value
   if (!files?.salaryWorkbookPath) throw new Error('监控文件夹未检测到工资表')
   return {
     salaryWorkbookPath: files.salaryWorkbookPath,
     housingAccountWorkbookPath: files.housingAccountWorkbookPath,
-    insuranceDetailWorkbookPaths: files.insuranceDetailWorkbookPaths
-  }
-}
-
-async function runPreview() {
-  adjustmentLoading.value = true
-  result.value = null
-  try {
-    preview.value = await window.salaryApi.previewAnnualAdjustment(buildInput())
-    ElMessage.success('预览完成')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '预览失败')
-  } finally {
-    adjustmentLoading.value = false
+    insuranceDetailWorkbookPaths: [...files.insuranceDetailWorkbookPaths]
   }
 }
 
 async function applyAdjustment() {
-  if (!preview.value) await runPreview()
-  if (!preview.value) return
-
-  const changeCount = preview.value.summary.integratedChangeCount
-  const manualCount = preview.value.summary.integratedManualCount
-  let confirmIntegratedWriteBack = false
-  if (changeCount > 0) {
-    try {
-      await ElMessageBox.confirm(
-        `将回写在职工资 ${changeCount} 项差异。${manualCount ? `另有 ${manualCount} 项需人工判断，不会自动回写。` : ''}`,
-        '确认回写在职工资',
-        {
-          confirmButtonText: '确认回写',
-          cancelButtonText: '只生成工资表',
-          type: 'warning',
-          distinguishCancelAndClose: true
-        }
-      )
-      confirmIntegratedWriteBack = true
-    } catch (error) {
-      if ((error as string) !== 'cancel') return
-    }
-  }
-
   adjustmentLoading.value = true
+  result.value = null
   try {
+    const input = buildInput()
+    const confirmed = await confirmNameIdCardMismatches(input)
+    if (!confirmed) return
     const next = await window.salaryApi.applyAnnualAdjustment({
-      ...buildInput(),
-      confirmIntegratedWriteBack
+      ...input,
+      confirmIntegratedWriteBack: true,
+      confirmNameIdCardMismatch: confirmed === 'confirmed'
     })
     result.value = next
     ElMessage.success(next.message)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '执行失败')
+    ElMessage.error(error instanceof Error ? error.message : '更新五险一金失败')
   } finally {
     adjustmentLoading.value = false
   }
+}
+
+async function confirmNameIdCardMismatches(
+  input: AnnualAdjustmentPreviewInput
+): Promise<'none' | 'confirmed' | false> {
+  const preview = await window.salaryApi.previewAnnualAdjustment(input)
+  const conflicts = (preview.sourceRows as AnnualAdjustmentSourceRow[]).filter(
+    isConfirmableNameIdCardMismatch
+  )
+  if (conflicts.length === 0) return 'none'
+  const examples = conflicts
+    .slice(0, 10)
+    .map((row: AnnualAdjustmentSourceRow) =>
+      `- ${row.name}：来源身份证 ${row.idCard}，工资表身份证 ${row.targetIdCard || '未识别'}，${row.fieldName} ${formatMoney(row.amount)}（${row.sourceFile} 第 ${row.rowNumber} 行）`
+    )
+    .join('\n')
+  const more = conflicts.length > 10 ? `\n...还有 ${conflicts.length - 10} 条` : ''
+  try {
+    await ElMessageBox.confirm(
+      `发现 ${conflicts.length} 条五险一金明细与工资表同名但身份证不同。确认后本次会按工资表唯一同名人员写入明细金额；不会修改原始身份证号。\n\n${examples}${more}`,
+      '确认身份匹配',
+      {
+        type: 'warning',
+        confirmButtonText: '确认并继续',
+        cancelButtonText: '先不继续'
+      }
+    )
+    return 'confirmed'
+  } catch {
+    return false
+  }
+}
+
+function isConfirmableNameIdCardMismatch(row: AnnualAdjustmentSourceRow): boolean {
+  return row.status === 'id-conflict' && row.reason.includes('需人工确认')
+}
+
+function formatMoney(value: number): string {
+  return Number(value || 0).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
 }
 
 async function generateTaxImport() {
@@ -186,7 +192,7 @@ async function generateTaxImport() {
     const next = await window.salaryApi.generatePersonalTaxImport({
       templateWorkbookPath:
         taxTemplateFile.value?.filePath ?? detectedFiles.value?.taxTemplateWorkbookPath,
-      incomeFields: selectedIncomeFields.value
+      incomeFields: [...selectedIncomeFields.value]
     })
     taxResult.value = next
     ElMessage.success(`已生成个税导入文件：${next.rowCount} 人`)
@@ -207,7 +213,7 @@ async function generateSocialInsuranceBase() {
     const next = await window.salaryApi.exportSocialInsuranceBase({
       templateWorkbookPath:
         socialBaseTemplateFile.value?.filePath ?? detectedFiles.value?.socialBaseTemplateWorkbookPath,
-      baseFields: selectedSocialBaseFields.value
+      baseFields: [...selectedSocialBaseFields.value]
     })
     socialBaseResult.value = next
     ElMessage.success(`已生成社保基数导出文件：${next.rowCount} 人`)
@@ -225,14 +231,14 @@ async function openPath(path?: string) {
 
 async function pushAnnualAdjustmentToIntegrated() {
   if (!result.value?.salaryImportPath) {
-    ElMessage.warning('没有可推送的年初调整工资导入文件')
+    ElMessage.warning('没有可推送的五险一金工资导入文件')
     return
   }
   pushingAnnualAdjustment.value = true
   try {
     const monthPrompt = await ElMessageBox.prompt(
-      '请输入年初调整导入对应的一体化月份，例如 1',
-      '年初调整导入月份',
+      '请输入五险一金导入对应的一体化月份，例如 1',
+      '五险一金导入月份',
       {
         confirmButtonText: '开始推送',
         cancelButtonText: '取消',
@@ -251,17 +257,17 @@ async function pushAnnualAdjustmentToIntegrated() {
         fileName: file.fileName,
         fileSize: file.size,
         month,
-        label: `年初调整 ${result.value.salaryApplied} 人`
+        label: `五险一金 ${result.value.salaryApplied} 人`
       }
     ]
     pendingPushQueue.value = steps
-    ElMessage.info('已准备年初调整推送，正在跳转到“一体化对接”...')
+    ElMessage.info('已准备五险一金推送，正在跳转到“一体化对接”...')
     requestSwitchToIntegration()
   } catch (error) {
     const action = (error as { action?: string; message?: string } | undefined)?.action
     const message = (error as { message?: string } | undefined)?.message
     if (error === 'cancel' || action === 'cancel' || action === 'close' || message === 'cancel') return
-    ElMessage.error(error instanceof Error ? error.message : '年初调整推送失败')
+    ElMessage.error(error instanceof Error ? error.message : '五险一金推送失败')
   } finally {
     pushingAnnualAdjustment.value = false
   }
@@ -273,12 +279,11 @@ async function pushAnnualAdjustmentToIntegrated() {
     <header class="annual-header">
       <div>
         <h1>社保个税</h1>
-        <p>按列名处理公积金、五险和个税导入，写回一体化前会先确认。</p>
+        <p>按工资表人员匹配五险一金个人缴纳部分，并同步更新本地在职工资。</p>
       </div>
       <div class="annual-actions">
-        <el-button :disabled="!canPreview" :loading="adjustmentLoading" @click="runPreview">预览</el-button>
-        <el-button type="primary" :disabled="!canPreview" :loading="adjustmentLoading" @click="applyAdjustment">
-          执行
+        <el-button type="primary" :disabled="!canUpdateInsurance" :loading="adjustmentLoading" @click="applyAdjustment">
+          更新五险一金
         </el-button>
       </div>
     </header>
@@ -321,17 +326,6 @@ async function pushAnnualAdjustmentToIntegrated() {
             {{ fileName }}
           </span>
         </div>
-      </section>
-
-      <section class="annual-panel">
-        <h2>预览</h2>
-        <div v-if="preview" class="summary-grid">
-          <div><strong>{{ preview.summary.salaryPeople }}</strong><span>工资表人数</span></div>
-          <div><strong>{{ preview.summary.housingAccountRows }}</strong><span>公积金账号</span></div>
-          <div><strong>{{ preview.summary.matchedInsuranceRows }}</strong><span>五险匹配</span></div>
-          <div><strong>{{ preview.summary.integratedChangeCount }}</strong><span>一体化差异</span></div>
-        </div>
-        <el-empty v-else description="监控文件夹检测到来源后先预览" :image-size="80" />
       </section>
     </div>
 
@@ -428,31 +422,6 @@ async function pushAnnualAdjustmentToIntegrated() {
       </div>
     </section>
 
-    <section v-if="preview" class="annual-panel annual-wide">
-      <h2>在职工资确认项</h2>
-      <el-table :data="preview.integratedChanges" size="small" border max-height="260">
-        <el-table-column prop="name" label="姓名" width="110" />
-        <el-table-column prop="idCard" label="证件号码" width="190" />
-        <el-table-column prop="fieldName" label="字段" width="120" />
-        <el-table-column prop="targetValue" label="当前" width="100" />
-        <el-table-column prop="sourceValue" label="写入" width="100" />
-        <el-table-column prop="reason" label="规则" show-overflow-tooltip />
-      </el-table>
-    </section>
-
-    <section v-if="blockedRows.length" class="annual-panel annual-wide">
-      <h2>未写入工资表的五险明细</h2>
-      <el-table :data="blockedRows" size="small" border max-height="240">
-        <el-table-column prop="sourceFile" label="来源文件" width="260" show-overflow-tooltip />
-        <el-table-column prop="rowNumber" label="行" width="70" />
-        <el-table-column prop="name" label="姓名" width="110" />
-        <el-table-column prop="idCard" label="证件号码" width="190" />
-        <el-table-column prop="rate" label="费率" width="80" />
-        <el-table-column prop="amount" label="金额" width="100" />
-        <el-table-column prop="reason" label="原因" show-overflow-tooltip />
-      </el-table>
-    </section>
-
     <section v-if="result" class="annual-panel annual-wide">
       <h2>输出</h2>
       <div class="output-list">
@@ -466,7 +435,7 @@ async function pushAnnualAdjustmentToIntegrated() {
           :loading="pushingAnnualAdjustment"
           @click="pushAnnualAdjustmentToIntegrated"
         >
-          推送年初调整
+          推送五险一金
         </el-button>
         <button v-if="result.housingDeclarationPath" @click="openPath(result.housingDeclarationPath)">
           公积金申报：{{ result.housingDeclarationPath }}
@@ -510,7 +479,7 @@ async function pushAnnualAdjustmentToIntegrated() {
 
 .annual-grid {
   display: grid;
-  grid-template-columns: minmax(380px, 1.2fr) minmax(320px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -578,27 +547,6 @@ async function pushAnnualAdjustmentToIntegrated() {
   gap: 6px;
   margin-top: 10px;
   font-size: 13px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.summary-grid div {
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 12px;
-}
-
-.summary-grid strong {
-  display: block;
-  font-size: 22px;
-}
-
-.summary-grid span {
-  color: #64748b;
 }
 
 .income-fields {

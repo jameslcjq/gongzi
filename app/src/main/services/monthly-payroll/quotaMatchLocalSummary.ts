@@ -1,5 +1,6 @@
 import type { SalaryQuotaMatchLocalSummary } from '../../../shared/types'
 import {
+  loadActiveActualPayTotalsByBatch,
   loadIntegratedActiveAggregates,
   loadIntegratedSimpleAggregates,
   loadTraffic002Total
@@ -31,13 +32,15 @@ const EMPTY_SUMMARY: SalaryQuotaMatchLocalSummary = {
 export async function computeSalaryQuotaMatchLocalSummary(): Promise<SalaryQuotaMatchLocalSummary> {
   try {
     const now = new Date()
-    const [active, retired, other, traffic002Total, runs] = await Promise.all([
-      loadIntegratedActiveAggregates({ batchCode: '001' }),
-      loadIntegratedSimpleAggregates('退休工资'),
-      loadIntegratedSimpleAggregates('其他工资'),
-      loadTraffic002Total(),
-      listMonthlyPayrollRuns()
-    ])
+    const [active, retired, other, traffic002Total, runs, activeBatchActualPayTotals] =
+      await Promise.all([
+        loadIntegratedActiveAggregates({ batchCode: '001' }),
+        loadIntegratedSimpleAggregates('退休工资'),
+        loadIntegratedSimpleAggregates('其他工资'),
+        loadTraffic002Total(),
+        listMonthlyPayrollRuns(),
+        loadActiveActualPayTotalsByBatch()
+      ])
     // 实发合计 = 在职实发 + 遗补实发 + 退休房补实发，取当月最新且未过期的报账记录（与历史报表口径一致）。
     const currentRun = runs.find(
       (run) => run.year === now.getFullYear() && run.month === now.getMonth() + 1 && !run.isOutdated
@@ -58,7 +61,8 @@ export async function computeSalaryQuotaMatchLocalSummary(): Promise<SalaryQuota
       retiredActualPayTotal: retired.实发合计,
       otherActualPayTotal: other.实发合计,
       actualPayTotal,
-      traffic002Total
+      traffic002Total,
+      activeBatchActualPayTotals
     }
   } catch (error) {
     return {

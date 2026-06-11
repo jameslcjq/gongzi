@@ -194,6 +194,200 @@ export function buildPushVoucherScript(
     return !!findVoucherWindow(win)
   }
 
+  function shortText(value, limit) {
+    var text = String(value || '').replace(/\\s+/g, ' ').trim()
+    var max = limit || 260
+    return text.length > max ? text.slice(0, max) + '...' : text
+  }
+
+  function cloneImportParam() {
+    return {
+      modelType: IMPORT_PARAM.modelType,
+      displayMode: IMPORT_PARAM.displayMode,
+      currentModelId: IMPORT_PARAM.currentModelId,
+      incrementFlag: IMPORT_PARAM.incrementFlag
+    }
+  }
+
+  function isLikelyModelId(value) {
+    var text = String(value || '').trim()
+    return /^[0-9a-f]{32}$/i.test(text) && text !== MENUID
+  }
+
+  function addModelCandidate(list, seen, value, source) {
+    var id = String(value || '').trim()
+    if (!isLikelyModelId(id) || seen[id]) return
+    seen[id] = true
+    list.push({ id: id, source: source || 'unknown' })
+  }
+
+  function addModelCandidatesFromText(list, seen, value, source) {
+    var text = String(value || '')
+    if (!text) return
+    var patterns = [
+      /currentModelId[^0-9a-f]{1,40}([0-9a-f]{32})/ig,
+      /current_model_id[^0-9a-f]{1,40}([0-9a-f]{32})/ig,
+      /modelId[^0-9a-f]{1,40}([0-9a-f]{32})/ig,
+      /model_id[^0-9a-f]{1,40}([0-9a-f]{32})/ig,
+      /templateId[^0-9a-f]{1,40}([0-9a-f]{32})/ig,
+      /template_id[^0-9a-f]{1,40}([0-9a-f]{32})/ig
+    ]
+    for (var pi = 0; pi < patterns.length; pi++) {
+      var re = patterns[pi]
+      var match
+      while ((match = re.exec(text))) {
+        addModelCandidate(list, seen, match[1], source)
+      }
+    }
+  }
+
+  function scanObjectForModelId(obj, source, list, seen, visited, depth) {
+    if (!obj || depth > 2) return
+    try {
+      if (visited.indexOf(obj) >= 0) return
+      visited.push(obj)
+    } catch (e) { return }
+    var keys = []
+    try { keys = Object.keys(obj).slice(0, 500) } catch (e) { return }
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
+      var keyNorm = String(key || '').toLowerCase()
+      var interested = keyNorm.indexOf('model') >= 0 ||
+        keyNorm.indexOf('template') >= 0 ||
+        keyNorm.indexOf('import') >= 0
+      if (!interested && depth > 0) continue
+      var value
+      try { value = obj[key] } catch (e) { continue }
+      if (interested && (typeof value === 'string' || typeof value === 'number')) {
+        addModelCandidate(list, seen, value, source + '.' + key)
+        addModelCandidatesFromText(list, seen, value, source + '.' + key)
+      } else if (value && typeof value === 'object') {
+        scanObjectForModelId(value, source + '.' + key, list, seen, visited, depth + 1)
+      }
+    }
+  }
+
+  function scanWindowForModelIds(win, label, list, seen, visitedWins) {
+    try {
+      if (!win || visitedWins.indexOf(win) >= 0) return
+      visitedWins.push(win)
+    } catch (e) { return }
+
+    try {
+      var doc = win.document
+      if (doc) {
+        var nodes = Array.prototype.slice.call(
+          doc.querySelectorAll('input,select,option,textarea,[data-model-id],[data-current-model-id],[data-template-id],[modelid],[currentmodelid]')
+        ).slice(0, 800)
+        nodes.forEach(function (el) {
+          try {
+            var attrs = Array.prototype.slice.call(el.attributes || [])
+            attrs.forEach(function (attr) {
+              var name = String(attr.name || '').toLowerCase()
+              if (name.indexOf('model') >= 0 || name.indexOf('template') >= 0 || name.indexOf('import') >= 0) {
+                addModelCandidate(list, seen, attr.value, label + '.dom@' + attr.name)
+                addModelCandidatesFromText(list, seen, attr.value, label + '.dom@' + attr.name)
+              }
+            })
+            addModelCandidate(list, seen, el.value, label + '.dom.value')
+          } catch (e) {}
+        })
+        addModelCandidatesFromText(list, seen, doc.documentElement && doc.documentElement.innerHTML, label + '.html')
+      }
+    } catch (e) {}
+
+    try {
+      ;[win.sessionStorage, win.localStorage].forEach(function (store, storeIndex) {
+        if (!store) return
+        var storeName = storeIndex === 0 ? 'sessionStorage' : 'localStorage'
+        for (var i = 0; i < Math.min(store.length, 200); i++) {
+          var key = store.key(i)
+          var value = key ? store.getItem(key) : ''
+          addModelCandidatesFromText(list, seen, key + '=' + value, label + '.' + storeName + '.' + key)
+        }
+      })
+    } catch (e) {}
+
+    scanObjectForModelId(win, label + '.window', list, seen, [], 0)
+
+    try {
+      for (var i = 0; i < win.frames.length; i++) {
+        scanWindowForModelIds(win.frames[i], label + '>frame[' + i + ']', list, seen, visitedWins)
+      }
+    } catch (e) {}
+  }
+
+  async function fetchTextWithTimeout(fetchFn, win, url, timeoutMs) {
+    var controller = null
+    var timer = null
+    try {
+      controller = win && win.AbortController ? new win.AbortController() : null
+      timer = controller ? setTimeout(function () { try { controller.abort() } catch (e) {} }, timeoutMs || 5000) : null
+      var res = await fetchFn(url, {
+        method: 'GET',
+        credentials: 'include',
+        signal: controller ? controller.signal : undefined
+      })
+      return await res.text()
+    } catch (e) {
+      return ''
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  function addImportAttempt(list, seen, param, source) {
+    var key = JSON.stringify(param)
+    if (seen[key]) return
+    seen[key] = true
+    list.push({ param: param, source: source || 'default' })
+  }
+
+  async function buildImportParamAttempts(execWin, fetchFn) {
+    var modelCandidates = []
+    var modelSeen = {}
+    scanWindowForModelIds(execWin, 'voucher', modelCandidates, modelSeen, [])
+
+    var importHtml = await fetchTextWithTimeout(
+      fetchFn,
+      execWin,
+      '/gld-web/gl/html/common/Import.html?modelType=29&mode=0&menuid=' + MENUID,
+      5000
+    )
+    addModelCandidatesFromText(modelCandidates, modelSeen, importHtml, 'Import.html')
+
+    var attempts = []
+    var attemptSeen = {}
+    for (var i = 0; i < modelCandidates.length && attempts.length < 5; i++) {
+      var detected = cloneImportParam()
+      detected.currentModelId = modelCandidates[i].id
+      addImportAttempt(attempts, attemptSeen, detected, modelCandidates[i].source)
+    }
+    addImportAttempt(attempts, attemptSeen, cloneImportParam(), '内置默认')
+    var withoutModel = cloneImportParam()
+    delete withoutModel.currentModelId
+    addImportAttempt(attempts, attemptSeen, withoutModel, '不指定模板ID')
+    return attempts
+  }
+
+  async function postVoucherImport(fetchFn, FormDataCtor, file, param) {
+    var formData = new FormDataCtor()
+    formData.append('file', file, FILE_NAME)
+    formData.append('param', JSON.stringify(param))
+    var url = '/gld-account-server/importAccount/gl_import_file_json?menuid=' + MENUID
+    var res = await fetchFn(url, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    })
+    if (!res.ok) throw new Error('gl_import_file_json HTTP ' + res.status)
+    var text = ''
+    try { text = await res.text() } catch (e) { text = '' }
+    var json
+    try { json = text ? JSON.parse(text) : null } catch (e) { json = null }
+    return { json: json, text: text }
+  }
+
   async function waitForVoucherPage(root, timeoutMs) {
     var deadline = Date.now() + (timeoutMs || 60000)
     while (Date.now() < deadline) {
@@ -313,33 +507,44 @@ export function buildPushVoucherScript(
       // 旧浏览器 File 构造可能不支持，直接用 blob
       file = blob
     }
-    var formData = new FormDataCtor()
-    formData.append('file', file, FILE_NAME)
-    formData.append('param', JSON.stringify(IMPORT_PARAM))
+    var attempts = await buildImportParamAttempts(execWin, fetchFn)
+    status('凭证导入模板候选：' + attempts.map(function (item) {
+      return (item.param.currentModelId || '无模板ID') + '（' + item.source + '）'
+    }).join('；'))
 
-    var url = '/gld-account-server/importAccount/gl_import_file_json?menuid=' + MENUID
-    status('⏳ 上传中（服务端处理可能需要 20-30 秒）...')
-
-    var res = await fetchFn(url, {
-      method: 'POST',
-      credentials: 'include',
-      body: formData
-    })
-    if (!res.ok) throw new Error('gl_import_file_json HTTP ' + res.status)
     var text = ''
-    try { text = await res.text() } catch (e) { text = '' }
-    var json
-    try { json = text ? JSON.parse(text) : null } catch (e) { json = null }
+    var json = null
+    var usedImportParam = null
+    var lastImportError = ''
+    for (var ai = 0; ai < attempts.length; ai++) {
+      var attempt = attempts[ai]
+      var modelLabel = attempt.param.currentModelId || '无模板ID'
+      status('⏳ 上传中（服务端处理可能需要 20-30 秒）... 模板ID：' + modelLabel + '，尝试 ' + (ai + 1) + '/' + attempts.length)
+      var posted = await postVoucherImport(fetchFn, FormDataCtor, file, attempt.param)
+      text = posted.text
+      json = posted.json
 
-    if (!json && /^\\s*</.test(text || '')) {
-      throw new Error('凭证导入接口返回了页面内容，不是导入结果。请确认已停在“凭证录入”页面后重试。')
-    }
-    if (!json) {
-      throw new Error('凭证导入接口没有返回可识别的导入结果。')
-    }
+      if (!json && /^\\s*</.test(text || '')) {
+        throw new Error('凭证导入接口返回了页面内容，不是导入结果。请确认已停在“凭证录入”页面后重试。')
+      }
+      if (!json) {
+        throw new Error('凭证导入接口没有返回可识别的导入结果。一体化返回：' + shortText(text))
+      }
 
-    if (json && json.status_code && String(json.status_code) !== '200' && String(json.status_code) !== '0000') {
-      throw new Error('凭证导入失败：' + (json.reason || json.message || JSON.stringify(json)))
+      if (json && json.status_code && String(json.status_code) !== '200' && String(json.status_code) !== '0000') {
+        var reason = json.reason || json.message || JSON.stringify(json)
+        lastImportError = '凭证导入失败：' + reason + '；模板ID=' + modelLabel + '；一体化返回：' + shortText(JSON.stringify(json))
+        if (/获取导入模板失败|模板/.test(String(reason)) && ai < attempts.length - 1) {
+          status('⚠ 模板ID不可用：' + modelLabel + '，改用下一种参数 ...', 'warn')
+          continue
+        }
+        throw new Error(lastImportError)
+      }
+      usedImportParam = attempt.param
+      break
+    }
+    if (!usedImportParam) {
+      throw new Error(lastImportError || '凭证导入失败：所有模板参数均未成功')
     }
 
     // 解析一体化返回的导入明细（不同版本字段名不一，做容错）：
@@ -370,11 +575,14 @@ export function buildPushVoucherScript(
     if ((okCount !== null && okCount <= 0) || (failCount !== null && failCount > 0)) {
       throw new Error(
         '凭证导入未真正成功：' + (detailText || '一体化返回成功 0 条 / 存在失败行') +
+        '\\n模板ID：' + (usedImportParam.currentModelId || '无模板ID') +
         '\\n一体化返回：' + rawText
       )
     }
 
-    status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\\n' + detailText : '') + '\\n一体化返回：' + rawText, 'ok')
+    status('✅ 凭证导入完成：' + RUN_LABEL + (detailText ? '\\n' + detailText : '') +
+      '\\n模板ID：' + (usedImportParam.currentModelId || '无模板ID') +
+      '\\n一体化返回：' + rawText, 'ok')
     clearStatusLater(12000)
     return { ok: true, response: json, trace: TRACE, traceText: TRACE.join('\\n') }
   } catch (error) {

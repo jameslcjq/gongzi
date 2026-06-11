@@ -46,6 +46,58 @@ export function buildRecorderInstallScript(sessionId = ''): string {
     } catch (e) {}
   }
 
+  function isFormDataLike(value) {
+    try {
+      return value && typeof value.entries === 'function' && String(value) === '[object FormData]'
+    } catch (e) {
+      return false
+    }
+  }
+
+  function describeBodyValue(value) {
+    try {
+      if (value && typeof File !== 'undefined' && value instanceof File) {
+        return {
+          kind: 'file',
+          name: value.name || '',
+          size: value.size || 0,
+          type: value.type || ''
+        }
+      }
+      if (value && typeof Blob !== 'undefined' && value instanceof Blob) {
+        return {
+          kind: 'blob',
+          size: value.size || 0,
+          type: value.type || ''
+        }
+      }
+    } catch (e) {}
+    if (value === null || value === undefined) return ''
+    return String(value).slice(0, MAX_PREVIEW)
+  }
+
+  function serializeRequestBody(body) {
+    try {
+      if (!body) return null
+      if (isFormDataLike(body)) {
+        const fields = []
+        body.forEach(function (value, key) {
+          fields.push({ name: String(key || ''), value: describeBodyValue(value) })
+        })
+        return { kind: 'formData', fields: fields }
+      }
+      if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+        return { kind: 'urlSearchParams', text: String(body).slice(0, MAX_PREVIEW) }
+      }
+      if (typeof Blob !== 'undefined' && body instanceof Blob) {
+        return describeBodyValue(body)
+      }
+      return { kind: typeof body, text: String(body).slice(0, MAX_PREVIEW) }
+    } catch (e) {
+      return { kind: 'unreadable', error: String((e && e.message) || e) }
+    }
+  }
+
   if (window.__exportRecorderInstalled) {
     pushNavigationOnce()
     return { ok: true, alreadyInstalled: true, frameUrl: location.href }
@@ -60,7 +112,7 @@ export function buildRecorderInstallScript(sessionId = ''): string {
       const method = ((init && init.method) || (typeof input === 'object' && input && input.method) || 'GET').toUpperCase()
       let reqBody = null
       try {
-        if (init && init.body) reqBody = String(init.body).slice(0, MAX_PREVIEW)
+        if (init && init.body) reqBody = serializeRequestBody(init.body)
       } catch (e) {}
       const t0 = Date.now()
       return orig.apply(this, arguments).then(
@@ -114,7 +166,7 @@ export function buildRecorderInstallScript(sessionId = ''): string {
       const self = this
       let reqBody = null
       try {
-        if (body) reqBody = String(body).slice(0, MAX_PREVIEW)
+        if (body) reqBody = serializeRequestBody(body)
       } catch (e) {}
       this.addEventListener('loadend', function () {
         let respText = ''

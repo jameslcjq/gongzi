@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260611k-salary-quota-match-dep-display-probe'
+  var VERSION = '20260611l-salary-quota-match-batch-crosscheck'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -164,6 +164,21 @@ export function buildSalaryQuotaMatchScript(
     }
     pageTotal = roundMoney(pageTotal)
     var traffic002 = roundMoney(ls.traffic002Total || 0)
+    // A4 批次交叉校验：002 批次按行实际批次编码汇总的实发合计，应当恰好等于 002 交通费合计。
+    // 两数岔开 = 002 批次里混入了交通费以外的项目，"实发合计 − 002交通费"的口径失真，必须停。
+    var batchTotals = ls.activeBatchActualPayTotals
+    if (batchTotals && typeof batchTotals === 'object') {
+      var batch002Actual = roundMoney(batchTotals['002'] || 0)
+      if (!moneyEquals(batch002Actual, traffic002)) {
+        return {
+          ok: false,
+          message:
+            '前置批次校验未通过，已停止自动匹配：\\n002 批次实发合计：' + formatAmount(batch002Actual) +
+            '\\n002 批次交通费合计：' + formatAmount(traffic002) +
+            '\\n两者不一致，说明 002 数币批次包含交通费以外的项目，请人工核对本月工资数据后再匹配。'
+        }
+      }
+    }
     var expected = roundMoney(ls.actualPayTotal - traffic002)
     if (!moneyEquals(pageTotal, expected)) {
       return {

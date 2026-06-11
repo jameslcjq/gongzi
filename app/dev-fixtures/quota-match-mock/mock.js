@@ -23,6 +23,8 @@
     retiredBackpayTotal: 6800,
     retiredActualPayTotal: 6800,
     otherActualPayTotal: 0,
+    // A4 批次交叉校验：002 实发合计须等于 002 交通费合计（本页无数币批次，均为 0）
+    activeBatchActualPayTotals: { '001': 493157.98, '002': 0 },
     message: '仿真页内置汇总'
   }
   try {

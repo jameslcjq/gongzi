@@ -4,13 +4,20 @@ import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import * as XLSX from 'xlsx'
-import { all, getDatabase, run } from '../db/connection'
+import { all, getDatabase, refreshAllPersonnelStatuses, run, runWithLastId } from '../db/connection'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import { readUnitSettings } from './unitSettings'
 import { getWorksheetByName, tableNameOf } from './worksheetTable'
 import { getDataPath, getMonthlyOutputPath } from '../config/paths'
 import { parseSalaryWorkbook } from './monthly-payroll/monthlyPayrollParsers'
 import { writeSalaryImportWorkbook } from './monthly-payroll/salaryImportWorkbook'
+import { readMonthlyPayrollSettings } from './monthly-payroll/monthlyPayrollSettings'
+import {
+  applyIntegratedComputedFieldsForUpdate,
+  applyIntegratedComputedFieldsToRows
+} from './monthly-payroll/integratedPayrollRules'
+import { activeBackpayAdjustmentTotals } from './monthly-payroll/salaryBackpayAdjustments'
+import type { PayrollPerson, SalarySummary } from './monthly-payroll/monthlyPayrollTypes'
 import type {
   AnnualAdjustmentApplyInput,
   AnnualAdjustmentApplyResult,
@@ -24,13 +31,15 @@ import type {
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
   SocialInsuranceBaseExportInput,
-  SocialInsuranceBaseExportResult
+  SocialInsuranceBaseExportResult,
+  WorksheetRecordValue
 } from '../../shared/types'
 
 type ReadSourcesResult = {
   unitName: string
   salaryRows: AnnualSalaryRow[]
   housingRows: AnnualHousingAccountRow[]
+  insuranceFiles: AnnualInsuranceFile[]
   insuranceRows: AnnualInsuranceSourceRow[]
 }
 
@@ -50,6 +59,8 @@ type AnnualHousingAccountRow = {
 
 type AnnualInsuranceSourceRow = {
   sourceFile: string
+  sourceIndex: number
+  sourceKind: AnnualInsuranceKind
   rowNumber: number
   idCard: string
   name: string
@@ -57,10 +68,33 @@ type AnnualInsuranceSourceRow = {
   amount: number
 }
 
+type AnnualInsuranceFile = {
+  sourceFile: string
+  sourceIndex: number
+}
+
+type AnnualInsuranceKind =
+  | 'pension'
+  | 'annuity'
+  | 'unemployment'
+  | 'medical-basic'
+  | 'medical-large'
+  | 'unknown'
+
 type AnnualSourcePerson = {
   idCard: string
   name: string
   values: Record<string, number>
+}
+
+type AnnualNameIdCardMismatch = {
+  sourceFile: string
+  rowNumber: number
+  name: string
+  idCard: string
+  targetIdCard: string
+  fieldName: string
+  amount: number
 }
 
 type IntegratedUpdate = {
@@ -76,6 +110,7 @@ type IntegratedPlan = {
   changes: IntegratedChange[]
   manual: AnnualIntegratedChangePreview[]
   missing: AnnualIntegratedChangePreview[]
+  existingRowCount: number
 }
 
 type PersonalTaxRow = {
@@ -93,15 +128,6 @@ type SocialInsuranceBaseRow = {
   idCard: string
   name: string
   base: number
-}
-
-const INSURANCE_RATE_FIELDS: Record<string, string> = {
-  // 社保明细文件用缴费比例表达项目，写回在职工资时必须转成一体化字段名。
-  '8%': '养老保险缴费',
-  '4%': '职业年金缴费',
-  '2%': '医疗保险',
-  '0.5%': '失业保险',
-  '100%': '医疗保险'
 }
 
 const INTEGRATED_FIELDS = ['公积金', '养老保险缴费', '职业年金缴费', '医疗保险', '失业保险']
@@ -180,7 +206,14 @@ export async function applyAnnualAdjustment(
 ): Promise<AnnualAdjustmentApplyResult> {
   validateAnnualInput(input)
   const sources = await readAnnualSources(input)
-  const prepared = prepareAnnualSources(sources)
+  const prepared = prepareAnnualSources(sources, {
+    confirmNameIdCardMismatch: Boolean(input.confirmNameIdCardMismatch)
+  })
+  if (prepared.nameIdCardMismatches.length > 0 && !input.confirmNameIdCardMismatch) {
+    throw new Error(
+      `发现 ${prepared.nameIdCardMismatches.length} 条同名但身份证不同的五险一金明细，需要人工确认后再继续。`
+    )
+  }
   const integratedPlan = await buildAnnualIntegratedPlan(prepared.people)
   const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
@@ -188,7 +221,7 @@ export async function applyAnnualAdjustment(
 
   const salaryOutputPath = join(
     outputDir,
-    `社保个税_${safeFileStem(input.salaryWorkbookPath)}_年初调整_${stamp}${extname(input.salaryWorkbookPath) || '.xlsx'}`
+    `社保个税_${safeFileStem(input.salaryWorkbookPath)}_五险一金_${stamp}${extname(input.salaryWorkbookPath) || '.xlsx'}`
   )
   const salaryApplied = await writeAnnualValuesToSalaryWorkbook({
     salaryWorkbookPath: input.salaryWorkbookPath,
@@ -196,11 +229,31 @@ export async function applyAnnualAdjustment(
     people: prepared.people
   })
 
+  let salaryImportSource: SalarySummary | undefined
+  const readUpdatedSalary = async (): Promise<SalarySummary> => {
+    salaryImportSource ??= await parseSalaryWorkbook(salaryOutputPath)
+    return salaryImportSource
+  }
+  validateUpdatedSalaryInsuranceTotals(prepared.people, await readUpdatedSalary())
+
+  let integratedApplied = 0
+  let integratedInserted = 0
+  let integratedUnitNameUpdated = 0
+  if (input.confirmIntegratedWriteBack) {
+    if (integratedPlan.existingRowCount === 0) {
+      integratedInserted = await seedIntegratedActiveFromSalarySummary(await readUpdatedSalary(), prepared.people)
+    } else {
+      await applyIntegratedPlan(integratedPlan)
+      integratedApplied = integratedPlan.changes.length
+      integratedUnitNameUpdated = await syncIntegratedUnitNameForPeople(prepared.people)
+    }
+  }
+
   let salaryImportPath: string | undefined
   const salaryImportWarnings: string[] = []
   try {
-    const salaryImportSource = await parseSalaryWorkbook(salaryOutputPath)
-    const candidatePath = join(outputDir, `社保个税_工资导入_年初调整_${stamp}.xls`)
+    const salaryImportSource = await readUpdatedSalary()
+    const candidatePath = join(outputDir, `社保个税_工资导入_五险一金_${stamp}.xls`)
     await writeSalaryImportWorkbook(candidatePath, salaryImportSource)
     salaryImportPath = candidatePath
   } catch (error) {
@@ -223,26 +276,30 @@ export async function applyAnnualAdjustment(
     housingMissingLogPath = housingOutput.missingLogPath
   }
 
-  let integratedApplied = 0
-  if (input.confirmIntegratedWriteBack) {
-    await applyIntegratedPlan(integratedPlan)
-    integratedApplied = integratedPlan.changes.length
+  const integratedMessages: string[] = []
+  if (integratedInserted) {
+    integratedMessages.push(`在职工资新增 ${integratedInserted} 人`)
+  } else {
+    if (integratedApplied) integratedMessages.push(`在职工资回写 ${integratedApplied} 项`)
+    if (integratedUnitNameUpdated) integratedMessages.push(`单位名称修正 ${integratedUnitNameUpdated} 行`)
   }
+  const integratedMessage = integratedMessages.length ? `，${integratedMessages.join('，')}` : ''
 
   return {
     ok: true,
-    message: `已生成年初调整工资表，工资表写回 ${salaryApplied} 人${integratedApplied ? `，在职工资回写 ${integratedApplied} 项` : ''}`,
+    message: `已更新五险一金工资表，工资表写回 ${salaryApplied} 人${integratedMessage}`,
     salaryOutputPath,
     salaryImportPath,
     housingDeclarationPath,
     housingMissingLogPath,
     salaryApplied,
     integratedApplied,
+    integratedInserted,
     integratedManualCount: integratedPlan.manual.length,
     warnings: [
       ...prepared.warnings,
       ...salaryImportWarnings,
-      ...buildMissingIntegratedWarnings(integratedPlan.missing),
+      ...(integratedInserted ? [] : buildMissingIntegratedWarnings(integratedPlan.missing)),
       ...(integratedPlan.manual.length
         ? [`在职工资有 ${integratedPlan.manual.length} 项需要人工判断，未自动回写`]
         : [])
@@ -610,57 +667,120 @@ function validateAnnualInput(input: AnnualAdjustmentPreviewInput): void {
 
 async function readAnnualSources(input: AnnualAdjustmentPreviewInput): Promise<ReadSourcesResult> {
   const script = buildReadSourcesScript(input)
-  const output = await runPowerShellScript(script, '读取年初调整来源表失败')
+  const output = await runPowerShellScript(script, '读取五险一金来源表失败')
   const jsonLine = output.trim().split(/\r?\n/).find((line) => line.trim().startsWith('{'))
-  if (!jsonLine) throw new Error('读取年初调整来源表失败：未返回数据')
+  if (!jsonLine) throw new Error('读取五险一金来源表失败：未返回数据')
   const result = JSON.parse(jsonLine) as ReadSourcesResult
-  if (!result.unitName) {
-    const settings = await readUnitSettings()
-    result.unitName = settings.unitFullName
-  }
+  const settings = await readUnitSettings()
+  result.unitName = settings.unitFullName || result.unitName || ''
+  const insuranceFiles = input.insuranceDetailWorkbookPaths.map((filePath, sourceIndex) => {
+    const sourceFile = basename(filePath)
+    return { sourceFile, sourceIndex }
+  })
+  const fileByIndex = new Map(insuranceFiles.map((file) => [file.sourceIndex, file]))
+  result.insuranceFiles = insuranceFiles
+  result.insuranceRows = (result.insuranceRows ?? []).map((row) => ({
+    ...row,
+    sourceFile: fileByIndex.get(row.sourceIndex)?.sourceFile ?? row.sourceFile,
+    idCard: normalizeIdCard(row.idCard),
+    rate: normalizeInsuranceRate(row.rate),
+    sourceKind: inferInsuranceKindFromRate(row.rate)
+  }))
   return result
 }
 
-function prepareAnnualSources(sources: ReadSourcesResult): {
+function prepareAnnualSources(
+  sources: ReadSourcesResult,
+  options: { confirmNameIdCardMismatch?: boolean } = {}
+): {
   people: AnnualSourcePerson[]
   sourceRows: AnnualAdjustmentSourceRow[]
   warnings: string[]
   housingByIdCard: Map<string, AnnualHousingAccountRow>
+  nameIdCardMismatches: AnnualNameIdCardMismatch[]
 } {
   const salaryById = new Map(sources.salaryRows.map((row) => [row.idCard, row]))
-  const salaryNameToId = new Map<string, string>()
+  const salaryRowsByName = new Map<string, AnnualSalaryRow[]>()
   for (const row of sources.salaryRows) {
-    if (row.name && row.idCard && !salaryNameToId.has(row.name)) salaryNameToId.set(row.name, row.idCard)
+    if (!row.name || !row.idCard) continue
+    const rows = salaryRowsByName.get(row.name) ?? []
+    rows.push(row)
+    salaryRowsByName.set(row.name, rows)
   }
 
   const housingByIdCard = new Map(sources.housingRows.map((row) => [row.idCard, row]))
   const sourceRows: AnnualAdjustmentSourceRow[] = []
   const warnings: string[] = []
+  const nameIdCardMismatches: AnnualNameIdCardMismatch[] = []
   const insuranceById = new Map<string, Record<string, number>>()
+  const hasLargeMedicalRows = sources.insuranceRows.some((row) => row.sourceKind === 'medical-large')
+  const basicMedicalMatchedIds = new Set<string>()
 
   for (const row of sources.insuranceRows) {
-    const fieldName = INSURANCE_RATE_FIELDS[row.rate]
-    const salaryRow = salaryById.get(row.idCard)
+    const fieldName = inferInsuranceField(row)
+    let salaryRow = salaryById.get(row.idCard)
+    let targetIdCard = row.idCard
+    let matchReason = ''
     if (!fieldName) {
-      warnings.push(`${row.sourceFile} 第 ${row.rowNumber} 行费率 ${row.rate || '空'} 未识别，已跳过`)
-      sourceRows.push({ ...row, fieldName: '未识别', status: 'skipped', reason: '费率未识别' })
+      warnings.push(`${row.sourceFile} 第 ${row.rowNumber} 行文件类型未识别，已跳过`)
+      sourceRows.push({ ...row, fieldName: '未识别', status: 'skipped', reason: '文件类型未识别' })
       continue
     }
     if (!salaryRow) {
-      const sameNameId = row.name ? salaryNameToId.get(row.name) : undefined
+      const sameNameRows = row.name ? salaryRowsByName.get(row.name) ?? [] : []
+      if (sameNameRows.length === 1) {
+        salaryRow = sameNameRows[0]
+        targetIdCard = salaryRow.idCard
+        nameIdCardMismatches.push({
+          sourceFile: row.sourceFile,
+          rowNumber: row.rowNumber,
+          name: row.name,
+          idCard: row.idCard,
+          targetIdCard,
+          fieldName,
+          amount: row.amount
+        })
+        if (!options.confirmNameIdCardMismatch) {
+          sourceRows.push({
+            ...row,
+            targetIdCard,
+            fieldName,
+            status: 'id-conflict',
+            reason: `身份证不一致，工资表唯一同名身份证为 ${targetIdCard}，需人工确认`
+          })
+          continue
+        }
+        matchReason = `身份证不一致，来源 ${row.idCard}，工资表 ${targetIdCard}，已人工确认按唯一姓名匹配`
+        warnings.push(`${row.sourceFile} 第 ${row.rowNumber} 行 ${row.name} 身份证不一致，已人工确认写入工资表身份证 ${targetIdCard}`)
+      }
+    }
+    if (!salaryRow) {
+      const sameNameRows = row.name ? salaryRowsByName.get(row.name) ?? [] : []
       sourceRows.push({
         ...row,
         fieldName,
-        status: sameNameId ? 'id-conflict' : 'missing',
-        reason: sameNameId ? `工资表同名人员身份证为 ${sameNameId}` : '工资表未找到该人员'
+        targetIdCard: sameNameRows.length === 1 ? sameNameRows[0].idCard : undefined,
+        status: sameNameRows.length ? 'id-conflict' : 'missing',
+        reason: sameNameRows.length
+          ? `工资表有 ${sameNameRows.length} 个同名人员，无法自动判断身份证`
+          : '工资表未找到该人员'
       })
       continue
     }
 
-    const values = insuranceById.get(row.idCard) ?? {}
+    const values = insuranceById.get(targetIdCard) ?? {}
     values[fieldName] = roundMoney((values[fieldName] ?? 0) + row.amount)
-    insuranceById.set(row.idCard, values)
-    sourceRows.push({ ...row, fieldName, status: 'matched', reason: '' })
+    insuranceById.set(targetIdCard, values)
+    if (row.sourceKind === 'medical-basic') basicMedicalMatchedIds.add(targetIdCard)
+    sourceRows.push({ ...row, fieldName, status: 'matched', reason: matchReason })
+  }
+
+  if (!hasLargeMedicalRows) {
+    for (const idCard of basicMedicalMatchedIds) {
+      const values = insuranceById.get(idCard) ?? {}
+      values['医疗保险'] = roundMoney((values['医疗保险'] ?? 0) + 5)
+      insuranceById.set(idCard, values)
+    }
   }
 
   const people: AnnualSourcePerson[] = sources.salaryRows.map((row) => ({
@@ -672,7 +792,48 @@ function prepareAnnualSources(sources: ReadSourcesResult): {
     }
   }))
 
-  return { people, sourceRows, warnings, housingByIdCard }
+  return { people, sourceRows, warnings, housingByIdCard, nameIdCardMismatches }
+}
+
+function inferInsuranceField(row: AnnualInsuranceSourceRow): string | undefined {
+  switch (row.sourceKind) {
+    case 'pension':
+      return '养老保险缴费'
+    case 'annuity':
+      return '职业年金缴费'
+    case 'unemployment':
+      return '失业保险'
+    case 'medical-basic':
+    case 'medical-large':
+      return '医疗保险'
+    default:
+      return undefined
+  }
+}
+
+function inferInsuranceKindFromRate(value: string): AnnualInsuranceKind {
+  switch (normalizeInsuranceRate(value)) {
+    case '8%':
+      return 'pension'
+    case '4%':
+      return 'annuity'
+    case '0.5%':
+      return 'unemployment'
+    case '2%':
+      return 'medical-basic'
+    case '100%':
+      return 'medical-large'
+    default:
+      return 'unknown'
+  }
+}
+
+function normalizeInsuranceRate(value: string): string {
+  const normalized = text(value).replace(/\s+/g, '')
+  const match = normalized.match(/^(\d+(?:\.\d+)?)%$/)
+  if (!match) return normalized
+  const rate = Number(match[1])
+  return Number.isFinite(rate) ? `${Number(rate.toFixed(4))}%` : normalized
 }
 
 function buildPreviewSummary(
@@ -691,6 +852,7 @@ function buildPreviewSummary(
     integratedManualCount: plan.manual.length,
     warnings: [
       ...prepared.warnings,
+      ...(plan.existingRowCount === 0 ? ['在职工资当前为空，执行更新时会按工资表人员直接写入在职工资。'] : []),
       ...buildMissingIntegratedWarnings(plan.missing)
     ]
   }
@@ -765,9 +927,33 @@ async function writeAnnualValuesToSalaryWorkbook(input: {
     outputPath: input.outputPath,
     values
   })
-  const output = await runPowerShellScript(script, '写回年初调整工资表失败')
+  const output = await runPowerShellScript(script, '写回五险一金工资表失败')
   const match = output.match(/applied=(\d+)/)
   return match ? Number(match[1]) : 0
+}
+
+function validateUpdatedSalaryInsuranceTotals(
+  people: AnnualSourcePerson[],
+  salary: SalarySummary
+): void {
+  const mappings: Array<[string, string, string]> = [
+    ['养老保险缴费', '养老保险', '养老保险'],
+    ['职业年金缴费', '职业年金', '职业年金'],
+    ['医疗保险', '医保大病统筹', '医疗保险'],
+    ['失业保险', '失业保险', '失业保险']
+  ]
+  const messages: string[] = []
+  for (const [sourceField, salarySummaryField, label] of mappings) {
+    if (!people.some((person) => Object.prototype.hasOwnProperty.call(person.values, sourceField))) continue
+    const expected = roundMoney(people.reduce((sum, person) => sum + num(person.values[sourceField]), 0))
+    const actual = roundMoney(num(salary.active[salarySummaryField]))
+    if (Math.abs(roundMoney(expected - actual)) >= 0.01) {
+      messages.push(`${label} 来源合计 ${expected.toFixed(2)} / 工资表合计 ${actual.toFixed(2)}`)
+    }
+  }
+  if (messages.length > 0) {
+    throw new Error(`五险一金写入后合计不一致：${messages.join('；')}`)
+  }
 }
 
 async function buildAnnualIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Promise<IntegratedPlan> {
@@ -780,6 +966,9 @@ async function buildAnnualIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Pr
   const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const database = await getDatabase()
   const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
+  if (rows.length === 0) {
+    return { changes: [], manual: [], missing: [], existingRowCount: 0 }
+  }
 
   const latestByIdBatch = new Map<string, Record<string, unknown>>()
   for (const row of rows) {
@@ -837,7 +1026,7 @@ async function buildAnnualIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Pr
       else manual.push(preview)
     }
   }
-  return { changes, manual, missing }
+  return { changes, manual, missing, existingRowCount: rows.length }
 }
 
 function buildMissingIntegratedWarnings(missing: AnnualIntegratedChangePreview[]): string[] {
@@ -851,7 +1040,7 @@ function buildMissingIntegratedWarnings(missing: AnnualIntegratedChangePreview[]
   const examples = people.slice(0, 8).map((item) => item.name ? `${item.name}(${item.idCard})` : item.idCard)
   const suffix = people.length > examples.length ? `，等 ${people.length} 人` : ''
   return [
-    `工资表有 ${people.length} 人按身份证在在职工资中未找到，相关年初调整金额未自动回写。示例：${examples.join('、')}${suffix}`
+    `工资表有 ${people.length} 人按身份证在在职工资中未找到，相关五险一金金额未自动回写。示例：${examples.join('、')}${suffix}`
   ]
 }
 
@@ -888,6 +1077,190 @@ function decideIntegratedUpdate(
   }
 }
 
+const ACTIVE_SEED_FIELD_SOURCES: Array<[string, string[]]> = [
+  ['岗位工资', ['岗位工资']],
+  ['薪级工资', ['薪级工资']],
+  ['岗位津贴', ['岗位津贴']],
+  ['生活补贴', ['生活补贴']],
+  ['绩效工资', ['绩效工资']],
+  ['工作性津贴', ['工作性津贴']],
+  ['教（工）龄补贴', ['教（工）龄补贴']],
+  ['特岗性津补贴', ['特岗性津补贴']],
+  ['交通费', ['交通费']],
+  ['公车补贴', ['公车补贴']],
+  ['住房补贴', ['住房补贴']],
+  ['基础绩效奖', ['基础绩效奖', '基础性绩效工资']],
+  ['其他一', ['其他一']],
+  ['其他二', ['其他二']],
+  ['其他三', ['其他三']],
+  ['当月个人所得税', ['当月个人所得税']],
+  ['公积金', ['公积金']],
+  ['养老保险缴费', ['养老保险缴费']],
+  ['职业年金缴费', ['职业年金缴费']],
+  ['医疗保险', ['医疗保险']],
+  ['失业保险', ['失业保险']],
+  ['支出一', ['支出一']],
+  ['支出二', ['支出二']],
+  ['支出三', ['支出三']]
+]
+
+async function seedIntegratedActiveFromSalarySummary(
+  salary: SalarySummary,
+  sourcePeople: AnnualSourcePerson[]
+): Promise<number> {
+  if (salary.activePeople.length === 0) return 0
+  const worksheet = getWorksheetByName('在职工资')
+  const columns = getWorksheetLocalColumns(worksheet)
+  const table = tableNameOf(worksheet)
+  const database = await getDatabase()
+  const countRows = await all<{ total: number }>(database, `SELECT COUNT(*) AS total FROM ${table}`)
+  if ((countRows[0]?.total ?? 0) > 0) return 0
+
+  const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
+  const idColumn = fieldColumns.get('证件号码')
+  if (!idColumn) throw new Error('在职工资缺少证件号码字段')
+
+  const unitSettings = await readUnitSettings()
+  const salaryType = unitSettings.salaryExportSaltypes?.[0]
+  const sourceByIdCard = new Map(sourcePeople.map((person) => [person.idCard, person]))
+  const rows = salary.activePeople
+    .map((person, index) =>
+      buildIntegratedActiveSeedRow(person, index, fieldColumns, {
+        unitCode: unitSettings.unitImportCode,
+        unitName: unitSettings.unitFullName,
+        salaryTypeCode: salaryType?.saltype_id ?? '2',
+        salaryTypeName: salaryType?.saltype_name ?? '002事业',
+        source: sourceByIdCard.get(person.idCard)
+      })
+    )
+    .filter((row) => text(row[idColumn]))
+  if (rows.length === 0) return 0
+
+  const settings = await readMonthlyPayrollSettings()
+  applyIntegratedComputedFieldsToRows(worksheet, rows, settings.taxField)
+
+  const { lastId: batchId } = await runWithLastId(
+    database,
+    `INSERT INTO import_batches (source_name, worksheet_id, worksheet_name, status) VALUES (?, ?, ?, 'pending')`,
+    ['五险一金更新自动写入', worksheet.worksheetId, worksheet.name]
+  )
+
+  await run(database, 'BEGIN TRANSACTION')
+  let insertedRows = 0
+  try {
+    const now = new Date().toISOString()
+    const batchSize = 200
+    for (let batchStart = 0; batchStart < rows.length; batchStart += batchSize) {
+      const batch = rows.slice(batchStart, batchStart + batchSize)
+      const allColumnNames = Array.from(new Set(batch.flatMap((row) => Object.keys(row))))
+      const columnList = [...allColumnNames.map(quoteIdentifier), '"md_created_at"', '"md_updated_at"'].join(', ')
+      const singleRowPlaceholders = `(${[...allColumnNames.map(() => '?'), '?', '?'].join(', ')})`
+      const allPlaceholders = batch.map(() => singleRowPlaceholders).join(', ')
+      const params: unknown[] = []
+      for (const row of batch) {
+        for (const columnName of allColumnNames) params.push(row[columnName] ?? null)
+        params.push(now, now)
+      }
+      const { lastId } = await runWithLastId(
+        database,
+        `INSERT INTO ${table} (${columnList}) VALUES ${allPlaceholders}`,
+        params
+      )
+      const firstId = lastId - batch.length + 1
+      const rowPlaceholders = batch.map(() => '(?, ?, ?, ?, ?)').join(', ')
+      const rowParams: unknown[] = []
+      for (let index = 0; index < batch.length; index += 1) {
+        rowParams.push(batchId, worksheet.name, firstId + index, 'insert', null)
+      }
+      await run(
+        database,
+        `INSERT INTO import_batch_rows (batch_id, worksheet_name, record_id, action, previous_values) VALUES ${rowPlaceholders}`,
+        rowParams
+      )
+      insertedRows += batch.length
+    }
+
+    const message = `五险一金更新：在职工资为空，已按更新后的工资表新增 ${insertedRows} 人`
+    await run(
+      database,
+      `UPDATE import_batches SET status = 'imported', row_count = ?, message = ? WHERE id = ?`,
+      [insertedRows, message, batchId]
+    )
+    await run(
+      database,
+      `INSERT INTO import_logs (file_name, worksheet_name, ok, imported_rows, message, batch_id) VALUES (?, ?, 1, ?, ?, ?)`,
+      ['五险一金更新自动写入', worksheet.name, insertedRows, message, batchId]
+    )
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK')
+    await run(
+      database,
+      `UPDATE import_batches SET status = 'failed', message = ? WHERE id = ?`,
+      [error instanceof Error ? error.message : '五险一金写入在职工资失败', batchId]
+    )
+    throw error
+  }
+
+  await refreshAllPersonnelStatuses(database)
+  return insertedRows
+}
+
+function buildIntegratedActiveSeedRow(
+  person: PayrollPerson,
+  index: number,
+  fieldColumns: Map<string, string>,
+  defaults: {
+    unitCode: string
+    unitName: string
+    salaryTypeCode: string
+    salaryTypeName: string
+    source?: AnnualSourcePerson
+  }
+): Record<string, WorksheetRecordValue> {
+  const row: Record<string, WorksheetRecordValue> = {}
+  const assign = (fieldName: string, value: WorksheetRecordValue | undefined): void => {
+    const columnName = fieldColumns.get(fieldName)
+    if (!columnName || value === undefined) return
+    row[columnName] = value === '' ? null : value
+  }
+  const assignNumber = (fieldName: string, sourceNames: string[]): void => {
+    assign(fieldName, salaryPersonNumber(person, sourceNames))
+  }
+
+  const now = new Date()
+  assign('单位编码', defaults.unitCode)
+  assign('单位名称', defaults.unitName)
+  assign('工资类别编码', defaults.salaryTypeCode)
+  assign('工资类别名称', defaults.salaryTypeName)
+  assign('业务年度', now.getFullYear())
+  assign('月份', now.getMonth() + 1)
+  assign('姓名', person.name)
+  assign('证件号码', person.idCard)
+  assign('工资批次编码', '001')
+  assign('工资批次名称', '工资')
+  assign('部门内序号', num(person.values['序号']) || index + 1)
+  for (const [fieldName, sourceNames] of ACTIVE_SEED_FIELD_SOURCES) assignNumber(fieldName, sourceNames)
+  for (const fieldName of INTEGRATED_FIELDS) {
+    if (defaults.source && Object.prototype.hasOwnProperty.call(defaults.source.values, fieldName)) {
+      assign(fieldName, roundMoney(num(defaults.source.values[fieldName])))
+    }
+  }
+  const backpay = activeBackpayAdjustmentTotals(person)
+  assign('补发工资', backpay.increaseTotal)
+  assign('补扣工资', backpay.deductionTotal)
+  return row
+}
+
+function salaryPersonNumber(person: PayrollPerson, sourceNames: string[]): number {
+  for (const sourceName of sourceNames) {
+    if (Object.prototype.hasOwnProperty.call(person.values, sourceName)) {
+      return roundMoney(num(person.values[sourceName]))
+    }
+  }
+  return 0
+}
+
 async function applyIntegratedPlan(plan: IntegratedPlan): Promise<void> {
   if (plan.changes.length === 0) return
   const worksheet = getWorksheetByName('在职工资')
@@ -895,22 +1268,34 @@ async function applyIntegratedPlan(plan: IntegratedPlan): Promise<void> {
   const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
   const table = tableNameOf(worksheet)
   const database = await getDatabase()
+  const settings = await readMonthlyPayrollSettings()
   const now = new Date().toISOString()
+  const updatesByRow = new Map<number, Record<string, WorksheetRecordValue>>()
+  for (const change of plan.changes) {
+    const columnName = fieldColumns.get(change.fieldName)
+    if (!columnName) continue
+    for (const update of change.updates) {
+      const values = updatesByRow.get(update.rowId) ?? {}
+      values[columnName] = update.value
+      updatesByRow.set(update.rowId, values)
+    }
+  }
+
   await run(database, 'BEGIN TRANSACTION')
   try {
-    for (const change of plan.changes) {
-      const columnName = fieldColumns.get(change.fieldName)
-      if (!columnName) continue
-      for (const update of change.updates) {
-        await run(
-          database,
-          `UPDATE ${table}
-             SET ${quoteIdentifier(columnName)} = ?,
-                 "md_updated_at" = ?
-           WHERE "id" = ?`,
-          [update.value, now, update.rowId]
-        )
-      }
+    for (const [rowId, values] of updatesByRow.entries()) {
+      await applyIntegratedComputedFieldsForUpdate(database, worksheet, rowId, values, settings.taxField)
+      const columnNames = Object.keys(values)
+      if (columnNames.length === 0) continue
+      const assignments = columnNames
+        .map((columnName) => `${quoteIdentifier(columnName)} = ?`)
+        .concat('"md_updated_at" = ?')
+        .join(', ')
+      await run(
+        database,
+        `UPDATE ${table} SET ${assignments} WHERE "id" = ?`,
+        [...columnNames.map((columnName) => values[columnName]), now, rowId]
+      )
     }
     await run(database, 'COMMIT')
   } catch (error) {
@@ -919,12 +1304,50 @@ async function applyIntegratedPlan(plan: IntegratedPlan): Promise<void> {
   }
 }
 
+async function syncIntegratedUnitNameForPeople(sourcePeople: AnnualSourcePerson[]): Promise<number> {
+  const unitSettings = await readUnitSettings()
+  const unitName = text(unitSettings.unitFullName)
+  if (!unitName) return 0
+  const idCards = Array.from(new Set(sourcePeople.map((person) => person.idCard).filter(Boolean)))
+  if (idCards.length === 0) return 0
+
+  const worksheet = getWorksheetByName('在职工资')
+  const columns = getWorksheetLocalColumns(worksheet)
+  const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
+  const idColumn = fieldColumns.get('证件号码')
+  const unitNameColumn = fieldColumns.get('单位名称')
+  if (!idColumn || !unitNameColumn) return 0
+
+  const database = await getDatabase()
+  const table = tableNameOf(worksheet)
+  const normalizedIdExpression = `UPPER(REPLACE(REPLACE(TRIM(CAST(${quoteIdentifier(idColumn)} AS TEXT)), ' ', ''), ',', ''))`
+  const now = new Date().toISOString()
+  let updated = 0
+  for (let start = 0; start < idCards.length; start += 400) {
+    const batch = idCards.slice(start, start + 400)
+    const placeholders = batch.map(() => '?').join(', ')
+    const result = await runWithLastId(
+      database,
+      `UPDATE ${table}
+         SET ${quoteIdentifier(unitNameColumn)} = ?,
+             "md_updated_at" = ?
+       WHERE ${normalizedIdExpression} IN (${placeholders})
+         AND COALESCE(CAST(${quoteIdentifier(unitNameColumn)} AS TEXT), '') <> ?`,
+      [unitName, now, ...batch, unitName]
+    )
+    updated += result.changes
+  }
+  return updated
+}
+
 function buildReadSourcesScript(input: AnnualAdjustmentPreviewInput): string {
   const salaryPath = psString(input.salaryWorkbookPath)
   const housingPath = psString(input.housingAccountWorkbookPath ?? '')
   const insurancePaths = input.insuranceDetailWorkbookPaths.map(psString).join(', ')
   return `
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $SalaryPath = ${salaryPath}
 $HousingPath = ${housingPath}
 $InsurancePaths = @(${insurancePaths})
@@ -978,6 +1401,38 @@ function Col($headers, [string[]]$aliases) {
   }
   return 0
 }
+function ColNearby($ws, $h, [string[]]$aliases) {
+  $c = Col $h.Headers $aliases
+  if ($c -gt 0) { return $c }
+  for ($r = $h.Row; $r -le [math]::Min($h.LastRow, $h.Row + 2); $r++) {
+    for ($col = 1; $col -le $h.LastCol; $col++) {
+      $key = Norm (CellText $ws $r $col)
+      foreach ($alias in $aliases) {
+        if ($key -eq (Norm $alias)) { return [int]$col }
+      }
+    }
+  }
+  return 0
+}
+function LooksLikeId([string]$value) {
+  $v = (N $value).ToUpper() -replace '[,\\s]', ''
+  return ($v -match '^\\d{15}$') -or ($v -match '^\\d{17}[\\dX]$')
+}
+function AddFixedPayrollSalaryRows($ws, $salaryRows) {
+  $used = $ws.UsedRange
+  $lastRow = [int]($used.Row + $used.Rows.Count - 1)
+  for ($r = [int]$used.Row; $r -le $lastRow; $r++) {
+    $id = ((CellText $ws $r 3).ToUpper() -replace '[,\\s]', '')
+    $name = CellText $ws $r 5
+    if (-not (LooksLikeId $id) -or -not $name -or $name.Contains('合计')) { continue }
+    $salaryRows.Add([pscustomobject]@{
+      rowNumber = $r
+      idCard = $id
+      name = $name
+      housing = Amount (CellText $ws $r 24)
+    }) | Out-Null
+  }
+}
 function SheetOrFirst($wb, [string]$name) {
   if ($name) {
     try { return $wb.Sheets.Item($name) } catch {}
@@ -1001,21 +1456,27 @@ try {
   try {
     try { $unitName = N $wb.Sheets.Item('汇总').Range('A4').Text } catch {}
     $ws = SheetOrFirst $wb '公办在职'
-    $h = FindHeader $ws @(@('证件号码','身份证号','身份证'), @('姓名'), @('住房公积金','公积金'))
-    $idCol = Col $h.Headers @('证件号码','身份证号','身份证')
-    $nameCol = Col $h.Headers @('姓名')
-    $housingCol = Col $h.Headers @('住房公积金','公积金')
-    for ($r = $h.Row + 1; $r -le $h.LastRow; $r++) {
-      $id = (CellText $ws $r $idCol).ToUpper()
-      $name = CellText $ws $r $nameCol
-      if (-not $id -or -not $name -or $name.Contains('合计')) { continue }
-      $salaryRows.Add([pscustomobject]@{
-        rowNumber = $r
-        idCard = $id
-        name = $name
-        housing = Amount (CellText $ws $r $housingCol)
-      }) | Out-Null
+    try {
+      $h = FindHeader $ws @(@('证件号码','身份证号','身份证'), @('姓名'))
+      $idCol = Col $h.Headers @('证件号码','身份证号','身份证')
+      $nameCol = Col $h.Headers @('姓名')
+      $housingCol = ColNearby $ws $h @('住房公积金','公积金')
+      if ($housingCol -le 0) { throw '工资表找不到住房公积金列' }
+      for ($r = $h.Row + 1; $r -le $h.LastRow; $r++) {
+        $id = ((CellText $ws $r $idCol).ToUpper() -replace '[,\\s]', '')
+        $name = CellText $ws $r $nameCol
+        if (-not (LooksLikeId $id) -or -not $name -or $name.Contains('合计')) { continue }
+        $salaryRows.Add([pscustomobject]@{
+          rowNumber = $r
+          idCard = $id
+          name = $name
+          housing = Amount (CellText $ws $r $housingCol)
+        }) | Out-Null
+      }
+    } catch {
+      AddFixedPayrollSalaryRows $ws $salaryRows
     }
+    if ($salaryRows.Count -eq 0) { throw '工资表未读取到公办在职人员' }
   } finally {
     $wb.Close($false)
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb) | Out-Null
@@ -1031,7 +1492,7 @@ try {
       $accountCol = Col $h.Headers @('个人账号')
       $baseCol = Col $h.Headers @('个人缴存基数','缴存基数')
       for ($r = $h.Row + 1; $r -le $h.LastRow; $r++) {
-        $id = (CellText $ws $r $idCol).ToUpper()
+        $id = ((CellText $ws $r $idCol).ToUpper() -replace '[,\\s]', '')
         if (-not $id) { continue }
         $housingRows.Add([pscustomobject]@{
           idCard = $id
@@ -1046,23 +1507,25 @@ try {
     }
   }
 
-  foreach ($path in $InsurancePaths) {
+  for ($sourceIndex = 0; $sourceIndex -lt $InsurancePaths.Count; $sourceIndex++) {
+    $path = $InsurancePaths[$sourceIndex]
     if (-not $path) { continue }
     $wb = $xl.Workbooks.Open($path, 3, $true)
     try {
       $ws = SheetOrFirst $wb ''
-      $h = FindHeader $ws @(@('姓名'), @('证件号码','身份证号','身份证'), @('费率'), @('应缴费额','应补(退)费额','应补退费额'))
+      $h = FindHeader $ws @(@('姓名'), @('证件号码','身份证号','身份证'), @('费率'), @('应补(退)费额','应补（退）费额','应补退费额','应补(退)费额(元)','应补（退）费额(元)'))
       $nameCol = Col $h.Headers @('姓名')
       $idCol = Col $h.Headers @('证件号码','身份证号','身份证')
       $rateCol = Col $h.Headers @('费率')
-      $amountCol = Col $h.Headers @('应缴费额','应补(退)费额','应补退费额')
+      $amountCol = Col $h.Headers @('应补(退)费额','应补（退）费额','应补退费额','应补(退)费额(元)','应补（退）费额(元)')
       for ($r = $h.Row + 1; $r -le $h.LastRow; $r++) {
-        $id = (CellText $ws $r $idCol).ToUpper()
+        $id = ((CellText $ws $r $idCol).ToUpper() -replace '[,\\s]', '')
         $name = CellText $ws $r $nameCol
         $amount = Amount (CellText $ws $r $amountCol)
         if ((-not $id -and -not $name) -or $amount -le 0) { continue }
         $insuranceRows.Add([pscustomobject]@{
           sourceFile = [System.IO.Path]::GetFileName($path)
+          sourceIndex = $sourceIndex
           rowNumber = $r
           idCard = $id
           name = $name
@@ -1147,6 +1610,29 @@ function Col($headers, [string[]]$aliases) {
   }
   return 0
 }
+function ColNearby($ws, $h, [string[]]$aliases) {
+  $c = Col $h.Headers $aliases
+  if ($c -gt 0) { return $c }
+  for ($r = $h.Row; $r -le [math]::Min($h.LastRow, $h.Row + 2); $r++) {
+    for ($col = 1; $col -le $h.LastCol; $col++) {
+      $key = Norm (CellText $ws $r $col)
+      foreach ($alias in $aliases) {
+        if ($key -eq (Norm $alias)) { return [int]$col }
+      }
+    }
+  }
+  return 0
+}
+function FixedPayrollColumn([string]$field) {
+  switch ($field) {
+    '养老保险缴费' { return 20 }
+    '职业年金缴费' { return 21 }
+    '医疗保险' { return 22 }
+    '失业保险' { return 23 }
+    '公积金' { return 24 }
+    default { return 0 }
+  }
+}
 
 $map = @{}
 $obj = $ValuesJson | ConvertFrom-Json
@@ -1172,15 +1658,20 @@ try {
   $h = FindHeader $ws
   $idCol = Col $h.Headers @('证件号码','身份证号','身份证')
   $fieldCols = @{
-    '公积金' = Col $h.Headers @('公积金','住房公积金')
-    '养老保险缴费' = Col $h.Headers @('养老保险缴费','养老保险')
-    '职业年金缴费' = Col $h.Headers @('职业年金缴费','职业年金')
-    '医疗保险' = Col $h.Headers @('医疗保险','医保大病统筹')
-    '失业保险' = Col $h.Headers @('失业保险')
+    '公积金' = ColNearby $ws $h @('公积金','住房公积金')
+    '养老保险缴费' = ColNearby $ws $h @('养老保险缴费','养老保险')
+    '职业年金缴费' = ColNearby $ws $h @('职业年金缴费','职业年金')
+    '医疗保险' = ColNearby $ws $h @('医疗保险','医保大病统筹')
+    '失业保险' = ColNearby $ws $h @('失业保险')
+  }
+  foreach ($field in @($fieldCols.Keys)) {
+    if ([int]$fieldCols[$field] -le 0) {
+      $fieldCols[$field] = FixedPayrollColumn $field
+    }
   }
   $appliedPeople = @{}
   for ($r = $h.Row + 1; $r -le $h.LastRow; $r++) {
-    $id = (CellText $ws $r $idCol).ToUpper()
+    $id = ((CellText $ws $r $idCol).ToUpper() -replace '[,\\s]', '')
     if (-not $id -or -not $map.ContainsKey($id)) { continue }
     $person = $map[$id]
     $written = $false
@@ -1449,7 +1940,7 @@ function timestamp(): string {
 }
 
 function safeFileStem(value: string): string {
-  const raw = basename(value, extname(value)) || value || '年初调整'
+  const raw = basename(value, extname(value)) || value || '五险一金'
   const cleaned = raw.replace(/[\\/:*?"<>|\s]/g, '')
   if (cleaned) return cleaned
   return createHash('sha1').update(value).digest('hex').slice(0, 8)

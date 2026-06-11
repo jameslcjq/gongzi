@@ -439,6 +439,7 @@ function isAnnualAdjustmentFile(filePath: string): boolean {
 }
 
 function classifyMonthlyPayrollFile(filePath: string): MonthlyPayrollFileKind | undefined {
+  if (isAnnualAdjustmentFile(filePath)) return undefined
   const workbook = readWorkbookSample(filePath)
   if (workbook) {
     if (looksLikeSalaryWorkbook(workbook)) return 'salary'
