@@ -62,7 +62,10 @@ export async function computeSalaryQuotaMatchLocalSummary(): Promise<SalaryQuota
       otherActualPayTotal: other.实发合计,
       actualPayTotal,
       traffic002Total,
-      activeBatchActualPayTotals
+      activeBatchActualPayTotals,
+      // 001 批次的交通补贴（交通费+公车补贴）：没有数币卡的人员交通费留在 001，
+      // 页面把它并进「津贴补贴实发」，脚本端用 教龄津贴+本值 做该项校验。
+      activeTraffic001Total: active.交通补贴
     }
   } catch (error) {
     return {

@@ -535,6 +535,11 @@ export type SalaryQuotaMatchLocalSummary = {
    * 交通费以外的项目，"实发合计−002交通费"的口径即失真，应停止自动匹配。
    */
   activeBatchActualPayTotals?: Record<string, number>
+  /**
+   * 001 工资批次内的交通费+公车补贴合计。没有数币卡的人员交通费留在 001 批次，
+   * 一体化页面把它并入「津贴补贴实发」工资项，故该项校验金额 = 教龄津贴 + 本字段。
+   */
+  activeTraffic001Total?: number
   message?: string
 }
 

@@ -13,18 +13,20 @@
 ;(function presetLocalSummary() {
   var summary = {
     ok: true,
-    actualPayTotal: 563957.98,
+    actualPayTotal: 565157.98,
     traffic002Total: 0,
     activeOtherOneTotal: 0,
     activeBasicPerformanceTotal: 100000, // 基本工资中"岗位津贴+生活补贴"→ 30107
     activeHousingTotal: 103849,
-    activeAllowanceTotal: 505,
+    activeAllowanceTotal: 505, // 教龄津贴
+    // 没有数币卡人员的交通费留在 001 批次，页面并入「津贴补贴实发」（505+1200=1705）
+    activeTraffic001Total: 1200,
     retiredHousingTotal: 64000,
     retiredBackpayTotal: 6800,
     retiredActualPayTotal: 6800,
     otherActualPayTotal: 0,
     // A4 批次交叉校验：002 实发合计须等于 002 交通费合计（本页无数币批次，均为 0）
-    activeBatchActualPayTotals: { '001': 493157.98, '002': 0 },
+    activeBatchActualPayTotals: { '001': 494357.98, '002': 0 },
     message: '仿真页内置汇总'
   }
   try {
@@ -40,7 +42,8 @@ function fmtMoney(v) {
 // ---- 工资单（tableContent）----
 var ITEM_ROWS = [
   { item_name: '基本工资实发', saltype_name: '事业', item_money: 388803.98, already_matc_amonty: 0, unalready_matc_amonty: 388803.98 },
-  { item_name: '津贴补贴实发', saltype_name: '事业', item_money: 505, already_matc_amonty: 0, unalready_matc_amonty: 505 },
+  // 1705 = 教龄津贴 505 + 001批次交通费 1200（无数币卡人员交通费并入此项）
+  { item_name: '津贴补贴实发', saltype_name: '事业', item_money: 1705, already_matc_amonty: 0, unalready_matc_amonty: 1705 },
   { item_name: '住房补贴', saltype_name: '事业', item_money: 103849, already_matc_amonty: 0, unalready_matc_amonty: 103849 },
   { item_name: '退休费实发', saltype_name: '事业退休', item_money: 6800, already_matc_amonty: 0, unalready_matc_amonty: 6800 },
   { item_name: '住房补贴', saltype_name: '事业退休', item_money: 64000, already_matc_amonty: 0, unalready_matc_amonty: 64000 }
@@ -59,6 +62,8 @@ var ITEM_ROWS = [
 // dep_bgt_eco_id=6 故意对应 30107 绩效工资——复现"部门经济分类被显示成 6"的真实场景。
 var QUOTA_ROWS = [
   q('3', '30102 津贴补贴', '50501 工资福利支出', '2050203 初中教育', 872100, 398280, '年初预算-事业人员提租补贴-津贴补贴'),
+  // 津贴补贴实发（含001交通费）的主目标：30102 + 事业人员工资
+  q('3', '30102 津贴补贴', '50501 工资福利支出', '2050203 初中教育', 500000, 200000, '年初预算-事业人员工资-津贴补贴'),
   q('7', '30108 机关事业单位基本养老保险缴费', '50501 工资福利支出', '2050203 初中教育', 659700, 198844.09, '年初预算-事业人员基本养老保险-机关事业单位基本养老保险缴费'),
   q('2', '30101 基本工资', '50501 工资福利支出', '2050203 初中教育', 2753659, 890261.23, '年初预算-事业人员工资-基本工资'),
   q('11', '30112 其他社会保障缴费', '50501 工资福利支出', '2050203 初中教育', 28875, 12423.5, '年初预算-事业人员工资-其他社会保障缴费'),
@@ -91,10 +96,17 @@ function q(id, depCodename, govCodename, expCodename, balanceSum, canUse, docNam
   }
 }
 
-// 部门经济分类下拉树：页面"健康路径"点格子时才装载
-var DEP_TREE = QUOTA_ROWS.map(function (row) {
-  return { id: row.dep_bgt_eco_id, text: row.dep_bgt_eco_codename }
-})
+// 部门经济分类下拉树：页面"健康路径"点格子时才装载（同一编码多条指标行时按 id 去重）
+var DEP_TREE = (function () {
+  var seen = {}
+  var nodes = []
+  QUOTA_ROWS.forEach(function (row) {
+    if (seen[row.dep_bgt_eco_id]) return
+    seen[row.dep_bgt_eco_id] = true
+    nodes.push({ id: row.dep_bgt_eco_id, text: row.dep_bgt_eco_codename })
+  })
+  return nodes
+})()
 
 var modifyMode = false
 var editingIndex = null

@@ -28,7 +28,7 @@ export function buildSalaryQuotaMatchScript(
 ;(function installSalaryQuotaMatch() {
   var AUTO_START = ${autoStart ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
-  var VERSION = '20260611l-salary-quota-match-batch-crosscheck'
+  var VERSION = '20260611m-salary-quota-match-allowance-traffic001'
   var BTN_ID = 'salary-quota-match-btn'
   var STATUS_ID = 'salary-quota-match-status'
   var LOCAL_SUMMARY = ${JSON.stringify(localSummary)}
@@ -1038,9 +1038,17 @@ export function buildSalaryQuotaMatchScript(
         reason: '本地工资数据读取失败，无法校验“事业/津贴补贴实发”：' + ((localSummary && localSummary.message) || '')
       }
     }
-    var localAmount = roundMoney(localSummary.activeAllowanceTotal)
+    // 页面「津贴补贴实发」= 教龄津贴 + 001批次交通费（没有数币卡的人员交通费留在 001 并入此项）。
+    var allowanceBase = roundMoney(localSummary.activeAllowanceTotal)
+    var traffic001 = roundMoney(localSummary.activeTraffic001Total || 0)
+    var localAmount = roundMoney(allowanceBase + traffic001)
     if (!moneyEquals(localAmount, amount)) {
-      return { ok: false, reason: amountMismatchReason('事业/津贴补贴实发', localAmount, amount) }
+      return {
+        ok: false,
+        reason:
+          amountMismatchReason('事业/津贴补贴实发', localAmount, amount) +
+          '（本地构成：教龄津贴 ' + formatAmount(allowanceBase) + ' + 001批次交通费 ' + formatAmount(traffic001) + '）'
+      }
     }
     var allowanceQuota = pickQuotaByRequirement(
       rows,
