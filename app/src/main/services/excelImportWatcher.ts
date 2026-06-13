@@ -420,7 +420,8 @@ function isAnnualAdjustmentFile(filePath: string): boolean {
     isHousingAccountWorkbook(filePath) ||
     isPersonalInsuranceDetailWorkbook(filePath) ||
     isPersonalTaxTemplateWorkbook(filePath) ||
-    isSocialBaseTemplateWorkbook(filePath)
+    isSocialBaseTemplateWorkbook(filePath) ||
+    isHousingBaseAdjustmentWorkbook(filePath)
   )
 }
 
@@ -577,6 +578,32 @@ function isSalaryWorkbook(filePath: string): boolean {
 
 function isHousingAccountWorkbook(filePath: string): boolean {
   return basename(filePath).toLowerCase().startsWith('grxxlist')
+}
+
+function isHousingBaseAdjustmentWorkbook(filePath: string): boolean {
+  const workbook = readWorkbookSample(filePath)
+  if (!workbook) return false
+  return workbook.SheetNames.some((sheetName) => {
+    const rows = sheetToRows(workbook.Sheets[sheetName]).slice(0, 6)
+    const hasTitle = rows.some((row) =>
+      row.some((cell) => normalizeHeader(text(cell)).includes(normalizeHeader('缴存基数调整列表')))
+    )
+    const hasHeaders = rows.some((row) => {
+      const headers = row.map((cell) => normalizeHeader(text(cell)))
+      return hasAllHeaders(headers, [
+        '证件号码',
+        '姓名',
+        '调整前缴存基数',
+        '调整后缴存基数',
+        '调整后单位月缴存额',
+        '调整后个人月缴存额',
+        '调整后月缴存额',
+        '调整后住房补贴月缴存额',
+        '个人账号'
+      ])
+    })
+    return hasTitle && hasHeaders
+  })
 }
 
 function isPersonalInsuranceDetailWorkbook(filePath: string): boolean {

@@ -961,6 +961,7 @@ export type AnnualAdjustmentApplyResult = {
   ok: boolean
   message: string
   salaryOutputPath: string
+  salaryBackupPath?: string
   salaryImportPath?: string
   housingDeclarationPath?: string
   housingMissingLogPath?: string
@@ -990,14 +991,25 @@ export type PersonalTaxImportGenerateResult = {
 
 export type SocialInsuranceBaseExportInput = {
   templateWorkbookPath?: string
+  salaryWorkbookPath?: string
+  housingAccountWorkbookPath?: string
+  insuranceDetailWorkbookPaths?: string[]
   baseFields: string[]
 }
 
 export type SocialInsuranceBaseExportResult = {
   ok: boolean
   filePath: string
+  housingDeclarationPath?: string
+  housingMissingLogPath?: string
+  salaryOutputPath?: string
+  salaryBackupPath?: string
+  salaryApplied?: number
   rowCount: number
   baseTotal: number
+  housingRowCount?: number
+  housingAmountTotal?: number
+  warnings?: string[]
 }
 
 export type ImportBatchSummary = {
