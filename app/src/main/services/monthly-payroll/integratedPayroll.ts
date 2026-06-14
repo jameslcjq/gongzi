@@ -168,7 +168,14 @@ export type IntegratedActiveRecomputeResult = {
 
 export async function applyTaxAndRecomputeIntegratedActive(
   taxByIdCard: Record<string, number>,
-  options: { clearTaxWhenMissing?: boolean; preserveExistingTaxField?: boolean } = {}
+  options: {
+    clearTaxWhenMissing?: boolean
+    preserveExistingTaxField?: boolean
+    // 工资表口径：补扣工资列 = 补发负数(backpayDeductionByIdCard) + 个税(文件)，每遍重算、幂等。
+    // 不传则保持原有税列口径(一体化数据源用)，避免改动整合模式行为。
+    recomputeBackpayInTaxCol?: boolean
+  } = {},
+  backpayDeductionByIdCard: Record<string, number> = {}
 ): Promise<IntegratedActiveRecomputeResult> {
   const settings = await readMonthlyPayrollSettings()
   const taxField = settings.taxField
@@ -222,18 +229,29 @@ export async function applyTaxAndRecomputeIntegratedActive(
 
   await run(database, 'BEGIN TRANSACTION')
   try {
+    // 业务口径(仅工资表数据源)：补扣工资 = 补发负数 + 当月个税(个税文件为权威)。
+    // 因为“补扣工资”这一列同时被配置为个税列(taxField)，若按纯个税列处理，没有个税文件时会被
+    // 清零、连补发负数一起丢掉(历史 bug)。这里按“补发负数 + 个税”每遍重算，幂等。
+    const recomputeBackpay = options.recomputeBackpayInTaxCol === true && taxDeductionCol === taxCol
     for (const [idCard, personRows] of rowsByIdCard.entries()) {
       const overrideTax = taxByIdCard[idCard]
       if (overrideTax !== undefined) taxApplied += 1
+      // 补发负数(整人)：来自工资表，每遍重算，保证幂等
+      const personBackpayDeduction = roundMoney(backpayDeductionByIdCard[idCard] ?? 0)
 
       const taxCarrier = selectIntegratedRepresentativeRow(personRows, batchColumn)
       for (const row of personRows) {
-        const receivesOverrideTax = overrideTax !== undefined && num(row.id) === num(taxCarrier.id)
-        const taxAmount = options.preserveExistingTaxField
-          ? num(row[taxCol])
-          : overrideTax !== undefined
-            ? (receivesOverrideTax ? overrideTax : 0)
-            : options.clearTaxWhenMissing ? 0 : num(row[taxCol])
+        const isCarrier = num(row.id) === num(taxCarrier.id)
+        const receivesOverrideTax = overrideTax !== undefined && isCarrier
+        const fileTax = receivesOverrideTax ? overrideTax : 0
+        // 工资表口径：补扣工资 = 补发负数 + 个税(文件)，集中落在 taxCarrier 行，其余批次行清 0
+        const taxAmount = recomputeBackpay
+          ? (isCarrier ? roundMoney(personBackpayDeduction + fileTax) : 0)
+          : options.preserveExistingTaxField
+            ? num(row[taxCol])
+            : overrideTax !== undefined
+              ? fileTax
+              : options.clearTaxWhenMissing ? 0 : num(row[taxCol])
         const payable = payCols.reduce((sum, col) => sum + num(row[col]), 0)
         const taxDeduction = taxDeductionCol === taxCol
           ? taxAmount

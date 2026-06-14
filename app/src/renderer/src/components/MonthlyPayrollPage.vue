@@ -740,18 +740,24 @@ async function confirmMonthlyPayrollPreprocess(): Promise<boolean> {
       detected: hasSocial
         ? periodInspection?.socialSecurity?.message ?? '已检测到社保未申报汇总'
         : '未检测到社保文件',
-      action: includesSocial ? '生成社保报账' : '先生成工资阶段结果；社保补齐后需重新生成，暂不可月结'
+      action: includesSocial ? '生成社保报账' : '本次不报社保',
+      danger: !includesSocial
     },
     {
       item: '个税',
       detected: hasTax ? periodInspection?.tax?.message ?? '已检测到个税文件' : '未检测到个税文件',
-      action: includesTax ? '生成个税扣款' : '本次不报个税'
+      action: includesTax ? '生成个税扣款' : '本次不报个税',
+      danger: !includesTax
     }
   ]
   const tableRows = rows
-    .map((row) => (
-      `<tr><td>${escapeHtml(row.item)}</td><td>${escapeHtml(row.detected)}</td><td>${escapeHtml(row.action)}</td></tr>`
-    ))
+    .map((row) => {
+      const danger = 'danger' in row && row.danger
+      const actionCell = danger
+        ? `<span style="color:#dc2626;font-weight:600;">${escapeHtml(row.action)}</span>`
+        : escapeHtml(row.action)
+      return `<tr><td>${escapeHtml(row.item)}</td><td>${escapeHtml(row.detected)}</td><td>${actionCell}</td></tr>`
+    })
     .join('')
   const message =
     `<div class="payroll-confirm-summary">权威来源：${escapeHtml(selectedDataSourceModeText.value)}；本次将处理：${escapeHtml(scope.join('、'))}</div>` +

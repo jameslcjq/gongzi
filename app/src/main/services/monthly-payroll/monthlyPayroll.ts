@@ -98,6 +98,7 @@ import {
   roundMoney,
   text
 } from './monthlyPayrollUtils'
+import { activeBackpayAdjustmentTotals } from './salaryBackpayAdjustments'
 import {
   gridColumns,
   timestamp,
@@ -433,10 +434,11 @@ export async function preprocessMonthlyPayroll(
       const appliedPlan = writeBackPlan
       await applyIntegratedWriteBackPlan(writeBackPlan)
       integratedActiveRecompute = activeWriteBackPlan.changes.length > 0
-        ? await applyTaxAndRecomputeIntegratedActive(taxByIdCard, {
-            clearTaxWhenMissing: !tax,
-            preserveExistingTaxField: activeBackpayWriteBackPlan.changes.length > 0
-          })
+        ? await applyTaxAndRecomputeIntegratedActive(
+            taxByIdCard,
+            { clearTaxWhenMissing: !tax, recomputeBackpayInTaxCol: true },
+            buildActiveBackpayDeductionMap(salary)
+          )
         : await summarizeIntegratedActive(taxByIdCard)
       activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(
         salary.activePeople,
@@ -607,11 +609,13 @@ export async function generateMonthlyPayrollReportView(
   const salary = rawSalary
     ? applyTaxToSalarySummary(rawSalary, taxByIdCard, { clearTaxWhenMissing: !tax })
     : undefined
-  const preserveIntegratedTaxField = !useIntegratedDataSource && hasActiveBackpayAdjustments(salary)
-  const integratedActiveSummary = await applyTaxAndRecomputeIntegratedActive(taxByIdCard, {
-    clearTaxWhenMissing: !tax,
-    preserveExistingTaxField: preserveIntegratedTaxField
-  })
+  const integratedActiveSummary = await applyTaxAndRecomputeIntegratedActive(
+    taxByIdCard,
+    useIntegratedDataSource
+      ? { clearTaxWhenMissing: !tax }
+      : { clearTaxWhenMissing: !tax, recomputeBackpayInTaxCol: true },
+    useIntegratedDataSource ? {} : buildActiveBackpayDeductionMap(salary)
+  )
   const integratedOtherPaySummary = await recomputeIntegratedOtherLikeWorksheet('其他工资')
   const integratedRetiredPaySummary = await recomputeIntegratedOtherLikeWorksheet('退休工资')
 
@@ -1677,11 +1681,15 @@ function buildBackpayRows(
   return [...rowsById.values(), ...rowsWithoutId].filter(hasBackpayAdjustments)
 }
 
-function hasActiveBackpayAdjustments(salary: SalarySummary | undefined): boolean {
-  return Boolean(salary?.activePeople.some((person) =>
-    num(person.values['基本补发']) !== 0 ||
-      num(person.values['绩效补发']) !== 0
-  ))
+// 工资表口径下，按身份证汇总每人补发负数(补扣)，供重算补扣工资 = 补发负数 + 个税(文件)
+function buildActiveBackpayDeductionMap(salary: SalarySummary | undefined): Record<string, number> {
+  const map: Record<string, number> = {}
+  for (const person of salary?.activePeople ?? []) {
+    const id = normalizeIdCard(person.idCard)
+    if (!id) continue
+    map[id] = roundMoney((map[id] ?? 0) + activeBackpayAdjustmentTotals(person).deductionTotal)
+  }
+  return map
 }
 
 function resolveHousingFund(salary: SalarySummary, integratedActiveHousingFund: number): number {
