@@ -6,6 +6,7 @@ import {
   createBackup,
   createFullBackup,
   listBackups,
+  listFullBackups,
   restoreBackup,
   restoreFullBackup
 } from '../services/backup'
@@ -265,6 +266,7 @@ const LICENSE_FREE_CHANNELS = new Set([
   'unit-settings:set',
   'unit-settings:resolve-school',
   'backup:list',
+  'backup:list-full',
   'monthly-payroll:list-runs'
 ])
 
@@ -1520,13 +1522,17 @@ export function registerAppIpc(): void {
   )
 
   ipcMain.handle('backup:list', (): BackupSummary[] => listBackups())
+  ipcMain.handle('backup:list-full', (): BackupSummary[] => listFullBackups())
   ipcMain.handle('backup:create', (): Promise<BackupSummary> => createBackup())
   ipcMain.handle(
     'backup:restore',
     (_event, fileName: string): Promise<BackupSummary> => restoreBackup(fileName)
   )
   ipcMain.handle('backup:create-full', (): Promise<FullBackupSummary | null> => createFullBackup())
-  ipcMain.handle('backup:restore-full', (): Promise<FullBackupSummary | null> => restoreFullBackup())
+  ipcMain.handle(
+    'backup:restore-full',
+    (_event, fileName?: string): Promise<FullBackupSummary | null> => restoreFullBackup(fileName)
+  )
 
   ipcMain.handle('pivot:list-configs', (): Promise<PivotConfigSummary[]> => listPivotConfigs())
 

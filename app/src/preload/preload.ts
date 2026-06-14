@@ -507,13 +507,14 @@ const salaryApi = {
     ipcRenderer.invoke('import:rollback-batch', batchId),
 
   listBackups: (): Promise<BackupSummary[]> => ipcRenderer.invoke('backup:list'),
+  listFullBackups: (): Promise<BackupSummary[]> => ipcRenderer.invoke('backup:list-full'),
   createBackup: (): Promise<BackupSummary> => ipcRenderer.invoke('backup:create'),
   restoreBackup: (fileName: string): Promise<BackupSummary> =>
     ipcRenderer.invoke('backup:restore', fileName),
   createFullBackup: (): Promise<FullBackupSummary | null> =>
     ipcRenderer.invoke('backup:create-full'),
-  restoreFullBackup: (): Promise<FullBackupSummary | null> =>
-    ipcRenderer.invoke('backup:restore-full'),
+  restoreFullBackup: (fileName?: string): Promise<FullBackupSummary | null> =>
+    ipcRenderer.invoke('backup:restore-full', fileName),
 
   listPivotConfigs: (): Promise<PivotConfigSummary[]> =>
     ipcRenderer.invoke('pivot:list-configs'),

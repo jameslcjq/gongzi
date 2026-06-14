@@ -58,7 +58,7 @@ type FullBackupManifest = {
 
 const FULL_BACKUP_FORMAT = 'laojiu.salary-system.full-backup'
 const FULL_BACKUP_EXTENSION = 'ljgzbackup'
-const FULL_BACKUP_FILTER = { name: '老九工资系统完整备份', extensions: [FULL_BACKUP_EXTENSION] }
+const FULL_BACKUP_FILTER = { name: '老九工资系统全量备份', extensions: [FULL_BACKUP_EXTENSION] }
 const DATA_ROOT_EXCLUDED_NAMES = new Set(['backups', 'license', 'userdata', 'temp', 'debug'])
 const BACKUP_FILE_EXTENSIONS = new Set(['.ljgzbackup'])
 const SQLITE_VOLATILE_FILES = new Set(['salary-system.sqlite-wal', 'salary-system.sqlite-shm'])
@@ -75,6 +75,25 @@ export function listBackups(): BackupSummary[] {
 
   return readdirSync(folder)
     .filter((name) => name.endsWith('.sqlite'))
+    .map((name) => {
+      const filePath = join(folder, name)
+      const stat = statSync(filePath)
+      return {
+        fileName: name,
+        filePath,
+        sizeBytes: stat.size,
+        createdAt: stat.mtime.toISOString()
+      }
+    })
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+}
+
+export function listFullBackups(): BackupSummary[] {
+  const folder = getBackupFolder()
+  if (!existsSync(folder)) return []
+
+  return readdirSync(folder)
+    .filter((name) => name.toLowerCase().endsWith(`.${FULL_BACKUP_EXTENSION}`))
     .map((name) => {
       const filePath = join(folder, name)
       const stat = statSync(filePath)
@@ -175,9 +194,9 @@ export async function restoreBackup(fileName: string): Promise<BackupSummary> {
 
 export async function createFullBackup(): Promise<FullBackupSummary | null> {
   const stamp = buildTimestamp()
-  const defaultPath = join(getBackupFolder(), `工资系统完整备份-${stamp}.${FULL_BACKUP_EXTENSION}`)
+  const defaultPath = join(getBackupFolder(), `工资系统全量备份-${stamp}.${FULL_BACKUP_EXTENSION}`)
   const picked = await dialog.showSaveDialog({
-    title: '保存完整数据备份',
+    title: '保存全量数据备份',
     defaultPath,
     filters: [FULL_BACKUP_FILTER, { name: '所有文件', extensions: ['*'] }]
   })
@@ -187,29 +206,35 @@ export async function createFullBackup(): Promise<FullBackupSummary | null> {
   return buildFullBackupPackage(destinationPath)
 }
 
-export async function restoreFullBackup(): Promise<FullBackupSummary | null> {
-  const picked = await dialog.showOpenDialog({
-    title: '选择完整数据备份',
-    properties: ['openFile'],
-    filters: [FULL_BACKUP_FILTER, { name: '所有文件', extensions: ['*'] }]
-  })
-  if (picked.canceled || picked.filePaths.length === 0) return null
+export async function restoreFullBackup(fileName?: string): Promise<FullBackupSummary | null> {
+  let sourcePath: string
+  if (fileName) {
+    sourcePath = resolveBackupPackagePath(fileName)
+  } else {
+    const picked = await dialog.showOpenDialog({
+      title: '选择全量数据备份',
+      properties: ['openFile'],
+      filters: [FULL_BACKUP_FILTER, { name: '所有文件', extensions: ['*'] }]
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return null
+    sourcePath = picked.filePaths[0]
+  }
 
-  const sourcePath = picked.filePaths[0]
+  if (!existsSync(sourcePath)) throw new Error('全量备份文件不存在')
   const buffer = await readFile(sourcePath)
   const zip = await JSZip.loadAsync(buffer)
   const manifest = await readFullBackupManifest(zip)
   const targetLicense = await getCachedLicenseStatus()
   if (!targetLicense.valid) {
-    throw new Error(targetLicense.message || '当前电脑未完成授权校验，不能恢复完整备份')
+    throw new Error(targetLicense.message || '当前电脑未完成授权校验，不能恢复全量备份')
   }
 
   const confirmation = await dialog.showMessageBox({
     type: 'warning',
-    title: '恢复完整数据备份',
-    message: `将恢复 ${basename(sourcePath)} 中的完整业务数据，确认后程序需要重启。`,
+    title: '恢复全量数据备份',
+    message: `将恢复 ${basename(sourcePath)} 中的全部业务数据，确认后程序需要重启。`,
     detail:
-      '恢复会覆盖当前业务数据库、工资数据文件夹、工资导入文件夹和交换包文件夹；当前电脑的授权、备份库、登录缓存不会被覆盖。恢复前系统会自动保存一份当前完整备份。',
+      '恢复会覆盖当前业务数据库、工资数据文件夹、工资导入文件夹和交换包文件夹；当前电脑的授权、备份库、登录缓存不会被覆盖。恢复前系统会自动保存一份当前全量备份。',
     buttons: ['确认恢复并重启', '取消'],
     cancelId: 1,
     defaultId: 1
@@ -228,11 +253,11 @@ export async function restoreFullBackup(): Promise<FullBackupSummary | null> {
   for (const entry of manifest.files) {
     validateManifestEntry(entry)
     const zipFile = zip.file(entry.zipPath)
-    if (!zipFile) throw new Error(`完整备份包缺少文件：${entry.zipPath}`)
+    if (!zipFile) throw new Error(`全量备份包缺少文件：${entry.zipPath}`)
     const bytes = await zipFile.async('nodebuffer')
     const actualSha256 = sha256(bytes)
     if (actualSha256 !== entry.sha256) {
-      throw new Error(`完整备份包文件校验失败：${entry.relativePath}`)
+      throw new Error(`全量备份包文件校验失败：${entry.relativePath}`)
     }
     const targetPath = resolveManagedRestorePath(entry.root, entry.relativePath)
     await mkdir(dirname(targetPath), { recursive: true })
@@ -377,16 +402,16 @@ async function appendFolderToZip(
 
 async function readFullBackupManifest(zip: JSZip): Promise<FullBackupManifest> {
   const manifestFile = zip.file('manifest.json')
-  if (!manifestFile) throw new Error('完整备份包缺少 manifest.json')
+  if (!manifestFile) throw new Error('全量备份包缺少 manifest.json')
   const manifest = JSON.parse(await manifestFile.async('string')) as FullBackupManifest
   if (manifest.format !== FULL_BACKUP_FORMAT) {
-    throw new Error('这不是老九工资系统完整备份包')
+    throw new Error('这不是老九工资系统全量备份包')
   }
   if (manifest.version !== 1) {
-    throw new Error(`不支持的完整备份版本：${manifest.version}`)
+    throw new Error(`不支持的全量备份版本：${manifest.version}`)
   }
   if (!Array.isArray(manifest.files)) {
-    throw new Error('完整备份包清单无效')
+    throw new Error('全量备份包清单无效')
   }
   for (const entry of manifest.files) validateManifestEntry(entry)
   return manifest
@@ -394,37 +419,37 @@ async function readFullBackupManifest(zip: JSZip): Promise<FullBackupManifest> {
 
 function validateManifestEntry(entry: FullBackupFileEntry): void {
   if (!entry || !['data', 'import', 'exchange'].includes(entry.root)) {
-    throw new Error('完整备份包包含无效文件根目录')
+    throw new Error('全量备份包包含无效文件根目录')
   }
   assertSafeRelativePath(entry.relativePath)
   const pathParts = entry.relativePath.split('/')
   const firstPart = pathParts[0]?.toLowerCase() || ''
   const fileName = pathParts[pathParts.length - 1]?.toLowerCase() || ''
   if (entry.root === 'data' && DATA_ROOT_EXCLUDED_NAMES.has(firstPart)) {
-    throw new Error('完整备份包不能覆盖授权、备份库或本机缓存目录')
+    throw new Error('全量备份包不能覆盖授权、备份库或本机缓存目录')
   }
   if (entry.root === 'data' && SQLITE_VOLATILE_FILES.has(fileName)) {
-    throw new Error('完整备份包不能包含 SQLite 临时锁文件')
+    throw new Error('全量备份包不能包含 SQLite 临时锁文件')
   }
   if (isBackupPackageFile(fileName)) {
-    throw new Error('完整备份包不能嵌套其他完整备份包')
+    throw new Error('全量备份包不能嵌套其他全量备份包')
   }
   if (entry.zipPath !== `${entry.root}/${entry.relativePath}`) {
-    throw new Error('完整备份包文件路径不一致')
+    throw new Error('全量备份包文件路径不一致')
   }
   if (!/^[a-f0-9]{64}$/i.test(entry.sha256 || '')) {
-    throw new Error('完整备份包文件校验信息无效')
+    throw new Error('全量备份包文件校验信息无效')
   }
 }
 
 async function createPreRestoreFullBackup(): Promise<void> {
   const stamp = buildTimestamp()
-  const destinationPath = join(getBackupFolder(), `恢复前完整备份-${stamp}.${FULL_BACKUP_EXTENSION}`)
+  const destinationPath = join(getBackupFolder(), `恢复前全量备份-${stamp}.${FULL_BACKUP_EXTENSION}`)
   try {
     await buildFullBackupPackage(destinationPath)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`恢复前自动备份当前数据失败，已停止恢复：${message}`)
+    throw new Error(`恢复前自动全量备份当前数据失败，已停止恢复：${message}`)
   }
 }
 
@@ -449,7 +474,7 @@ function resolveManagedRestorePath(rootKey: BackupRootKey, relativePath: string)
   const normalizedRoot = resolve(rootPath).toLowerCase()
   const normalizedTarget = target.toLowerCase()
   if (normalizedTarget !== normalizedRoot && !normalizedTarget.startsWith(normalizedRoot + sep)) {
-    throw new Error('完整备份包包含越界文件路径')
+    throw new Error('全量备份包包含越界文件路径')
   }
   return target
 }
@@ -464,15 +489,30 @@ function assertManagedFolder(folderPath: string): void {
 
 function assertSafeRelativePath(relativePath: string): void {
   if (!relativePath || relativePath.includes('\\') || relativePath.includes('\0')) {
-    throw new Error('完整备份包包含无效文件路径')
+    throw new Error('全量备份包包含无效文件路径')
   }
   if (relativePath.startsWith('/') || /^[a-zA-Z]:/.test(relativePath)) {
-    throw new Error('完整备份包包含绝对路径')
+    throw new Error('全量备份包包含绝对路径')
   }
   const parts = relativePath.split('/')
   if (parts.some((part) => !part || part === '.' || part === '..')) {
-    throw new Error('完整备份包包含越界文件路径')
+    throw new Error('全量备份包包含越界文件路径')
   }
+}
+
+function resolveBackupPackagePath(fileName: string): string {
+  const normalizedFileName = basename(fileName)
+  if (
+    fileName.includes('/') ||
+    fileName.includes('\\') ||
+    normalizedFileName !== fileName ||
+    normalizedFileName === '.' ||
+    normalizedFileName === '..' ||
+    !normalizedFileName.toLowerCase().endsWith(`.${FULL_BACKUP_EXTENSION}`)
+  ) {
+    throw new Error('全量备份文件名无效')
+  }
+  return join(getBackupFolder(), normalizedFileName)
 }
 
 function removeStaleSqliteWalFiles(): void {
