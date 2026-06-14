@@ -31,6 +31,13 @@ import type {
   AnnualIntegratedChangePreview,
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
+  SocialBaseApplyInput,
+  SocialBaseApplyResult,
+  SocialBaseBatchSelection,
+  SocialBaseChangeRow,
+  SocialBaseManualChange,
+  SocialBasePreview,
+  SocialBasePreviewInput,
   SocialInsuranceBaseExportInput,
   SocialInsuranceBaseExportResult,
   WorksheetRecordValue
@@ -335,7 +342,11 @@ export async function generatePersonalTaxImportWorkbook(
 
   const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
-  const filePath = join(outputDir, `社保个税_正常工资薪金所得_${timestamp()}.xls`)
+  const taxUnitStem = ((await readUnitSettings()).unitFullName || '').replace(/[\\/:*?"<>|\s]/g, '')
+  const filePath = join(
+    outputDir,
+    taxUnitStem ? `${taxUnitStem}个税导入.xls` : `个税导入_${timestamp()}.xls`
+  )
   await writePersonalTaxWorkbook(
     filePath,
     input.templateWorkbookPath ?? resolveBuiltinTemplatePath('正常工资薪金所得.xls'),
@@ -460,6 +471,412 @@ export async function exportSocialInsuranceBaseWorkbook(
     housingAmountTotal,
     warnings
   }
+}
+
+// ===================== 社保基数两阶段流程（数据源 + 预览确认 + 回写） =====================
+
+type SocialBaseManualResolvable = SocialBaseManualChange & {
+  batchRows: Array<{ batchCode: string; rowId: number }>
+}
+
+type SocialBasePlan = {
+  autoChanges: IntegratedChange[]
+  manual: SocialBaseManualResolvable[]
+  missing: AnnualIntegratedChangePreview[]
+  existingRowCount: number
+}
+
+type SocialBaseResolvedSource = {
+  salaryRows: AnnualSalaryRow[]
+  people: AnnualSourcePerson[]
+  housingByIdCard: Map<string, AnnualHousingAccountRow>
+  unitName: string
+  canWriteSalaryWorkbook: boolean
+  warnings: string[]
+}
+
+function peopleFromSalaryRows(salaryRows: AnnualSalaryRow[]): AnnualSourcePerson[] {
+  return salaryRows
+    .filter((row) => row.idCard && row.name)
+    .map((row) => ({
+      idCard: row.idCard,
+      name: row.name,
+      values: {
+        公积金: roundMoney(row.housing),
+        养老保险缴费: roundMoney(row.pension),
+        职业年金缴费: roundMoney(row.annuity),
+        医疗保险: roundMoney(row.medical),
+        失业保险: roundMoney(row.unemployment)
+      }
+    }))
+}
+
+async function resolveSocialBaseSource(input: SocialBasePreviewInput): Promise<SocialBaseResolvedSource> {
+  const warnings: string[] = []
+  if (input.dataSourceMode === 'salary-workbook') {
+    if (!input.salaryWorkbookPath) throw new Error('数据源为工资表，但未检测到工资表文件，请确认导入文件夹后刷新重试')
+    const sources = await readAnnualSources({
+      salaryWorkbookPath: input.salaryWorkbookPath,
+      housingAccountWorkbookPath: input.housingAccountWorkbookPath,
+      insuranceDetailWorkbookPaths: []
+    })
+    const prepared = prepareAnnualSources(sources)
+    warnings.push(...prepared.warnings)
+    if (prepared.nameIdCardMismatches.length > 0) {
+      warnings.push(`有 ${prepared.nameIdCardMismatches.length} 条五险明细同名但身份证不同，已跳过这些明细的工资表回写。`)
+    }
+    return {
+      salaryRows: sources.salaryRows,
+      people: prepared.people,
+      housingByIdCard: prepared.housingByIdCard,
+      unitName: sources.unitName,
+      canWriteSalaryWorkbook: true,
+      warnings
+    }
+  }
+
+  const salaryRows = await buildAnnualSalaryRowsFromActiveWorksheet()
+  const housingByIdCard = input.housingAccountWorkbookPath
+    ? await readHousingAccountRowsFromWorkbook(input.housingAccountWorkbookPath)
+    : new Map<string, AnnualHousingAccountRow>()
+  const settings = await readUnitSettings()
+  return {
+    salaryRows,
+    people: peopleFromSalaryRows(salaryRows),
+    housingByIdCard,
+    unitName: settings.unitFullName || '',
+    canWriteSalaryWorkbook: false,
+    warnings
+  }
+}
+
+// 与 buildAnnualIntegratedPlan 同源分组，但对多批次歧义项额外暴露可选批次，供用户选目标批次（默认 001）。
+async function buildSocialBaseIntegratedPlan(sourcePeople: AnnualSourcePerson[]): Promise<SocialBasePlan> {
+  const worksheet = getWorksheetByName('在职工资')
+  const columns = getWorksheetLocalColumns(worksheet)
+  const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
+  const nameColumn = columns.find((column) => column.field.name === '姓名')?.columnName
+  const batchColumn = columns.find((column) => column.field.name === '工资批次编码')?.columnName
+  if (!idColumn) throw new Error('在职工资缺少证件号码字段')
+  const fieldColumns = new Map(columns.map((column) => [column.field.name, column.columnName]))
+  const database = await getDatabase()
+  const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
+  if (rows.length === 0) {
+    return { autoChanges: [], manual: [], missing: [], existingRowCount: 0 }
+  }
+
+  const latestByIdBatch = new Map<string, Record<string, unknown>>()
+  for (const row of rows) {
+    const idCard = normalizeIdCard(row[idColumn])
+    if (!idCard) continue
+    const key = batchColumn ? `${idCard}::${text(row[batchColumn])}` : idCard
+    const previous = latestByIdBatch.get(key)
+    if (!previous || num(row.id) > num(previous.id)) latestByIdBatch.set(key, row)
+  }
+  const rowsByIdCard = new Map<string, Record<string, unknown>[]>()
+  for (const row of latestByIdBatch.values()) {
+    const idCard = normalizeIdCard(row[idColumn])
+    const grouped = rowsByIdCard.get(idCard) ?? []
+    grouped.push(row)
+    rowsByIdCard.set(idCard, grouped)
+  }
+
+  const autoChanges: IntegratedChange[] = []
+  const manual: SocialBaseManualResolvable[] = []
+  const missing: AnnualIntegratedChangePreview[] = []
+  for (const person of sourcePeople) {
+    const personRows = rowsByIdCard.get(person.idCard)
+    if (!personRows) {
+      for (const fieldName of INTEGRATED_FIELDS) {
+        if (!(fieldName in person.values)) continue
+        missing.push({
+          idCard: person.idCard,
+          name: person.name,
+          fieldName,
+          sourceValue: roundMoney(num(person.values[fieldName])),
+          targetValue: 0,
+          reason: '在职工资中未找到该身份证'
+        })
+      }
+      continue
+    }
+    for (const fieldName of INTEGRATED_FIELDS) {
+      if (!(fieldName in person.values)) continue
+      const columnName = fieldColumns.get(fieldName)
+      if (!columnName) continue
+      const sourceValue = roundMoney(num(person.values[fieldName]))
+      const targetValue = roundMoney(personRows.reduce((sum, row) => sum + num(row[columnName]), 0))
+      if (roundMoney(sourceValue - targetValue) === 0) continue
+      const decision = decideIntegratedUpdate(personRows, columnName, sourceValue, batchColumn)
+      const base = {
+        idCard: person.idCard,
+        name: person.name || (nameColumn ? text(personRows[0]?.[nameColumn]) : ''),
+        fieldName,
+        sourceValue,
+        targetValue
+      }
+      if (decision.ok) {
+        autoChanges.push({ ...base, reason: decision.reason, updates: decision.updates })
+      } else {
+        const batchRows = personRows.map((row) => ({
+          batchCode: (batchColumn ? text(row[batchColumn]) : '') || '(无批次)',
+          rowId: num(row.id),
+          currentValue: roundMoney(num(row[columnName]))
+        }))
+        const defaultBatchCode = batchRows.find((row) => row.batchCode === '001')?.batchCode ?? batchRows[0]?.batchCode ?? '001'
+        manual.push({
+          ...base,
+          reason: decision.reason,
+          batchOptions: batchRows.map((row) => ({ batchCode: row.batchCode, currentValue: row.currentValue })),
+          defaultBatchCode,
+          batchRows: batchRows.map((row) => ({ batchCode: row.batchCode, rowId: row.rowId }))
+        })
+      }
+    }
+  }
+  return { autoChanges, manual, missing, existingRowCount: rows.length }
+}
+
+function resolveSocialBaseManual(
+  manual: SocialBaseManualResolvable[],
+  batchSelections: SocialBaseBatchSelection[]
+): IntegratedChange[] {
+  const selectionByKey = new Map(
+    batchSelections.map((selection) => [`${selection.idCard}::${selection.fieldName}`, selection.batchCode])
+  )
+  return manual.map((item) => {
+    const chosen = selectionByKey.get(`${item.idCard}::${item.fieldName}`) ?? item.defaultBatchCode
+    return {
+      idCard: item.idCard,
+      name: item.name,
+      fieldName: item.fieldName,
+      sourceValue: item.sourceValue,
+      targetValue: item.targetValue,
+      reason: `多批次已选批次 ${chosen}`,
+      updates: item.batchRows.map((row) => ({
+        rowId: row.rowId,
+        value: row.batchCode === chosen ? item.sourceValue : 0
+      }))
+    }
+  })
+}
+
+function changedIdsFromPlan(plan: SocialBasePlan): { changed: Set<string>; manual: Set<string> } {
+  const changed = new Set<string>()
+  const manual = new Set<string>()
+  for (const change of plan.autoChanges) changed.add(change.idCard)
+  for (const item of plan.manual) {
+    changed.add(item.idCard)
+    manual.add(item.idCard)
+  }
+  return { changed, manual }
+}
+
+export async function previewSocialInsuranceBase(input: SocialBasePreviewInput): Promise<SocialBasePreview> {
+  const source = await resolveSocialBaseSource(input)
+  const baseRows = socialBaseRowsFromSalaryRows(source.salaryRows)
+  if (baseRows.length === 0) throw new Error('没有可导出的人员（数据源中缺少可计算社保基数的工资字段）')
+  const plan = await buildSocialBaseIntegratedPlan(source.people)
+  const { changed } = changedIdsFromPlan(plan)
+  const housingAmountTotal = roundMoney(
+    source.salaryRows.reduce((total, row) => total + roundWholeMoney(row.housing), 0)
+  )
+  const warnings = [...source.warnings]
+  if (plan.existingRowCount === 0) {
+    warnings.push('在职工资当前为空，确认后将按数据源人员直接写入在职工资。')
+  }
+  return {
+    dataSourceMode: input.dataSourceMode,
+    unitName: source.unitName,
+    personCount: baseRows.length,
+    changedPeopleCount: changed.size,
+    baseTotal: roundMoney(baseRows.reduce((total, row) => total + row.base, 0)),
+    housingAmountTotal,
+    autoChanges: plan.autoChanges.map(({ updates: _updates, ...rest }) => rest).slice(0, 500),
+    manualChanges: plan.manual
+      .map(({ batchRows: _batchRows, ...rest }) => rest)
+      .slice(0, 500),
+    missing: plan.missing.slice(0, 5000),
+    canWriteSalaryWorkbook: source.canWriteSalaryWorkbook,
+    housingAccountAvailable: Boolean(input.housingAccountWorkbookPath),
+    warnings
+  }
+}
+
+export async function applySocialInsuranceBase(input: SocialBaseApplyInput): Promise<SocialBaseApplyResult> {
+  const source = await resolveSocialBaseSource(input)
+  const baseRows = socialBaseRowsFromSalaryRows(source.salaryRows)
+  if (baseRows.length === 0) throw new Error('没有可导出的人员（数据源中缺少可计算社保基数的工资字段）')
+
+  const outputDir = getMonthlyOutputPath()
+  mkdirSync(outputDir, { recursive: true })
+  const stamp = timestamp()
+  const warnings = [...source.warnings]
+
+  // 算一次计划：既用于 DB 回写，也用于变动明细的"变动人员"判定
+  const plan = await buildSocialBaseIntegratedPlan(source.people)
+  const { changed: changedIds, manual: manualIds } = changedIdsFromPlan(plan)
+
+  // 1) 回写花名册（可叠加，仅工资表数据源）+ 复核闸门（五险一金合计一致）
+  let salaryOutputPath: string | undefined
+  let salaryBackupPath: string | undefined
+  let salaryApplied: number | undefined
+  if (source.canWriteSalaryWorkbook && input.salaryWorkbookPath) {
+    const writeBack = await writeAnnualValuesBackToSalaryWorkbook({
+      salaryWorkbookPath: input.salaryWorkbookPath,
+      outputDir,
+      stamp,
+      people: source.people
+    })
+    salaryOutputPath = writeBack.salaryOutputPath
+    salaryBackupPath = writeBack.salaryBackupPath
+    salaryApplied = writeBack.salaryApplied
+    validateUpdatedSalaryInsuranceTotals(source.people, await parseSalaryWorkbook(writeBack.salaryOutputPath))
+  }
+
+  // 2) 回写数据库在职工资（可叠加，按批次；applyIntegratedPlan 内部按公式重算应发/扣款/实发）
+  let integratedApplied = 0
+  if (input.writeDatabase) {
+    if (plan.existingRowCount === 0) {
+      if (salaryOutputPath) {
+        integratedApplied = await seedIntegratedActiveFromSalarySummary(
+          await parseSalaryWorkbook(salaryOutputPath),
+          source.people
+        )
+      } else {
+        warnings.push('在职工资为空且无工资表可作为种子数据，已跳过数据库回写。')
+      }
+    } else {
+      const changes = [...plan.autoChanges, ...resolveSocialBaseManual(plan.manual, input.batchSelections)]
+      await applyIntegratedPlan({ changes, manual: [], missing: [], existingRowCount: plan.existingRowCount })
+      integratedApplied = changes.length
+    }
+  } else if (plan.manual.length > 0 || plan.autoChanges.length > 0) {
+    warnings.push('本次未勾选回写数据库，五险一金未写入在职工资（仅生成导入表/变动明细）。')
+  }
+
+  // 3) 导入表：社保基数、公积金（个税由其独立按钮生成，不在此流程）
+  const unitStem = (source.unitName || '').replace(/[\\/:*?"<>|\s]/g, '')
+  const socialBasePath = join(
+    outputDir,
+    unitStem ? `${unitStem}社保基数调整.xlsx` : `社保基数调整_${stamp}.xlsx`
+  )
+  await writeSocialInsuranceBaseWorkbook(
+    socialBasePath,
+    input.socialBaseTemplatePath ?? resolveBuiltinTemplatePath('参保职工列表模板.xlsx'),
+    baseRows
+  )
+
+  let housingDeclarationPath: string | undefined
+  let housingMissingLogPath: string | undefined
+  let housingAmountTotal: number | undefined
+  if (input.housingAccountWorkbookPath) {
+    const housingOutput = await writeHousingDeclarationWorkbook({
+      outputDir,
+      stamp,
+      unitName: source.unitName,
+      templateWorkbookPath: input.housingTemplatePath ?? resolveBuiltinTemplatePath('grjcjsList.xls'),
+      salaryRows: source.salaryRows,
+      housingByIdCard: source.housingByIdCard
+    })
+    housingDeclarationPath = housingOutput.workbookPath
+    housingMissingLogPath = housingOutput.missingLogPath
+    housingAmountTotal = housingOutput.amountTotal
+    const archived = archiveConsumedImportFile(input.housingAccountWorkbookPath)
+    if (archived) warnings.push(`grxxlist.xls 已归档到 imported 文件夹：${archived}`)
+  }
+
+  // 4) 变动明细表（只列五险一金有变动的人，数值为变动后新值）
+  let changeDetailPath: string | undefined
+  const changeRows = buildSocialBaseChangeRows(source.people, changedIds, manualIds)
+  if (changeRows.length > 0) {
+    changeDetailPath = join(outputDir, `社保个税_五险一金变动明细_${stamp}.xlsx`)
+    writeChangeDetailWorkbook(changeDetailPath, source.unitName, changeRows)
+  }
+
+  const messages = [`社保基数 ${baseRows.length} 人，五险一金变动 ${changedIds.size} 人`]
+  if (salaryApplied) messages.push(`工资表回写 ${salaryApplied} 人`)
+  if (integratedApplied) messages.push(`在职工资回写 ${integratedApplied} 项`)
+
+  return {
+    ok: true,
+    message: `已生成：${messages.join('，')}`,
+    socialBasePath,
+    housingDeclarationPath,
+    housingMissingLogPath,
+    changeDetailPath,
+    changedPeopleCount: changedIds.size,
+    salaryOutputPath,
+    salaryBackupPath,
+    salaryApplied,
+    integratedApplied,
+    baseTotal: roundMoney(baseRows.reduce((total, row) => total + row.base, 0)),
+    housingAmountTotal,
+    warnings
+  }
+}
+
+function buildSocialBaseChangeRows(
+  people: AnnualSourcePerson[],
+  changedIds: Set<string>,
+  manualIds: Set<string>
+): SocialBaseChangeRow[] {
+  return people
+    .filter((person) => changedIds.has(person.idCard))
+    .map((person) => {
+      const housing = roundMoney(num(person.values['公积金']))
+      const pension = roundMoney(num(person.values['养老保险缴费']))
+      const annuity = roundMoney(num(person.values['职业年金缴费']))
+      const medical = roundMoney(num(person.values['医疗保险']))
+      const unemployment = roundMoney(num(person.values['失业保险']))
+      return {
+        idCard: person.idCard,
+        name: person.name,
+        pension,
+        annuity,
+        medical,
+        unemployment,
+        housing,
+        deductionTotal: roundMoney(pension + annuity + medical + unemployment + housing),
+        netPay: 0,
+        batchNote: manualIds.has(person.idCard) ? '多批次已选批次' : ''
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
+}
+
+// 变动明细表是内部留痕/核对用，不导内网系统，故自排版即可，不套政府模板。
+function writeChangeDetailWorkbook(filePath: string, unitName: string, rows: SocialBaseChangeRow[]): void {
+  const title = `${unitName || ''}五险一金变动明细（仅变动人员，数值为变动后新值）`.trim()
+  const header = ['序号', '姓名', '证件号码', '公积金', '养老保险', '职业年金', '医疗保险', '失业保险', '五险一金合计', '备注']
+  const aoa: Array<Array<string | number>> = [
+    [title, '', '', '', '', '', '', '', '', ''],
+    header,
+    ...rows.map((row, index) => [
+      index + 1,
+      row.name,
+      row.idCard,
+      row.housing,
+      row.pension,
+      row.annuity,
+      row.medical,
+      row.unemployment,
+      row.deductionTotal,
+      row.batchNote ?? ''
+    ])
+  ]
+  const sheet = XLSX.utils.aoa_to_sheet([aoa[0], header])
+  sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }]
+  sheet['!cols'] = [6, 10, 20, 10, 10, 10, 10, 10, 12, 16].map((wch) => ({ wch }))
+  aoa.slice(2).forEach((row, index) => {
+    const rowIndex = index + 2
+    writeRowValues(sheet, rowIndex, row)
+    setCellAsText(sheet, rowIndex, 2)
+  })
+  setSheetRef(sheet, Math.max(getSheetLastRow(sheet), aoa.length - 1), header.length - 1)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '五险一金变动明细')
+  writeWorkbook(filePath, workbook, 'xlsx')
 }
 
 async function buildPersonalTaxRows(incomeFields: string[]): Promise<PersonalTaxRow[]> {
@@ -2070,10 +2487,8 @@ async function writeAnnualValuesBackToSalaryWorkbook(input: {
   stamp: string
   people: AnnualSourcePerson[]
 }): Promise<{ salaryOutputPath: string; salaryBackupPath: string; salaryApplied: number }> {
-  const salaryBackupPath = join(
-    input.outputDir,
-    `社保个税_${safeFileStem(input.salaryWorkbookPath)}_原始备份_${input.stamp}${extname(input.salaryWorkbookPath) || '.xlsx'}`
-  )
+  // 工资表备份沿用原文件名（放在输出目录，不与导入文件夹里的源文件冲突）
+  const salaryBackupPath = join(input.outputDir, basename(input.salaryWorkbookPath))
   copyFileSync(input.salaryWorkbookPath, salaryBackupPath)
   const salaryOutputPath = input.salaryWorkbookPath
   const salaryApplied = await writeAnnualValuesToSalaryWorkbook({

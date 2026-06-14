@@ -77,10 +77,12 @@ import { assertInsideBusinessRoots, payrollInstance } from '../config/paths'
 import type { PayrollInstanceSummary } from '../../shared/payrollInstance'
 import {
   applyAnnualAdjustment,
+  applySocialInsuranceBase,
   chooseAnnualAdjustmentFiles,
   exportSocialInsuranceBaseWorkbook,
   generatePersonalTaxImportWorkbook,
-  previewAnnualAdjustment
+  previewAnnualAdjustment,
+  previewSocialInsuranceBase
 } from '../services/annualAdjustment'
 import {
   generatePerformancePayroll,
@@ -212,6 +214,10 @@ import type {
   AnnualAdjustmentFilePick,
   AnnualAdjustmentPreview,
   AnnualAdjustmentPreviewInput,
+  SocialBasePreviewInput,
+  SocialBasePreview,
+  SocialBaseApplyInput,
+  SocialBaseApplyResult,
   ExchangeStatus,
   FullBackupSummary,
   ExchangePackagePreview,
@@ -1248,6 +1254,18 @@ export function registerAppIpc(): void {
     'social-insurance:export-base',
     (_event, input: SocialInsuranceBaseExportInput): Promise<SocialInsuranceBaseExportResult> =>
       exportSocialInsuranceBaseWorkbook(input)
+  )
+
+  ipcMain.handle(
+    'social-base:preview',
+    (_event, input: SocialBasePreviewInput): Promise<SocialBasePreview> =>
+      previewSocialInsuranceBase(input)
+  )
+
+  ipcMain.handle(
+    'social-base:apply',
+    (_event, input: SocialBaseApplyInput): Promise<SocialBaseApplyResult> =>
+      applySocialInsuranceBase(input)
   )
 
   ipcMain.handle(

@@ -1012,6 +1012,88 @@ export type SocialInsuranceBaseExportResult = {
   warnings?: string[]
 }
 
+// ===== 社保基数两阶段（预览→确认→应用）流程 =====
+// 数据源：salary-workbook=工资表花名册；integrated=本地在职工资(一体化数据)。默认 salary-workbook。
+export type SocialBaseDataSourceMode = 'salary-workbook' | 'integrated'
+
+export type SocialBasePreviewInput = {
+  dataSourceMode: SocialBaseDataSourceMode
+  salaryWorkbookPath?: string
+  housingAccountWorkbookPath?: string
+  socialBaseTemplatePath?: string
+  housingTemplatePath?: string
+}
+
+// 多批次歧义时的可选批次及其当前值，供用户选目标批次（默认 001）
+export type SocialBaseBatchOption = {
+  batchCode: string
+  currentValue: number
+}
+
+export type SocialBaseManualChange = AnnualIntegratedChangePreview & {
+  batchOptions: SocialBaseBatchOption[]
+  defaultBatchCode: string
+}
+
+// 用户对某人某字段选定的目标批次
+export type SocialBaseBatchSelection = {
+  idCard: string
+  fieldName: string
+  batchCode: string
+}
+
+export type SocialBasePreview = {
+  dataSourceMode: SocialBaseDataSourceMode
+  unitName: string
+  personCount: number
+  changedPeopleCount: number
+  baseTotal: number
+  housingAmountTotal: number
+  autoChanges: AnnualIntegratedChangePreview[]
+  manualChanges: SocialBaseManualChange[]
+  missing: AnnualIntegratedChangePreview[]
+  canWriteSalaryWorkbook: boolean
+  housingAccountAvailable: boolean
+  warnings: string[]
+}
+
+export type SocialBaseApplyInput = SocialBasePreviewInput & {
+  // 多批次人工项的批次选择；缺省按 defaultBatchCode(001)
+  batchSelections: SocialBaseBatchSelection[]
+  writeDatabase: boolean
+}
+
+// 变动明细表行：只保留新值（旧值不保留）
+export type SocialBaseChangeRow = {
+  idCard: string
+  name: string
+  pension: number
+  annuity: number
+  medical: number
+  unemployment: number
+  housing: number
+  deductionTotal: number
+  netPay: number
+  batchNote?: string
+}
+
+export type SocialBaseApplyResult = {
+  ok: boolean
+  message: string
+  socialBasePath: string
+  housingDeclarationPath?: string
+  housingMissingLogPath?: string
+  changeDetailPath?: string
+  changedPeopleCount: number
+  salaryOutputPath?: string
+  salaryBackupPath?: string
+  salaryApplied?: number
+  integratedApplied?: number
+  baseTotal: number
+  housingAmountTotal?: number
+  warnings: string[]
+}
+
 export type ImportBatchSummary = {
   id: number
   sourceName: string

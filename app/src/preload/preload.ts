@@ -80,6 +80,10 @@ import type {
   PerformancePayrollLocalGenerateInput,
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
+  SocialBasePreviewInput,
+  SocialBasePreview,
+  SocialBaseApplyInput,
+  SocialBaseApplyResult,
   SocialInsuranceBaseExportInput,
   SocialInsuranceBaseExportResult,
   FullBackupSummary,
@@ -382,6 +386,10 @@ const salaryApi = {
     input: SocialInsuranceBaseExportInput
   ): Promise<SocialInsuranceBaseExportResult> =>
     ipcRenderer.invoke('social-insurance:export-base', input),
+  previewSocialInsuranceBase: (input: SocialBasePreviewInput): Promise<SocialBasePreview> =>
+    ipcRenderer.invoke('social-base:preview', input),
+  applySocialInsuranceBase: (input: SocialBaseApplyInput): Promise<SocialBaseApplyResult> =>
+    ipcRenderer.invoke('social-base:apply', input),
   generatePerformancePayroll: (
     input: PerformancePayrollGenerateInput
   ): Promise<PerformancePayrollGenerateResult> =>
