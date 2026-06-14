@@ -40,6 +40,7 @@ import type {
   SocialBasePreviewInput,
   SocialInsuranceBaseExportInput,
   SocialInsuranceBaseExportResult,
+  UnitSettings,
   WorksheetRecordValue
 } from '../../shared/types'
 
@@ -143,6 +144,17 @@ type SocialInsuranceBaseRow = {
   base: number
 }
 
+type ChangeDetailContext = {
+  unitCode: string
+  unitName: string
+  salaryTypeCode: string
+  salaryTypeName: string
+  year: number
+  month: number
+  batchCode: string
+  batchName: string
+}
+
 type HousingDeclarationWriteResult = {
   workbookPath: string
   missingLogPath?: string
@@ -151,6 +163,21 @@ type HousingDeclarationWriteResult = {
 }
 
 const INTEGRATED_FIELDS = ['公积金', '养老保险缴费', '职业年金缴费', '医疗保险', '失业保险']
+const CHANGE_DETAIL_SALARY_TYPES = ['行政', '事业', '行政离休', '行政退休', '事业离休', '事业退休', '司法']
+const CHANGE_DETAIL_SALARY_BATCHES = ['工资', '数币']
+const CHANGE_DETAIL_REMARK_OPTIONS = [
+  '车补',
+  '取暖补助',
+  '出勤补助',
+  '山区补助',
+  '地区差别补助',
+  '乡镇补贴',
+  '特岗津贴',
+  '独生子女费',
+  '电话补助',
+  '临时补助',
+  '其他'
+]
 
 const TAX_HEADERS = [
   '工号',
@@ -707,6 +734,7 @@ export async function applySocialInsuranceBase(input: SocialBaseApplyInput): Pro
   const source = await resolveSocialBaseSource(input)
   const baseRows = socialBaseRowsFromSalaryRows(source.salaryRows)
   if (baseRows.length === 0) throw new Error('没有可导出的人员（数据源中缺少可计算社保基数的工资字段）')
+  const unitSettings = await readUnitSettings()
 
   const outputDir = getMonthlyOutputPath()
   mkdirSync(outputDir, { recursive: true })
@@ -791,7 +819,7 @@ export async function applySocialInsuranceBase(input: SocialBaseApplyInput): Pro
   const changeRows = buildSocialBaseChangeRows(source.people, changedIds, manualIds)
   if (changeRows.length > 0) {
     changeDetailPath = join(outputDir, `社保个税_五险一金变动明细_${stamp}.xlsx`)
-    writeChangeDetailWorkbook(changeDetailPath, source.unitName, changeRows)
+    writeChangeDetailWorkbook(changeDetailPath, buildChangeDetailContext(unitSettings, source.unitName), changeRows)
   }
 
   const messages = [`社保基数 ${baseRows.length} 人，五险一金变动 ${changedIds.size} 人`]
@@ -845,17 +873,46 @@ function buildSocialBaseChangeRows(
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
 }
 
-// 变动明细表是内部留痕/核对用，不导内网系统，故自排版即可，不套政府模板。
-function writeChangeDetailWorkbook(filePath: string, unitName: string, rows: SocialBaseChangeRow[]): void {
-  const title = `${unitName || ''}五险一金变动明细（仅变动人员，数值为变动后新值）`.trim()
-  const header = ['序号', '姓名', '证件号码', '公积金', '养老保险', '职业年金', '医疗保险', '失业保险', '五险一金合计', '备注']
+// 变动明细表是内部留痕/核对用，前置字段对齐工资导入表，便于核对单位/类别/年月/批次。
+function writeChangeDetailWorkbook(filePath: string, context: ChangeDetailContext, rows: SocialBaseChangeRow[]): void {
+  const header = [
+    '单位编码',
+    '单位名称',
+    '工资类别编码',
+    '工资类别名称',
+    '业务年度',
+    '月份',
+    '姓名',
+    '证件号码',
+    '工资批次编码',
+    '工资批次名称',
+    '内设部门编码',
+    '内设部门名称',
+    '部门内序号',
+    '公积金',
+    '养老保险',
+    '职业年金',
+    '医疗保险',
+    '失业保险',
+    '五险一金合计',
+    '备注'
+  ]
   const aoa: Array<Array<string | number>> = [
-    [title, '', '', '', '', '', '', '', '', ''],
     header,
     ...rows.map((row, index) => [
-      index + 1,
+      context.unitCode,
+      context.unitName,
+      context.salaryTypeCode,
+      context.salaryTypeName,
+      context.year,
+      context.month,
       row.name,
       row.idCard,
+      context.batchCode,
+      context.batchName,
+      '',
+      '',
+      index + 1,
       row.housing,
       row.pension,
       row.annuity,
@@ -865,18 +922,58 @@ function writeChangeDetailWorkbook(filePath: string, unitName: string, rows: Soc
       row.batchNote ?? ''
     ])
   ]
-  const sheet = XLSX.utils.aoa_to_sheet([aoa[0], header])
-  sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }]
-  sheet['!cols'] = [6, 10, 20, 10, 10, 10, 10, 10, 12, 16].map((wch) => ({ wch }))
-  aoa.slice(2).forEach((row, index) => {
-    const rowIndex = index + 2
+  const sheet = XLSX.utils.aoa_to_sheet([header])
+  sheet['!cols'] = [10, 24, 12, 12, 10, 8, 10, 20, 12, 12, 14, 14, 10, 10, 10, 10, 10, 10, 12, 16].map((wch) => ({ wch }))
+  aoa.slice(1).forEach((row, index) => {
+    const rowIndex = index + 1
     writeRowValues(sheet, rowIndex, row)
-    setCellAsText(sheet, rowIndex, 2)
+    for (const columnIndex of [0, 2, 7, 8]) setCellAsText(sheet, rowIndex, columnIndex)
   })
   setSheetRef(sheet, Math.max(getSheetLastRow(sheet), aoa.length - 1), header.length - 1)
   const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, sheet, '五险一金变动明细')
+  XLSX.utils.book_append_sheet(workbook, sheet, '002')
+  appendChangeDetailLookupSheets(workbook, context)
   writeWorkbook(filePath, workbook, 'xlsx')
+}
+
+function buildChangeDetailContext(unitSettings: UnitSettings, sourceUnitName: string): ChangeDetailContext {
+  const salaryType = resolveDefaultActiveSalaryType(unitSettings)
+  const now = new Date()
+  return {
+    unitCode: text(unitSettings.unitImportCode),
+    unitName: text(unitSettings.unitFullName) || text(sourceUnitName),
+    salaryTypeCode: salaryType.code,
+    salaryTypeName: salaryType.name,
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    batchCode: '001',
+    batchName: '工资'
+  }
+}
+
+function resolveDefaultActiveSalaryType(unitSettings: UnitSettings): { code: string; name: string } {
+  const configured = unitSettings.salaryExportSaltypes?.[0]
+  const rawName = text(configured?.saltype_name)
+  const nameMatch = rawName.match(/^(\d{3})(.*)$/)
+  const rawId = text(configured?.saltype_id)
+  const code = nameMatch?.[1] || (rawId ? rawId.padStart(3, '0') : '') || '002'
+  const name = text(nameMatch?.[2] ?? rawName.replace(/^\d+/, '')) || '事业'
+  return { code, name }
+}
+
+function appendChangeDetailLookupSheets(workbook: XLSX.WorkBook, context: ChangeDetailContext): void {
+  appendSingleColumnSheet(workbook, '单位', [context.unitName])
+  appendSingleColumnSheet(workbook, '工资类别', CHANGE_DETAIL_SALARY_TYPES)
+  appendSingleColumnSheet(workbook, '工资批次', CHANGE_DETAIL_SALARY_BATCHES)
+  appendSingleColumnSheet(workbook, '备注二', CHANGE_DETAIL_REMARK_OPTIONS)
+  appendSingleColumnSheet(workbook, '备注三', CHANGE_DETAIL_REMARK_OPTIONS)
+  appendSingleColumnSheet(workbook, '备注一', CHANGE_DETAIL_REMARK_OPTIONS)
+}
+
+function appendSingleColumnSheet(workbook: XLSX.WorkBook, sheetName: string, values: string[]): void {
+  const sheet = XLSX.utils.aoa_to_sheet(values.map((value) => [value]))
+  sheet['!cols'] = [{ wch: Math.max(12, ...values.map((value) => value.length + 4)) }]
+  XLSX.utils.book_append_sheet(workbook, sheet, sheetName)
 }
 
 async function buildPersonalTaxRows(incomeFields: string[]): Promise<PersonalTaxRow[]> {
