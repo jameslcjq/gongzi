@@ -89,7 +89,10 @@ export function reconcileActiveBackpayPeople(input: {
     const sourceIdCard = normalizeIdCard(person.idCard)
     const idCard = normalizeIdCard(input.resolveIdCard?.(person.idCard, person.name) ?? person.idCard)
     const source = activeBackpayAdjustmentTotals(person)
-    if (!sourceIdCard || (source.increaseTotal === 0 && source.deductionTotal === 0)) continue
+    // 补扣口径：补发负数 + 当月个税(salary 已按个税文件 applyTaxToSalarySummary 写入 person)
+    const sourceTax = roundMoney(num(person.values['当月个人所得税']))
+    const sourceDeduction = roundMoney(source.deductionTotal + sourceTax)
+    if (!sourceIdCard || (source.increaseTotal === 0 && sourceDeduction === 0)) continue
     checkedCount += 1
     const dbRow = activeById.get(idCard) ??
       activeById.get(sourceIdCard) ??
@@ -125,7 +128,7 @@ export function reconcileActiveBackpayPeople(input: {
       name: person.name,
       idCard,
       fieldName: '补扣工资',
-      sourceValue: source.deductionTotal,
+      sourceValue: sourceDeduction,
       databaseValue: dbRow ? roundMoney(num(dbRow.values['补扣工资'])) : 0
     })
     pushDifferenceIssue(issues, {
@@ -145,7 +148,7 @@ export function reconcileActiveBackpayPeople(input: {
       name: person.name,
       idCard,
       fieldName: '补发工资明细-补扣',
-      sourceValue: source.deductionTotal,
+      sourceValue: sourceDeduction,
       reportValue: reportTotals.deductionTotal
     })
   }
