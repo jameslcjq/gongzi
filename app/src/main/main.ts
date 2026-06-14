@@ -152,6 +152,7 @@ function createWindow(): void {
   })
 
   mainWindowRef = mainWindow
+  mainWindow.maximize()
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
