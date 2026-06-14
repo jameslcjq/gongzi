@@ -34,11 +34,8 @@ const emit = defineEmits<{
   (event: 'openWorksheet', worksheetName: string): void
 }>()
 
-const backups = ref<BackupSummary[]>([])
 const fullBackups = ref<BackupSummary[]>([])
-const backupsLoading = ref(false)
 const fullBackupsLoading = ref(false)
-const creatingBackup = ref(false)
 const creatingFullBackup = ref(false)
 const restoringFullBackup = ref(false)
 const wiping = ref(false)
@@ -244,17 +241,10 @@ async function autofillBudgetProjectCodes() {
 }
 
 async function refreshBackupLists() {
-  backupsLoading.value = true
   fullBackupsLoading.value = true
   try {
-    const [databaseBackups, fullBackupPackages] = await Promise.all([
-      window.salaryApi.listBackups(),
-      window.salaryApi.listFullBackups()
-    ])
-    backups.value = databaseBackups
-    fullBackups.value = fullBackupPackages
+    fullBackups.value = await window.salaryApi.listFullBackups()
   } finally {
-    backupsLoading.value = false
     fullBackupsLoading.value = false
   }
 }
@@ -265,19 +255,6 @@ async function refreshRecycleBin() {
     recycleBatches.value = await window.salaryApi.listRecycleBinBatches(200)
   } finally {
     recycleLoading.value = false
-  }
-}
-
-async function createBackup() {
-  creatingBackup.value = true
-  try {
-    const summary = await window.salaryApi.createBackup()
-    ElMessage.success(`已备份：${summary.fileName}`)
-    await refreshBackupLists()
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '备份失败')
-  } finally {
-    creatingBackup.value = false
   }
 }
 
@@ -292,25 +269,6 @@ async function createFullBackup() {
     ElMessage.error(error instanceof Error ? error.message : '全量备份失败')
   } finally {
     creatingFullBackup.value = false
-  }
-}
-
-async function restore(backup: BackupSummary) {
-  try {
-    await ElMessageBox.confirm(
-      `恢复后会用 ${backup.fileName} 覆盖当前数据库，应用将自动重启，是否继续？`,
-      '确认恢复',
-      { type: 'warning', confirmButtonText: '恢复并重启', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-
-  try {
-    await window.salaryApi.restoreBackup(backup.fileName)
-  } catch (error) {
-    if (error instanceof Error && error.message === '用户取消恢复') return
-    ElMessage.error(error instanceof Error ? error.message : '恢复失败')
   }
 }
 
@@ -672,28 +630,6 @@ function formatSize(bytes: number): string {
             </template>
           </el-table-column>
         </el-table>
-
-        <div class="settings-section database-snapshot-section">
-          <h4>数据库快照</h4>
-          <p>{{ databasePath || '初始化中' }}</p>
-          <div class="backup-actions">
-            <el-button :loading="creatingBackup" @click="createBackup">备份当前数据库</el-button>
-            <el-button @click="refreshBackupLists">刷新快照列表</el-button>
-          </div>
-        </div>
-
-        <el-table :data="backups" v-loading="backupsLoading" border size="small" height="420">
-          <el-table-column prop="fileName" label="文件名" min-width="240" show-overflow-tooltip />
-          <el-table-column label="大小" width="100" align="right">
-            <template #default="{ row }">{{ formatSize(row.sizeBytes) }}</template>
-          </el-table-column>
-          <el-table-column prop="createdAt" label="时间" min-width="200" />
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="restore(row)">恢复</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
       </el-tab-pane>
 
       <el-tab-pane label="回收站" name="recycle">
@@ -847,10 +783,6 @@ function formatSize(bytes: number): string {
   color: var(--text-3);
   font-size: 13px;
   line-height: 1.6;
-}
-
-.database-snapshot-section {
-  margin-top: 14px;
 }
 
 .settings-section .unit-lock-tip {
