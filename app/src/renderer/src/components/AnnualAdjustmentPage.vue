@@ -226,7 +226,7 @@ async function openOutputFolder(path?: string) {
       <div class="panel-title-row">
         <h2>导出社保、公积金</h2>
         <el-button type="primary" :loading="socialBaseLoading" @click="openSocialBasePreview">
-          生成公积金导入、社保基数
+          生成新五险一金
         </el-button>
       </div>
       <div class="source-row">

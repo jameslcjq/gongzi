@@ -4,17 +4,20 @@ import {
   get,
   getDatabase,
   refreshAllPersonnelStatuses,
-  run
+  run,
+  runWithLastId
 } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
 import { getWorksheetLocalColumns, quoteIdentifier } from '../db/schema'
 import type {
+  ActiveRetirementRevertPreview,
+  ActiveRetirementRevertResult,
   ActiveRetirementTransferPreview,
   ActiveRetirementTransferResult,
   WorksheetMeta,
   WorksheetRecordValue
 } from '../../shared/types'
-import { createOperationBatch, logRowsBeforeDelete } from './operationLog'
+import { createOperationBatch, logRecordSnapshots, logRowsBeforeDelete } from './operationLog'
 import {
   getWorksheetByName,
   tryFindColumnByName
@@ -45,6 +48,8 @@ type ActiveRetirementPlan = ActiveRetirementTransferPreview & {
 
 const activeWorksheetName = '在职工资'
 const retiredWorksheetName = '退休工资'
+const retireBatchKind = 'worksheet.retire-active-employee'
+const retireRevertBatchKind = 'worksheet.retire-active-employee.revert'
 const amountFieldsToClear = new Set([
   '住房补贴',
   '补发工资',
@@ -77,18 +82,19 @@ export async function retireActiveEmployee(
 
   await run(database, 'BEGIN TRANSACTION')
   try {
+    const batchMeta: Record<string, unknown> = {
+      selectedRecordId,
+      idCard: plan.idCard,
+      name: plan.name,
+      activeRecordIds: plan.activeRecordIds,
+      batches: plan.batches
+    }
     const batchId = await createOperationBatch(database, {
-      kind: 'worksheet.retire-active-employee',
+      kind: retireBatchKind,
       targetType: 'worksheet',
       targetName: `${activeWorksheetName}->${retiredWorksheetName}`,
       reason: '在职工资人员转入退休工资',
-      meta: {
-        selectedRecordId,
-        idCard: plan.idCard,
-        name: plan.name,
-        activeRecordIds: plan.activeRecordIds,
-        batches: plan.batches
-      }
+      meta: batchMeta
     })
 
     const idPlaceholders = plan.activeRecordIds.map(() => '?').join(', ')
@@ -101,17 +107,25 @@ export async function retireActiveEmployee(
       params: plan.activeRecordIds
     })
 
+    // 记下本次新建的退休行 id，撤销时据此精确删除，不会误删该人已有的退休记录。
+    const insertedRetiredIds: number[] = []
     for (const values of plan.targetRows) {
       const columns = Object.keys(values)
       const placeholders = columns.map(() => '?').join(', ')
-      await run(
+      const { lastId } = await runWithLastId(
         database,
         `INSERT INTO ${quoteIdentifier(plan.retiredWorksheet.name)}
           (${columns.map(quoteIdentifier).join(', ')}, "md_created_at", "md_updated_at")
          VALUES (${placeholders}, ?, ?)`,
         [...columns.map((column) => values[column]), now, now]
       )
+      if (Number.isFinite(lastId) && lastId > 0) insertedRetiredIds.push(lastId)
     }
+    batchMeta.insertedRetiredIds = insertedRetiredIds
+    await run(database, `UPDATE operation_batches SET meta_json = ? WHERE id = ?`, [
+      JSON.stringify(batchMeta),
+      batchId
+    ])
 
     await run(
       database,
@@ -441,4 +455,337 @@ async function markPersonnelRetiredAcrossWorksheets(
   }
 
   return updatedRows
+}
+
+type RetireBatchInfo = {
+  batchId: number
+  kind: string
+  idCard: string
+  name: string
+  batches: string[]
+  activeRecordIds: number[]
+  // null 表示旧版本退休批次未登记退休行，无法自动撤销
+  insertedRetiredIds: number[] | null
+}
+
+type RetireDeleteSnapshot = {
+  id: number
+  table_name: string
+  worksheet_name: string | null
+  record_id: number | null
+  before_values: string | null
+}
+
+export async function previewActiveRetirementRevert(
+  batchId: number
+): Promise<ActiveRetirementRevertPreview> {
+  const database = await getDatabase()
+  const info = await loadRetireBatch(database, batchId)
+  const base: ActiveRetirementRevertPreview = {
+    batchId,
+    canRevert: false,
+    idCard: info?.idCard ?? '',
+    name: info?.name ?? '',
+    batches: info?.batches ?? [],
+    activeRowsToRestore: 0,
+    retiredRowsToDelete: 0,
+    retiredRowsMissing: 0,
+    modifiedRetiredRows: 0
+  }
+
+  const blockMessage = await resolveRevertBlock(database, info, batchId)
+  if (blockMessage) return { ...base, message: blockMessage }
+
+  const insertedRetiredIds = info!.insertedRetiredIds ?? []
+  const activeRowsToRestore = await countActiveDeleteSnapshots(database, batchId)
+  const retiredStat = await inspectRetiredRows(database, insertedRetiredIds)
+  return {
+    ...base,
+    canRevert: true,
+    activeRowsToRestore,
+    retiredRowsToDelete: retiredStat.present,
+    retiredRowsMissing: retiredStat.missing,
+    modifiedRetiredRows: retiredStat.modified
+  }
+}
+
+export async function revertActiveRetirement(
+  batchId: number
+): Promise<ActiveRetirementRevertResult> {
+  const database = await getDatabase()
+  const info = await loadRetireBatch(database, batchId)
+  const blockMessage = await resolveRevertBlock(database, info, batchId)
+  if (blockMessage) throw new Error(blockMessage)
+
+  const insertedRetiredIds = info!.insertedRetiredIds ?? []
+  const snapshots = await all<RetireDeleteSnapshot>(
+    database,
+    `SELECT id, table_name, worksheet_name, record_id, before_values
+       FROM record_change_logs
+      WHERE batch_id = ?
+        AND table_name = ?
+        AND action = 'delete'
+        AND before_values IS NOT NULL
+      ORDER BY id ASC`,
+    [batchId, activeWorksheetName]
+  )
+
+  const result: ActiveRetirementRevertResult = {
+    batchId,
+    revertBatchId: 0,
+    idCard: info!.idCard,
+    name: info!.name,
+    restoredActiveRows: 0,
+    conflictActiveRows: 0,
+    deletedRetiredRows: 0,
+    statusRefreshed: false,
+    messages: []
+  }
+
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    const revertBatchId = await createOperationBatch(database, {
+      kind: retireRevertBatchKind,
+      targetType: 'worksheet',
+      targetName: `${retiredWorksheetName}->${activeWorksheetName}`,
+      reason: '撤销人员转退休，恢复为在职',
+      meta: {
+        sourceBatchId: batchId,
+        idCard: info!.idCard,
+        name: info!.name,
+        batches: info!.batches
+      }
+    })
+    result.revertBatchId = revertBatchId
+
+    // 1) 按原 id 补回在职工资行；若该 id 已被占用则跳过，不覆盖现有数据
+    for (const snapshot of snapshots) {
+      const status = await restoreActiveRow(database, revertBatchId, snapshot)
+      if (status === 'restored') result.restoredActiveRows += 1
+      else if (status === 'conflict') result.conflictActiveRows += 1
+    }
+
+    // 2) 删除本次退休新建的退休工资行；删除前留快照便于审计（强制撤销，手工改动会一并删除）
+    result.deletedRetiredRows = await deleteInsertedRetiredRows(
+      database,
+      revertBatchId,
+      insertedRetiredIds
+    )
+
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK').catch(() => undefined)
+    throw error
+  }
+
+  // 人员状态完全由"人员在哪张源表"推导，补回在职 + 删退休后重算即可恢复为在职
+  await refreshAllPersonnelStatuses(database)
+  result.statusRefreshed = true
+
+  result.messages.push(
+    `已恢复在职工资 ${result.restoredActiveRows} 行` +
+      (result.conflictActiveRows > 0
+        ? `（${result.conflictActiveRows} 行原记录已存在，未覆盖）`
+        : '') +
+      `，删除退休工资 ${result.deletedRetiredRows} 行，人员状态已刷新为在职`
+  )
+  return result
+}
+
+async function loadRetireBatch(
+  database: Database,
+  batchId: number
+): Promise<RetireBatchInfo | undefined> {
+  const row = await get<{ id: number; kind: string; meta_json: string | null }>(
+    database,
+    `SELECT id, kind, meta_json FROM operation_batches WHERE id = ? LIMIT 1`,
+    [batchId]
+  )
+  if (!row) return undefined
+  const meta = parseMetaObject(row.meta_json)
+  const insertedRetiredIds = Array.isArray(meta.insertedRetiredIds)
+    ? toIdList(meta.insertedRetiredIds)
+    : null
+  return {
+    batchId: Number(row.id),
+    kind: normalizeText(row.kind),
+    idCard: normalizeText(meta.idCard),
+    name: normalizeText(meta.name),
+    batches: Array.isArray(meta.batches)
+      ? uniqueStrings(meta.batches.map((value) => normalizeText(value)))
+      : [],
+    activeRecordIds: Array.isArray(meta.activeRecordIds) ? toIdList(meta.activeRecordIds) : [],
+    insertedRetiredIds
+  }
+}
+
+async function resolveRevertBlock(
+  database: Database,
+  info: RetireBatchInfo | undefined,
+  batchId: number
+): Promise<string | undefined> {
+  if (!info) return '未找到该操作批次'
+  if (info.kind !== retireBatchKind) return '该批次不是人员转退休操作'
+  if (info.insertedRetiredIds === null) {
+    return '此退休记录由旧版本生成，未登记退休行，无法自动撤销，请手工处理'
+  }
+  const existingRevert = await findExistingRevertBatchId(database, batchId)
+  if (existingRevert) return '该退休操作已撤销过，无需重复撤销'
+  return undefined
+}
+
+async function findExistingRevertBatchId(
+  database: Database,
+  sourceBatchId: number
+): Promise<number | undefined> {
+  const rows = await all<{ id: number; meta_json: string | null }>(
+    database,
+    `SELECT id, meta_json FROM operation_batches WHERE kind = ? ORDER BY id DESC`,
+    [retireRevertBatchKind]
+  )
+  for (const row of rows) {
+    const meta = parseMetaObject(row.meta_json)
+    if (Number(meta.sourceBatchId) === sourceBatchId) return Number(row.id)
+  }
+  return undefined
+}
+
+async function countActiveDeleteSnapshots(database: Database, batchId: number): Promise<number> {
+  const row = await get<{ total: number }>(
+    database,
+    `SELECT COUNT(*) AS total FROM record_change_logs
+      WHERE batch_id = ?
+        AND table_name = ?
+        AND action = 'delete'
+        AND before_values IS NOT NULL`,
+    [batchId, activeWorksheetName]
+  )
+  return Number(row?.total ?? 0)
+}
+
+async function inspectRetiredRows(
+  database: Database,
+  ids: number[]
+): Promise<{ present: number; missing: number; modified: number }> {
+  const retiredTable = quoteIdentifier(retiredWorksheetName)
+  let present = 0
+  let missing = 0
+  let modified = 0
+  for (const id of ids) {
+    const row = await get<{ created: unknown; updated: unknown }>(
+      database,
+      `SELECT "md_created_at" AS created, "md_updated_at" AS updated
+         FROM ${retiredTable} WHERE "id" = ? LIMIT 1`,
+      [id]
+    )
+    if (!row) {
+      missing += 1
+      continue
+    }
+    present += 1
+    // 退休行不参与人员状态刷新，新建时 created==updated；不一致即转入后被手工改过
+    if (normalizeText(row.created) !== normalizeText(row.updated)) modified += 1
+  }
+  return { present, missing, modified }
+}
+
+async function restoreActiveRow(
+  database: Database,
+  revertBatchId: number,
+  snapshot: RetireDeleteSnapshot
+): Promise<'restored' | 'conflict' | 'skipped'> {
+  const beforeValues = parseMetaObject(snapshot.before_values)
+  if (Object.keys(beforeValues).length === 0) return 'skipped'
+
+  const columns = await all<{ name: string }>(
+    database,
+    `PRAGMA table_info(${quoteIdentifier(snapshot.table_name)})`
+  )
+  if (columns.length === 0) return 'skipped'
+  const columnNames = new Set(columns.map((column) => column.name))
+
+  const values: Record<string, unknown> = { ...beforeValues }
+  const originalId = Object.prototype.hasOwnProperty.call(values, 'id')
+    ? values.id
+    : snapshot.record_id
+  if (
+    columnNames.has('id') &&
+    originalId !== null &&
+    originalId !== undefined &&
+    originalId !== ''
+  ) {
+    const existing = await get<{ id: number }>(
+      database,
+      `SELECT "id" FROM ${quoteIdentifier(snapshot.table_name)} WHERE "id" = ? LIMIT 1`,
+      [originalId]
+    )
+    if (existing) return 'conflict'
+    values.id = originalId
+  }
+
+  const insertColumns = Object.keys(values).filter((column) => columnNames.has(column))
+  if (insertColumns.length === 0) return 'skipped'
+  const placeholders = insertColumns.map(() => '?').join(', ')
+  await run(
+    database,
+    `INSERT INTO ${quoteIdentifier(snapshot.table_name)}
+      (${insertColumns.map(quoteIdentifier).join(', ')})
+     VALUES (${placeholders})`,
+    insertColumns.map((column) => values[column])
+  )
+
+  await logRecordSnapshots(database, {
+    batchId: revertBatchId,
+    tableName: snapshot.table_name,
+    worksheetName: snapshot.worksheet_name ?? snapshot.table_name,
+    action: 'restore',
+    rows: [{ id: values.id ?? originalId }],
+    afterValues: { sourceChangeLogId: snapshot.id }
+  })
+  return 'restored'
+}
+
+async function deleteInsertedRetiredRows(
+  database: Database,
+  revertBatchId: number,
+  ids: number[]
+): Promise<number> {
+  const retiredTable = quoteIdentifier(retiredWorksheetName)
+  let deleted = 0
+  for (const id of ids) {
+    const row = await get<Record<string, unknown>>(
+      database,
+      `SELECT * FROM ${retiredTable} WHERE "id" = ? LIMIT 1`,
+      [id]
+    )
+    if (!row) continue
+    await logRecordSnapshots(database, {
+      batchId: revertBatchId,
+      tableName: retiredWorksheetName,
+      worksheetName: retiredWorksheetName,
+      action: 'archive',
+      rows: [row]
+    })
+    await run(database, `DELETE FROM ${retiredTable} WHERE "id" = ?`, [id])
+    deleted += 1
+  }
+  return deleted
+}
+
+function parseMetaObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'string') return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function toIdList(values: unknown[]): number[] {
+  return values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0)
 }

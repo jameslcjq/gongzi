@@ -26,7 +26,7 @@ const baseModules: ModuleGroup[] = [
   { key: 'integrated', label: '工资数据', tables: ['在职工资', '退休工资', '其他工资'] },
   { key: 'payroll', label: '工资业务', tables: [] },
   { key: 'budget', label: '预算', tables: ['预算在职', '预算退休', '预算其他'] },
-  { key: 'annual', label: '工资年报', tables: ['工资年报', '绩效工资'] },
+  { key: 'annual', label: '工资年报', tables: ['工资年报'] },
   { key: 'township', label: '乡镇补贴', tables: ['乡镇补贴'] },
   {
     key: 'housing',

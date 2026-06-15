@@ -192,6 +192,31 @@ export type ActiveRetirementTransferResult = ActiveRetirementTransferPreview & {
   affectedRows: number
 }
 
+export type ActiveRetirementRevertPreview = {
+  batchId: number
+  canRevert: boolean
+  message?: string
+  idCard: string
+  name: string
+  batches: string[]
+  activeRowsToRestore: number
+  retiredRowsToDelete: number
+  retiredRowsMissing: number
+  modifiedRetiredRows: number
+}
+
+export type ActiveRetirementRevertResult = {
+  batchId: number
+  revertBatchId: number
+  idCard: string
+  name: string
+  restoredActiveRows: number
+  conflictActiveRows: number
+  deletedRetiredRows: number
+  statusRefreshed: boolean
+  messages: string[]
+}
+
 export type ConsistencyAuditValue = {
   worksheetName: string
   fieldName: string

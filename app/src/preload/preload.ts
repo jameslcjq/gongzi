@@ -96,6 +96,8 @@ import type {
   MailCheckResult,
   LocalFileBase64,
   BudgetImportResult,
+  ActiveRetirementRevertPreview,
+  ActiveRetirementRevertResult,
   ActiveRetirementTransferPreview,
   ActiveRetirementTransferResult
 } from '../shared/types'
@@ -472,6 +474,10 @@ const salaryApi = {
     ipcRenderer.invoke('recycle-bin:list-records', batchId, limit),
   restoreRecycleBinBatch: (batchId: number): Promise<RecycleBinRestoreResult> =>
     ipcRenderer.invoke('recycle-bin:restore-batch', batchId),
+  previewActiveRetirementRevert: (batchId: number): Promise<ActiveRetirementRevertPreview> =>
+    ipcRenderer.invoke('recycle-bin:preview-retirement-revert', batchId),
+  revertActiveRetirement: (batchId: number): Promise<ActiveRetirementRevertResult> =>
+    ipcRenderer.invoke('recycle-bin:revert-retirement', batchId),
   saveWorksheetFields: (worksheetId: string, fields: WorksheetField[]): Promise<AppSummary> =>
     ipcRenderer.invoke('worksheet:save-fields', worksheetId, fields),
 

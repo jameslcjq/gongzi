@@ -42,6 +42,8 @@ const wiping = ref(false)
 const recycleBatches = ref<RecycleBinBatch[]>([])
 const recycleLoading = ref(false)
 const recycleRestoringId = ref<number | null>(null)
+const recycleRevertingId = ref<number | null>(null)
+const retireBatchKind = 'worksheet.retire-active-employee'
 const activeTab = ref('unit')
 const appVersion = ref('dev')
 
@@ -316,6 +318,57 @@ async function restoreRecycleBatch(row: RecycleBinBatch) {
   }
 }
 
+async function revertRetirement(row: RecycleBinBatch) {
+  let preview
+  try {
+    preview = await window.salaryApi.previewActiveRetirementRevert(row.id)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '撤销退休预检失败')
+    return
+  }
+  if (!preview.canRevert) {
+    ElMessage.warning(preview.message || '该退休操作无法撤销')
+    return
+  }
+
+  const who = `${preview.name || '该人员'}（${preview.idCard || '无证件号'}）`
+  const lines = [
+    `将把 ${who} 从退休工资撤回到在职工资：`,
+    `· 恢复在职工资 ${preview.activeRowsToRestore} 行`,
+    `· 删除退休工资 ${preview.retiredRowsToDelete} 行` +
+      (preview.retiredRowsMissing > 0 ? `（另有 ${preview.retiredRowsMissing} 行已不存在）` : ''),
+    '· 各表人员状态将自动刷新回「在职」'
+  ]
+  if (preview.modifiedRetiredRows > 0) {
+    lines.push(
+      `⚠ 其中 ${preview.modifiedRetiredRows} 行退休记录转入后被手工修改过，撤销会一并删除这些改动，确定继续吗？`
+    )
+  }
+
+  try {
+    await ElMessageBox.confirm(lines.map(escapeHtml).join('<br>'), '撤销退休', {
+      type: preview.modifiedRetiredRows > 0 ? 'error' : 'warning',
+      dangerouslyUseHTMLString: true,
+      confirmButtonText: '撤销退休',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+
+  recycleRevertingId.value = row.id
+  try {
+    const result = await window.salaryApi.revertActiveRetirement(row.id)
+    ElMessage.success(result.messages[0] || '已撤销退休')
+    await refreshRecycleBin()
+    emit('changed')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '撤销退休失败')
+  } finally {
+    recycleRevertingId.value = null
+  }
+}
+
 async function wipeAll() {
   try {
     await ElMessageBox.confirm(
@@ -408,6 +461,13 @@ function openLookupWorksheet(name: string) {
   emit('openWorksheet', name)
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 function recycleKindText(kind: string): string {
   if (kind === 'system.wipe-all') return '一键清空'
   if (kind === 'worksheet.clear') return '清空工作表'
@@ -416,6 +476,7 @@ function recycleKindText(kind: string): string {
   if (kind === 'monthly-payroll.delete-run') return '删除工资报账'
   if (kind === 'monthly-payroll.detail-replace') return '替换月度明细'
   if (kind === 'budget-xls.update') return '预算导入更新'
+  if (kind === retireBatchKind) return '人员转退休'
   return kind
 }
 
@@ -636,6 +697,7 @@ function formatSize(bytes: number): string {
         <div class="settings-section">
           <h4>回收站</h4>
           <p>删除、清空、替换前的数据快照会永久留痕；恢复时只补回不存在的原记录，不覆盖当前数据。</p>
+          <p>「人员转退休」批次请用「撤销退休」整批撤回：会补回在职工资、删除对应退休工资行，并把各表人员状态刷新回在职。</p>
           <div>
             <el-button @click="refreshRecycleBin">刷新回收站</el-button>
           </div>
@@ -657,6 +719,15 @@ function formatSize(bytes: number): string {
           <el-table-column label="操作" width="110" fixed="right">
             <template #default="{ row }">
               <el-button
+                v-if="row.kind === retireBatchKind"
+                size="small"
+                text
+                type="warning"
+                :loading="recycleRevertingId === row.id"
+                @click="revertRetirement(row)"
+              >撤销退休</el-button>
+              <el-button
+                v-else
                 size="small"
                 text
                 type="primary"

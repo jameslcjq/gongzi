@@ -12,8 +12,10 @@ import {
 } from '../services/backup'
 import { applyConsistencyAuditUpdates, runConsistencyAudit } from '../services/consistencyAudit'
 import {
+  previewActiveRetirementRevert,
   previewActiveRetirementTransfer,
-  retireActiveEmployee
+  retireActiveEmployee,
+  revertActiveRetirement
 } from '../services/activeRetirementTransfer'
 import {
   chooseExcelFile,
@@ -213,6 +215,8 @@ import type {
   PrintRequest,
   PrinterSummary,
   UnitSettings,
+  ActiveRetirementRevertPreview,
+  ActiveRetirementRevertResult,
   ActiveRetirementTransferPreview,
   ActiveRetirementTransferResult,
   AnnualAdjustmentApplyInput,
@@ -1457,6 +1461,20 @@ export function registerAppIpc(): void {
     'recycle-bin:restore-batch',
     (_event, batchId: number): Promise<RecycleBinRestoreResult> => {
       return restoreRecycleBinBatch(batchId)
+    }
+  )
+
+  ipcMain.handle(
+    'recycle-bin:preview-retirement-revert',
+    (_event, batchId: number): Promise<ActiveRetirementRevertPreview> => {
+      return previewActiveRetirementRevert(batchId)
+    }
+  )
+
+  ipcMain.handle(
+    'recycle-bin:revert-retirement',
+    (_event, batchId: number): Promise<ActiveRetirementRevertResult> => {
+      return revertActiveRetirement(batchId)
     }
   )
 
