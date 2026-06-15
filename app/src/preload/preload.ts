@@ -95,7 +95,9 @@ import type {
   MailCheckProgress,
   MailCheckResult,
   LocalFileBase64,
-  BudgetImportResult
+  BudgetImportResult,
+  ActiveRetirementTransferPreview,
+  ActiveRetirementTransferResult
 } from '../shared/types'
 
 const appInstance = buildPayrollInstanceSummary({
@@ -443,6 +445,14 @@ const salaryApi = {
     recordIds: number[]
   ): Promise<WorksheetMutationResult> =>
     ipcRenderer.invoke('worksheet:delete-records', worksheetId, recordIds),
+  previewActiveRetirementTransfer: (
+    recordId: number
+  ): Promise<ActiveRetirementTransferPreview> =>
+    ipcRenderer.invoke('worksheet:preview-active-retirement-transfer', recordId),
+  retireActiveEmployee: (
+    recordId: number
+  ): Promise<ActiveRetirementTransferResult> =>
+    ipcRenderer.invoke('worksheet:retire-active-employee', recordId),
   clearWorksheet: (worksheetId: string): Promise<WorksheetMutationResult> =>
     ipcRenderer.invoke('worksheet:clear', worksheetId),
   listPersonnelChildRecords: (

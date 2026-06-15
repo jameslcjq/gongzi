@@ -171,6 +171,27 @@ export type WorksheetRecordsResult = {
   rows: WorksheetRecord[]
 }
 
+export type ActiveRetirementTransferPreview = {
+  canApply: boolean
+  message?: string
+  sourceWorksheetId: string
+  sourceWorksheetName: string
+  targetWorksheetId: string
+  targetWorksheetName: string
+  idCard: string
+  name: string
+  activeRowCount: number
+  batches: string[]
+  duplicateBatches: string[]
+}
+
+export type ActiveRetirementTransferResult = ActiveRetirementTransferPreview & {
+  insertedRows: number
+  deletedRows: number
+  statusUpdatedRows: number
+  affectedRows: number
+}
+
 export type ConsistencyAuditValue = {
   worksheetName: string
   fieldName: string

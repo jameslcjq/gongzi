@@ -55,6 +55,7 @@ const emit = defineEmits<{
   (event: 'edit', record: WorksheetRecord): void
   (event: 'delete', record: WorksheetRecord): void
   (event: 'delete-many', recordIds: number[]): void
+  (event: 'retire-active', record: WorksheetRecord): void
   (event: 'clear'): void
   (event: 'export'): void
   (event: 'refresh'): void
@@ -87,6 +88,7 @@ function onColumnSort(params: { key: string; order: 'asc' | 'desc' | null }) {
 }
 
 const detailEnabled = computed(() => true)
+const isActiveSalaryWorksheet = computed(() => props.worksheet.name === '在职工资')
 
 const selectedRows = ref<WorksheetRecord[]>([])
 const selectedRecord = ref<WorksheetRecord | null>(null)
@@ -169,6 +171,9 @@ watch(
   (rows) => {
     const currentIds = new Set((rows ?? []).map(recordKey))
     selectedRows.value = selectedRows.value.filter((row) => currentIds.has(recordKey(row)))
+    if (selectedRecord.value && !currentIds.has(recordKey(selectedRecord.value))) {
+      selectedRecord.value = null
+    }
   }
 )
 
@@ -690,6 +695,16 @@ function workflowDisabled(workflow: WorkflowDefinition) {
           删除选中（{{ selectedRows.length }}）
         </el-button>
         <el-button
+          v-if="isActiveSalaryWorksheet && selectedRows.length === 1"
+          size="small"
+          type="warning"
+          plain
+          :icon="ArrowRight"
+          @click="emit('retire-active', selectedRows[0])"
+        >
+          退休
+        </el-button>
+        <el-button
           v-if="total > 0"
           size="small"
           type="danger"
@@ -784,6 +799,16 @@ function workflowDisabled(workflow: WorkflowDefinition) {
               </button>
             </div>
             <div class="ws-detail-toolbar">
+              <el-button
+                v-if="isActiveSalaryWorksheet"
+                size="small"
+                type="warning"
+                plain
+                :icon="ArrowRight"
+                @click="emit('retire-active', selectedRecord)"
+              >
+                退休
+              </el-button>
               <el-button size="small" type="primary" plain :icon="Edit" @click="emit('edit', selectedRecord)">编辑</el-button>
               <el-button size="small" type="danger" plain :icon="Delete" @click="emit('delete', selectedRecord)">删除</el-button>
             </div>
@@ -805,6 +830,16 @@ function workflowDisabled(workflow: WorkflowDefinition) {
           <template v-else>
             <!-- 顶部工具条 -->
             <div class="pd-toolbar">
+              <el-button
+                v-if="isActiveSalaryWorksheet"
+                size="small"
+                type="warning"
+                plain
+                :icon="ArrowRight"
+                @click="emit('retire-active', selectedRecord)"
+              >
+                退休
+              </el-button>
               <el-button size="small" type="primary" plain :icon="Edit" @click="emit('edit', selectedRecord)">编辑</el-button>
               <el-button size="small" type="danger" plain :icon="Delete" @click="emit('delete', selectedRecord)">删除</el-button>
               <div class="pd-spacer"></div>

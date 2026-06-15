@@ -12,6 +12,10 @@ import {
 } from '../services/backup'
 import { applyConsistencyAuditUpdates, runConsistencyAudit } from '../services/consistencyAudit'
 import {
+  previewActiveRetirementTransfer,
+  retireActiveEmployee
+} from '../services/activeRetirementTransfer'
+import {
   chooseExcelFile,
   commitExcelImport,
   listImportBatches,
@@ -209,6 +213,8 @@ import type {
   PrintRequest,
   PrinterSummary,
   UnitSettings,
+  ActiveRetirementTransferPreview,
+  ActiveRetirementTransferResult,
   AnnualAdjustmentApplyInput,
   AnnualAdjustmentApplyResult,
   AnnualAdjustmentChooseFilesRequest,
@@ -1389,6 +1395,20 @@ export function registerAppIpc(): void {
     'worksheet:delete-records',
     (_event, worksheetId: string, recordIds: number[]): Promise<WorksheetMutationResult> => {
       return deleteRecords(worksheetId, recordIds)
+    }
+  )
+
+  ipcMain.handle(
+    'worksheet:preview-active-retirement-transfer',
+    (_event, recordId: number): Promise<ActiveRetirementTransferPreview> => {
+      return previewActiveRetirementTransfer(recordId)
+    }
+  )
+
+  ipcMain.handle(
+    'worksheet:retire-active-employee',
+    (_event, recordId: number): Promise<ActiveRetirementTransferResult> => {
+      return retireActiveEmployee(recordId)
     }
   )
 

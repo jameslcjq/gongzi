@@ -177,6 +177,7 @@ const recordDialogMode = ref<'create' | 'edit'>('create')
 const recordDialogInitial = ref<WorksheetRecord | undefined>(undefined)
 const recordSaving = ref(false)
 const editingRecordId = ref<number | null>(null)
+const activeRetirementTransferRunning = ref(false)
 const lookupFailureDialogVisible = ref(false)
 const lookupFailureLoading = ref(false)
 const lookupFailureTitle = ref('')
@@ -741,6 +742,48 @@ async function deleteRecords(recordIds: number[]) {
     await loadRecords()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '批量删除失败')
+  }
+}
+
+async function retireActiveEmployee(record: WorksheetRecord) {
+  if (activeRetirementTransferRunning.value) return
+  if (selectedWorksheet.value?.name !== '在职工资') return
+  const recordId = typeof record.id === 'number' ? record.id : Number(record.id)
+  if (!recordId) return
+
+  activeRetirementTransferRunning.value = true
+  try {
+    const preview = await window.salaryApi.previewActiveRetirementTransfer(recordId)
+    if (!preview.canApply) {
+      ElMessage.error(preview.message || '该人员暂不能转入退休工资')
+      return
+    }
+
+    const personLabel = preview.name ? `${preview.name}（${preview.idCard}）` : preview.idCard
+    const batchText = preview.batches.length > 0 ? preview.batches.join('、') : '未记录批次'
+    try {
+      await ElMessageBox.confirm(
+        `确定将 ${personLabel} 转入退休工资吗？\n将转移在职工资全部 ${preview.activeRowCount} 条批次记录：${batchText}。\n转入退休工资前会把退休工资金额字段清零，原在职工资记录将删除。`,
+        '转入退休工资',
+        {
+          type: 'warning',
+          confirmButtonText: '转入退休',
+          cancelButtonText: '取消'
+        }
+      )
+    } catch {
+      return
+    }
+
+    const result = await window.salaryApi.retireActiveEmployee(recordId)
+    ElMessage.success(
+      `已转入退休工资 ${result.insertedRows} 条，删除在职工资 ${result.deletedRows} 条，更新人员状态 ${result.statusUpdatedRows} 行`
+    )
+    await loadRecords()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '转入退休工资失败')
+  } finally {
+    activeRetirementTransferRunning.value = false
   }
 }
 
@@ -1577,6 +1620,7 @@ watch(isLicenseValid, (valid) => {
             @edit="openEditDialog"
             @delete="deleteRecord"
             @delete-many="deleteRecords"
+            @retire-active="retireActiveEmployee"
             @clear="clearCurrentWorksheet"
             @export="exportCurrentWorksheet"
             @refresh="loadRecords"
