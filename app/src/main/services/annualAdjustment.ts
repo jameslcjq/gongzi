@@ -1410,19 +1410,27 @@ function archiveConsumedImportFile(filePath: string | undefined): string | undef
 }
 
 function resolveBuiltinTemplatePath(fileName: string): string | undefined {
+  const targetDir = getDataPath('内置模板')
+  mkdirSync(targetDir, { recursive: true })
+  const target = join(targetDir, fileName)
+  if (existsForRead(target)) return target
+
   const candidates = [
+    join(process.resourcesPath ?? '', 'templates', fileName),
     join(app.getAppPath(), 'dist', 'templates', fileName),
     join(app.getAppPath(), 'public', 'templates', fileName),
     join(process.cwd(), 'dist', 'templates', fileName),
+    join(process.cwd(), 'templates', fileName),
     join(process.cwd(), 'public', 'templates', fileName)
   ]
   const source = candidates.find((candidate) => existsForRead(candidate))
   if (!source) return undefined
-  const targetDir = getDataPath('内置模板')
-  mkdirSync(targetDir, { recursive: true })
-  const target = join(targetDir, fileName)
-  copyFileSync(source, target)
-  return target
+  try {
+    copyFileSync(source, target)
+    return target
+  } catch {
+    return undefined
+  }
 }
 
 function validateAnnualInput(input: AnnualAdjustmentPreviewInput): void {

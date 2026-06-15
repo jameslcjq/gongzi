@@ -50,6 +50,13 @@
         ]
       },
       {
+        "from": "public/templates",
+        "to": "templates",
+        "filter": [
+          "*"
+        ]
+      },
+      {
         "from": "native",
         "to": "native",
         "filter": [

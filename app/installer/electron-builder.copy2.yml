@@ -16,6 +16,10 @@ extraResources:
     filter:
       - lookup-seeds.json
       - license_public_key.pem
+  - from: public/templates
+    to: templates
+    filter:
+      - "*"
   - from: native
     to: native
     filter:
