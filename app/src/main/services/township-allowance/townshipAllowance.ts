@@ -9,7 +9,7 @@ import { findColumnByName, getWorksheetByName, tableNameOf } from '../worksheetT
 import { getMonthlyOutputPath } from '../../config/paths'
 
 const N = {
-  integratedActive: '\u4e00\u4f53\u5316\u5728\u804c',
+  integratedActive: '\u5728\u804c\u5de5\u8d44',
   allowance: '\u4e61\u9547\u8865\u8d34',
   lookup: '\u4e61\u9547\u5de5\u4f5c\u5e74\u9650\u5bf9\u7167',
   adjustWorkflow: '\u8c03\u6574\u4e61\u9547\u8865\u8d34',

@@ -280,7 +280,9 @@ export async function previewExcelFile(
   await validateImportedUnitIdentity(basename(filePath), worksheet, rawRows, columns, columnHeaderMap)
   const uniqueColumnName = findUniqueColumnName(worksheet.name, columns)
   const partitionColumnNames = findPartitionColumnNames(worksheet.name, columns)
-  const sanitizedRows = dedupeRowsByUniqueKey(rawRows, columnHeaderMap, uniqueColumnName, partitionColumnNames)
+  let sanitizedRows = dedupeRowsByUniqueKey(rawRows, columnHeaderMap, uniqueColumnName, partitionColumnNames)
+  await applyTownshipIdCardsToRows(database, worksheet, columns, sanitizedRows)
+  sanitizedRows = dedupeMappedRowsByUniqueKey(sanitizedRows, uniqueColumnName, partitionColumnNames)
   applyHrDetailDerivedFields(worksheet, columns, sanitizedRows)
   await applyTownshipUnitFullNames(database, worksheet, columns, sanitizedRows)
   sanitizeBudgetDraftRows(worksheet, columns, sanitizedRows)
@@ -563,6 +565,8 @@ async function insertRowsAsBatch(
   const tableName = quoteIdentifier(worksheet.name)
   const database = await getDatabase()
   let sanitizedRows = dedupeRowsByUniqueKey(rows, headerMap, uniqueColumnName, partitionColumnNames)
+  await applyTownshipIdCardsToRows(database, worksheet, columns, sanitizedRows)
+  sanitizedRows = dedupeMappedRowsByUniqueKey(sanitizedRows, uniqueColumnName, partitionColumnNames)
   applyHrDetailDerivedFields(worksheet, columns, sanitizedRows)
   await applyTownshipUnitFullNames(database, worksheet, columns, sanitizedRows)
   const budgetDraftCleanup = sanitizeBudgetDraftRows(worksheet, columns, sanitizedRows)
@@ -816,6 +820,79 @@ async function applyTownshipUnitFullNames(
       (name ? uniqueNameUnit(lookup.byName.get(name)) : undefined)
     if (unitName) row[unitColumn] = unitName
   }
+}
+
+async function applyTownshipIdCardsToRows(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  worksheet: ReturnType<typeof readWorksheetMetadata>[number],
+  columns: Array<{ field: WorksheetMeta['fields'][number]; columnName: string }>,
+  rows: Array<Record<string, WorksheetRecordValue>>
+): Promise<void> {
+  if (worksheet.name !== '乡镇补贴' || rows.length === 0) return
+
+  const idColumn = findColumnByFieldName(columns, ['身份证号', '身份证号码', '证件号码', '证件号码*'])
+  const nameColumn = findColumnByFieldName(columns, ['姓名', '姓名*'])
+  if (!idColumn || !nameColumn) return
+
+  const idCardsByName = await loadTownshipIdCardsByName(database)
+  for (const row of rows) {
+    if (normalizeUniqueValue(row[idColumn])) continue
+    const name = normalizePersonName(row[nameColumn])
+    if (!name) continue
+
+    const matched = Array.from(idCardsByName.get(name) ?? [])
+    if (matched.length === 1) row[idColumn] = matched[0]
+  }
+}
+
+async function loadTownshipIdCardsByName(
+  database: Awaited<ReturnType<typeof getDatabase>>
+): Promise<Map<string, Set<string>>> {
+  const worksheets = readWorksheetMetadata()
+  const sources = [
+    {
+      worksheetName: '在职工资',
+      idFields: ['证件号码'],
+      nameFields: ['姓名', '姓名*']
+    },
+    {
+      worksheetName: '人事信息',
+      idFields: ['身份证号码', '身份证号'],
+      nameFields: ['姓名']
+    },
+    {
+      worksheetName: '退休工资',
+      idFields: ['证件号码'],
+      nameFields: ['姓名', '姓名*']
+    }
+  ]
+  const result = new Map<string, Set<string>>()
+
+  for (const source of sources) {
+    const sourceWorksheet = worksheets.find((item) => item.name === source.worksheetName)
+    if (!sourceWorksheet) continue
+    const sourceColumns = getWorksheetLocalColumns(sourceWorksheet)
+    const idColumn = findColumnByFieldName(sourceColumns, source.idFields)
+    const nameColumn = findColumnByFieldName(sourceColumns, source.nameFields)
+    if (!idColumn || !nameColumn) continue
+
+    const sourceRows = await all<{ name_value: unknown; id_value: unknown }>(
+      database,
+      `SELECT ${quoteIdentifier(nameColumn)} AS name_value,
+              ${quoteIdentifier(idColumn)} AS id_value
+       FROM ${quoteIdentifier(sourceWorksheet.name)}`
+    )
+    for (const sourceRow of sourceRows) {
+      const name = normalizePersonName(sourceRow.name_value)
+      const idCard = normalizeUniqueValue(sourceRow.id_value as WorksheetRecordValue | undefined)
+      if (!name || !idCard) continue
+      const bucket = result.get(name) ?? new Set<string>()
+      bucket.add(idCard)
+      result.set(name, bucket)
+    }
+  }
+
+  return result
 }
 
 async function loadTownshipUnitNameLookup(
@@ -1422,6 +1499,14 @@ function dedupeRowsByUniqueKey(
     .map((row) => mapRow(row, headerMap))
     .filter((row) => Object.keys(row).length > 0)
 
+  return dedupeMappedRowsByUniqueKey(sanitizedRows, uniqueColumnName, partitionColumnNames)
+}
+
+function dedupeMappedRowsByUniqueKey(
+  sanitizedRows: Array<Record<string, WorksheetRecordValue>>,
+  uniqueColumnName?: string,
+  partitionColumnNames: string[] = []
+): Array<Record<string, WorksheetRecordValue>> {
   if (!uniqueColumnName) return sanitizedRows
 
   const keyedRows = new Map<string, Record<string, WorksheetRecordValue>>()
