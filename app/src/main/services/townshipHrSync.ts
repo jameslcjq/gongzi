@@ -92,12 +92,15 @@ export async function fillTownshipIdCardsByHrName(): Promise<TownshipIdCardFillR
       )
       updatedRows += 1
     }
-    const { activeIds, retiredIds, otherIds } = await loadPersonnelStatusIdentitySets(database)
-    await refreshWorksheetPersonnelStatus(database, getWorksheetByName(townshipName), activeIds, retiredIds, otherIds)
     await run(database, 'COMMIT')
   } catch (error) {
     await run(database, 'ROLLBACK')
     throw error
+  }
+
+  if (updatedRows > 0) {
+    const { activeIds, retiredIds, otherIds } = await loadPersonnelStatusIdentitySets(database)
+    await refreshWorksheetPersonnelStatus(database, getWorksheetByName(townshipName), activeIds, retiredIds, otherIds)
   }
 
   return {

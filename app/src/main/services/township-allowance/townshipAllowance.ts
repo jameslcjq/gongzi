@@ -10,6 +10,7 @@ import { getMonthlyOutputPath } from '../../config/paths'
 
 const N = {
   integratedActive: '\u5728\u804c\u5de5\u8d44',
+  integratedRetired: '\u9000\u4f11\u5de5\u8d44',
   allowance: '\u4e61\u9547\u8865\u8d34',
   lookup: '\u4e61\u9547\u5de5\u4f5c\u5e74\u9650\u5bf9\u7167',
   adjustWorkflow: '\u8c03\u6574\u4e61\u9547\u8865\u8d34',
@@ -318,32 +319,27 @@ async function applyTownshipAllowanceIdCards(): Promise<{
 }> {
   const allowance = getWorksheetByName(N.allowance)
   const active = getWorksheetByName(N.integratedActive)
+  const retired = getWorksheetByName(N.integratedRetired)
 
   const allowanceNameColumn = findColumnByName(allowance, F.name)
   const allowanceIdCardColumn = findColumnByName(allowance, F.idCard)
   const activeNameColumn = findColumnByName(active, F.name)
   const activeIdCardColumn = findColumnByName(active, F.certificateNo)
+  const retiredNameColumn = findColumnByName(retired, F.name)
+  const retiredIdCardColumn = findColumnByName(retired, F.certificateNo)
 
   const allowanceTable = tableNameOf(allowance)
   const activeTable = tableNameOf(active)
+  const retiredTable = tableNameOf(retired)
   const database = await getDatabase()
 
-  const activeRows = await all<{ name: string | null; id_card: string | null }>(
-    database,
-    `
-      SELECT
-        TRIM(CAST(${quoteIdentifier(activeNameColumn)} AS TEXT)) AS name,
-        TRIM(CAST(${quoteIdentifier(activeIdCardColumn)} AS TEXT)) AS id_card
-      FROM ${activeTable}
-      WHERE ${quoteIdentifier(activeNameColumn)} IS NOT NULL
-        AND ${quoteIdentifier(activeIdCardColumn)} IS NOT NULL
-        AND TRIM(CAST(${quoteIdentifier(activeNameColumn)} AS TEXT)) <> ''
-        AND TRIM(CAST(${quoteIdentifier(activeIdCardColumn)} AS TEXT)) <> ''
-    `
-  )
+  const identityRows = [
+    ...(await loadNameIdentityRows(database, activeTable, activeNameColumn, activeIdCardColumn)),
+    ...(await loadNameIdentityRows(database, retiredTable, retiredNameColumn, retiredIdCardColumn))
+  ]
 
   const idCardsByName = new Map<string, Set<string>>()
-  for (const row of activeRows) {
+  for (const row of identityRows) {
     const name = normalizeName(row.name)
     const idCard = normalizeIdCard(row.id_card)
     if (!name || !idCard) continue
@@ -401,7 +397,7 @@ async function applyTownshipAllowanceIdCards(): Promise<{
           name,
           currentIdCard,
           matchedIdCards: '',
-          remark: '\u4e00\u4f53\u5316\u5728\u804c\u4e2d\u6ca1\u6709\u627e\u5230\u8be5\u59d3\u540d'
+          remark: '\u5728\u804c\u5de5\u8d44\u548c\u9000\u4f11\u5de5\u8d44\u4e2d\u6ca1\u6709\u627e\u5230\u8be5\u59d3\u540d'
         })
         continue
       }
@@ -411,7 +407,7 @@ async function applyTownshipAllowanceIdCards(): Promise<{
           name,
           currentIdCard,
           matchedIdCards: matched.join('\u3001'),
-          remark: '\u4e00\u4f53\u5316\u5728\u804c\u4e2d\u540c\u540d\u5bf9\u5e94\u591a\u4e2a\u8bc1\u4ef6\u53f7\u7801'
+          remark: '\u5728\u804c\u5de5\u8d44/\u9000\u4f11\u5de5\u8d44\u4e2d\u540c\u540d\u5bf9\u5e94\u591a\u4e2a\u8bc1\u4ef6\u53f7\u7801'
         })
         continue
       }
@@ -436,6 +432,27 @@ async function applyTownshipAllowanceIdCards(): Promise<{
       : []
 
   return { updatedRows, skippedExistingRows, warnings, reportPath }
+}
+
+async function loadNameIdentityRows(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  tableName: string,
+  nameColumn: string,
+  idCardColumn: string
+): Promise<Array<{ name: string | null; id_card: string | null }>> {
+  return all<{ name: string | null; id_card: string | null }>(
+    database,
+    `
+      SELECT
+        TRIM(CAST(${quoteIdentifier(nameColumn)} AS TEXT)) AS name,
+        TRIM(CAST(${quoteIdentifier(idCardColumn)} AS TEXT)) AS id_card
+      FROM ${tableName}
+      WHERE ${quoteIdentifier(nameColumn)} IS NOT NULL
+        AND ${quoteIdentifier(idCardColumn)} IS NOT NULL
+        AND TRIM(CAST(${quoteIdentifier(nameColumn)} AS TEXT)) <> ''
+        AND TRIM(CAST(${quoteIdentifier(idCardColumn)} AS TEXT)) <> ''
+    `
+  )
 }
 
 function writeIdCardReport(
