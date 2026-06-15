@@ -32,6 +32,7 @@ import {
   nonWorksheetModuleKeys,
   visibleModules
 } from './appModules'
+import { isRunnerFlavor } from '@shared/appFlavor'
 import {
   appendSyncSummaryWarnings,
   buildBudgetActiveMasterSyncWarnings,
@@ -444,15 +445,17 @@ async function refreshExchangeStatus() {
 }
 
 async function handleExchangePackageNotifications(next: ExchangeStatus) {
-  const pendingPackages = next.localInboxPackages
-    .filter((file) => file.kind === 'monthly-package' && file.stable)
+  const pendingPackages = [
+    ...next.localInboxPackages,
+    ...(isRunnerFlavor ? next.localOutboxPackages : [])
+  ].filter((file) => file.kind === 'monthly-package' && file.stable)
 
   const freshPackages = pendingPackages.filter((file) => !seenExchangePackageKeys.has(getExchangePackageKey(file)))
   if (freshPackages.length === 0) return
 
   const first = freshPackages[0]
   seenExchangePackageKeys.add(getExchangePackageKey(first))
-  const sourceText = '本机收件箱'
+  const sourceText = first.location === 'local-outbox' ? '本机输出箱' : '本机收件箱'
   const countText = freshPackages.length > 1 ? `等 ${freshPackages.length} 个` : ''
 
   try {
