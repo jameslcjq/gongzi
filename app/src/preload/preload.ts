@@ -251,9 +251,10 @@ const salaryApi = {
     }),
   startPortalNativeRecording: (
     sessionId: string,
-    webContentsIds: number[]
+    webContentsIds: number[],
+    installCode?: string
   ): Promise<{ ok: true; attached: number; tracked: number } | { ok: false; reason: string }> =>
-    ipcRenderer.invoke('integration:native-recorder-start', { sessionId, webContentsIds }),
+    ipcRenderer.invoke('integration:native-recorder-start', { sessionId, webContentsIds, installCode }),
   drainPortalNativeRecording: (
     sessionId: string
   ): Promise<{ ok: true; events: Array<Record<string, unknown>> }> =>

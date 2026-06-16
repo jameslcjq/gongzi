@@ -56,7 +56,8 @@ type RecorderApi = {
   } | { ok: false; reason: string }>
   startPortalNativeRecording: (
     sessionId: string,
-    webContentsIds: number[]
+    webContentsIds: number[],
+    installCode?: string
   ) => Promise<{ ok: true; attached: number; tracked: number } | { ok: false; reason: string }>
   drainPortalNativeRecording: (
     sessionId: string
@@ -211,10 +212,12 @@ export function mountPortalRecorderDevTools(options: {
     }
 
     events.sort((a, b) => a.t - b.t)
+    const completeness = computeRecordingCompleteness(events)
     const summary = {
       startedAt: new Date(recordingStart).toISOString(),
       durationMs: Date.now() - recordingStart,
       totalEvents: events.length,
+      completeness,
       byKind: events.reduce(
         (acc, event) => {
           acc[event.kind] = (acc[event.kind] || 0) + 1
@@ -241,7 +244,12 @@ export function mountPortalRecorderDevTools(options: {
       `${sessionId || '一体化录制'}.json`
     )
     if (save.ok) {
-      window.alert(`录制已保存：${save.path}（${summary.totalEvents} 条事件，${screenshotCount} 张截图）`)
+      const warnText = completeness.ok
+        ? ''
+        : `\n\n⚠ 采集可能不完整：\n· ${completeness.warnings.join('\n· ')}`
+      window.alert(
+        `录制已保存：${save.path}（${summary.totalEvents} 条事件，${screenshotCount} 张截图）${warnText}`
+      )
     } else if (!save.canceled) {
       window.alert('保存失败：' + (save.reason || '未知错误'))
     }
@@ -276,7 +284,8 @@ export function mountPortalRecorderDevTools(options: {
     if (!ids.length) return { attached: 0, tracked: 0 }
     try {
       const res = await withTimeout(
-        options.api.startPortalNativeRecording(sessionId, ids),
+        // 把 DOM 录制脚本一并下发，主进程会在每个 frame 重载后立刻重注入（消除 1.5s 轮询盲窗）。
+        options.api.startPortalNativeRecording(sessionId, ids, buildRecorderInstallScript(sessionId)),
         NATIVE_RECORDER_TIMEOUT_MS,
         { ok: false, reason: '原始录制启动超时' }
       )
@@ -476,6 +485,77 @@ export function mountPortalRecorderDevTools(options: {
     if (pollTimer !== null) window.clearInterval(pollTimer)
     startBtn.remove()
     stopBtn.remove()
+  }
+}
+
+type RecordingCompleteness = {
+  ok: boolean
+  nativeClicks: number
+  domClicks: number
+  missedClicks: number
+  netRequests: number
+  warnings: string[]
+}
+
+// P2：停录自检。两条信号判断"切换账套这类结尾操作有没有录全"：
+//  1) 原生物理点击数远多于页面捕获到的点击数 → 有点击没落到任何 DOM 目标上；
+//  2) 页面层在原生操作还在继续时就提前静默 → 帧重载后没接上（本次问题的典型特征）。
+function computeRecordingCompleteness(events: RecordingEvent[]): RecordingCompleteness {
+  const warnings: string[] = []
+  let nativeClicks = 0
+  let domDown = 0
+  let domClicks = 0
+  let netRequests = 0
+  let lastNativeMouseT = -1
+  let lastDomInteractionT = -1
+  const DOM_INTERACTION = new Set([
+    'click',
+    'pointerdown',
+    'pointerup',
+    'input',
+    'change',
+    'focusin',
+    'combo-select',
+    'xhr',
+    'fetch',
+    'navigation'
+  ])
+  for (const ev of events) {
+    const t = typeof ev.t === 'number' ? ev.t : -1
+    if (ev.kind === 'native-input') {
+      const type = String((ev as Record<string, unknown>).type || '')
+      if (type === 'mouseDown') {
+        nativeClicks += 1
+        if (t > lastNativeMouseT) lastNativeMouseT = t
+      } else if (/^mouse/.test(type) && t > lastNativeMouseT) {
+        lastNativeMouseT = t
+      }
+      continue
+    }
+    if (ev.kind === 'pointerdown') domDown += 1
+    if (ev.kind === 'click') domClicks += 1
+    if (ev.kind === 'net-request') netRequests += 1
+    if (DOM_INTERACTION.has(ev.kind) && t > lastDomInteractionT) lastDomInteractionT = t
+  }
+  const domDownEffective = Math.max(domDown, domClicks)
+  const missedClicks = Math.max(0, nativeClicks - domDownEffective)
+  if (missedClicks >= 2) {
+    warnings.push(
+      `约 ${missedClicks} 次点击没有捕获到页面元素（原始点击 ${nativeClicks}，页面点击 ${domDownEffective}），可能含切换账套等关键操作，建议重录`
+    )
+  }
+  if (lastNativeMouseT >= 0 && lastDomInteractionT >= 0 && lastNativeMouseT - lastDomInteractionT > 4000) {
+    warnings.push(
+      `页面采集在最后一次操作前约 ${Math.round((lastNativeMouseT - lastDomInteractionT) / 1000)} 秒就停止了，结尾操作可能没录到`
+    )
+  }
+  return {
+    ok: warnings.length === 0,
+    nativeClicks,
+    domClicks: domDownEffective,
+    missedClicks,
+    netRequests,
+    warnings
   }
 }
 

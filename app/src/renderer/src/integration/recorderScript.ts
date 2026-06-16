@@ -286,14 +286,22 @@ export function buildRecorderInstallScript(sessionId = ''): string {
   }
 
   document.addEventListener('click', function (ev) {
-    pushElementEvent('click', ev)
+    pushElementEvent('click', ev, {
+      button: ev.button,
+      clientX: ev.clientX,
+      clientY: ev.clientY,
+      pageX: ev.pageX,
+      pageY: ev.pageY
+    })
   }, true)
 
   document.addEventListener('pointerdown', function (ev) {
     pushElementEvent('pointerdown', ev, {
       button: ev.button,
       clientX: ev.clientX,
-      clientY: ev.clientY
+      clientY: ev.clientY,
+      pageX: ev.pageX,
+      pageY: ev.pageY
     })
   }, true)
 
@@ -301,8 +309,46 @@ export function buildRecorderInstallScript(sessionId = ''): string {
     pushElementEvent('pointerup', ev, {
       button: ev.button,
       clientX: ev.clientX,
-      clientY: ev.clientY
+      clientY: ev.clientY,
+      pageX: ev.pageX,
+      pageY: ev.pageY
     })
+  }, true)
+
+  // -------- easyui 下拉 / 账套·年度选择 ----------
+  // 账套、年度等都是 easyui combo：选项面板（.combo-panel / .combobox / .tree）通常挂在 <body> 上，
+  // 选择动作往往落在 mousedown 上（onSelect），普通 click 有时不冒泡到 document。这里专门补一条
+  // combo-select，带上被选中项的可见文本（如“沭阳县扎下初级中学”）——这是判断“切到哪个账套”的关键。
+  function comboItemOf(el) {
+    try {
+      if (!el || !el.closest) return null
+      const panel = el.closest('.combo-panel, .combobox, .combotree, .combobox-panel, .m-list, .panel-body')
+      if (!panel) return null
+      const item =
+        el.closest('.combobox-item, .tree-node, .menu-item, .l-btn, [data-options], td, li') || el
+      const text = (item.innerText || item.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120)
+      if (!text) return null
+      const out = { text: text }
+      if (panel.id) out.panelId = panel.id
+      try {
+        const val =
+          (item.getAttribute && (item.getAttribute('value') || item.getAttribute('data-value'))) || ''
+        if (val) out.itemValue = String(val).slice(0, 120)
+      } catch (e) {}
+      return out
+    } catch (e) {
+      return null
+    }
+  }
+
+  document.addEventListener('mousedown', function (ev) {
+    try {
+      const el = toElement(ev && ev.target)
+      if (!el) return
+      const combo = comboItemOf(el)
+      if (!combo) return
+      pushElementEvent('combo-select', ev, combo)
+    } catch (e) {}
   }, true)
 
   document.addEventListener('input', function (ev) {

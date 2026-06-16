@@ -1,4 +1,14 @@
-import { app, ipcMain as electronIpcMain, shell, type IpcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import {
+  app,
+  ipcMain as electronIpcMain,
+  shell,
+  webFrameMain,
+  type IpcMain,
+  type IpcMainInvokeEvent,
+  type Session,
+  type WebContents,
+  type WebFrameMain
+} from 'electron'
 import { assertTrustedIpcSender } from './ipcGuard'
 import { getDatabase, getDatabasePath, run } from '../db/connection'
 import { readWorksheetMetadata } from '../db/metadata'
@@ -317,6 +327,10 @@ type NativeRecorderSession = {
   startedAt: number
   events: NativeRecorderEvent[]
   detachByWebContentsId: Map<number, () => void>
+  // DOM 录制脚本（renderer 在 start 时下发），用于帧重载后立刻重注入，消除 1.5s 轮询盲窗
+  installCode?: string
+  // 已挂网络抓取的 Electron session（按分区去重），停录时统一摘钩
+  netDetachBySession: Map<Session, () => void>
 }
 
 const nativeRecorderSessions = new Map<string, NativeRecorderSession>()
@@ -353,6 +367,144 @@ function pushNativeRecorderEvent(
   })
   if (session.events.length > 12000) {
     session.events = session.events.slice(-6000)
+  }
+}
+
+// 网络事件不依赖某个具体 frame，按 session 级别记录（重载/跨帧都不丢）。
+function pushNetworkRecorderEvent(
+  session: NativeRecorderSession,
+  kind: string,
+  data: Record<string, unknown>
+): void {
+  session.events.push({
+    t: Date.now() - session.startedAt,
+    kind,
+    webContentsId: -1,
+    ...data
+  })
+  if (session.events.length > 12000) {
+    session.events = session.events.slice(-6000)
+  }
+}
+
+// 只抓与业务有关的请求，过滤掉图片/样式/脚本等静态资源噪声。
+const NET_CAPTURE_RESOURCE_TYPES = new Set(['xhr', 'mainFrame', 'subFrame', 'ping'])
+
+function decodeUploadData(uploadData: unknown): string {
+  try {
+    if (!Array.isArray(uploadData)) return ''
+    const parts: string[] = []
+    for (const part of uploadData as Array<{ bytes?: Buffer; file?: string }>) {
+      if (part && part.bytes) parts.push(Buffer.from(part.bytes).toString('utf-8'))
+      else if (part && part.file) parts.push('[file:' + part.file + ']')
+    }
+    return parts.join('').slice(0, 4000)
+  } catch {
+    return ''
+  }
+}
+
+// P0：主进程级网络抓取。挂在 webview 分区的 session.webRequest 上，请求体/状态全程记录，
+// 即使页面内 XHR hook 因帧重载失效也不丢——切换账套那条请求和 acctSetId 一定能抓到。
+function attachNetworkRecorderToSession(session: NativeRecorderSession, wc: WebContents): void {
+  let electronSession: Session
+  try {
+    electronSession = wc.session
+  } catch {
+    return
+  }
+  if (session.netDetachBySession.has(electronSession)) return
+
+  const wr = electronSession.webRequest as unknown as {
+    onBeforeRequest: (listener: ((details: Record<string, unknown>, callback: (response: Record<string, unknown>) => void) => void) | null) => void
+    onCompleted: (listener: ((details: Record<string, unknown>) => void) | null) => void
+    onErrorOccurred: (listener: ((details: Record<string, unknown>) => void) | null) => void
+  }
+
+  const onBeforeRequest = (
+    details: Record<string, unknown>,
+    callback: (response: Record<string, unknown>) => void
+  ): void => {
+    try {
+      if (NET_CAPTURE_RESOURCE_TYPES.has(String(details.resourceType))) {
+        pushNetworkRecorderEvent(session, 'net-request', {
+          requestId: details.id,
+          method: details.method,
+          url: details.url,
+          resourceType: details.resourceType,
+          reqBody: details.uploadData ? decodeUploadData(details.uploadData) : ''
+        })
+      }
+    } catch {}
+    callback({})
+  }
+  const onCompleted = (details: Record<string, unknown>): void => {
+    try {
+      if (NET_CAPTURE_RESOURCE_TYPES.has(String(details.resourceType))) {
+        pushNetworkRecorderEvent(session, 'net-response', {
+          requestId: details.id,
+          method: details.method,
+          url: details.url,
+          resourceType: details.resourceType,
+          status: details.statusCode,
+          fromCache: details.fromCache
+        })
+      }
+    } catch {}
+  }
+  const onErrorOccurred = (details: Record<string, unknown>): void => {
+    try {
+      if (NET_CAPTURE_RESOURCE_TYPES.has(String(details.resourceType))) {
+        pushNetworkRecorderEvent(session, 'net-error', {
+          requestId: details.id,
+          method: details.method,
+          url: details.url,
+          resourceType: details.resourceType,
+          error: details.error
+        })
+      }
+    } catch {}
+  }
+
+  try {
+    wr.onBeforeRequest(onBeforeRequest)
+    wr.onCompleted(onCompleted)
+    wr.onErrorOccurred(onErrorOccurred)
+  } catch {
+    return
+  }
+
+  session.netDetachBySession.set(electronSession, () => {
+    try { wr.onBeforeRequest(null) } catch {}
+    try { wr.onCompleted(null) } catch {}
+    try { wr.onErrorOccurred(null) } catch {}
+  })
+}
+
+// P0：帧重载会清掉页面里注入的 DOM 录制脚本。这里在每个 frame 加载完成时立即重注入，
+// 不再依赖 renderer 端 1.5s 轮询（那会留出最长 1.5s 的盲窗，且会和页面自身的重载竞态）。
+function reinjectInstallToFrame(session: NativeRecorderSession, frame: WebFrameMain | null): void {
+  if (!session.installCode || !frame) return
+  try {
+    void frame.executeJavaScript(session.installCode, false).catch(() => {})
+  } catch {}
+}
+
+function reinjectInstallToWebContents(session: NativeRecorderSession, wc: WebContents): void {
+  if (!session.installCode || wc.isDestroyed()) return
+  try {
+    reinjectInstallToFrame(session, wc.mainFrame)
+    for (const frame of wc.mainFrame.framesInSubtree) {
+      reinjectInstallToFrame(session, frame)
+    }
+  } catch {}
+}
+
+function resolveFrame(frameProcessId: number, frameRoutingId: number): WebFrameMain | null {
+  try {
+    return webFrameMain.fromId(frameProcessId, frameRoutingId) ?? null
+  } catch {
+    return null
   }
 }
 
@@ -416,6 +568,8 @@ function attachNativeRecorderToWebContents(
       frameProcessId,
       frameRoutingId
     })
+    // 帧导航后立刻把 DOM 录制脚本重注入到这个 frame，闭合重载盲窗。
+    reinjectInstallToFrame(session, resolveFrame(frameProcessId, frameRoutingId))
   }
   const frameLoadListener = (
     _event: unknown,
@@ -428,6 +582,11 @@ function attachNativeRecorderToWebContents(
       frameProcessId,
       frameRoutingId
     })
+    reinjectInstallToFrame(session, resolveFrame(frameProcessId, frameRoutingId))
+  }
+  const domReadyListener = (): void => {
+    // 主帧 dom-ready：把脚本铺到当前所有子帧，作为逐帧重注入的兜底。
+    reinjectInstallToWebContents(session, wc)
   }
   const titleListener = (_event: unknown, title: string): void => {
     pushNativeRecorderEvent(session, wc, 'native-title', { title })
@@ -448,6 +607,7 @@ function attachNativeRecorderToWebContents(
   wcAny.on('did-navigate-in-page', navigateInPageListener)
   wcAny.on('did-frame-navigate', frameNavigateListener)
   wcAny.on('did-frame-finish-load', frameLoadListener)
+  wcAny.on('dom-ready', domReadyListener)
   wcAny.on('page-title-updated', titleListener)
   wcAny.on('destroyed', destroyedListener)
 
@@ -459,6 +619,7 @@ function attachNativeRecorderToWebContents(
     wcAny.off('did-navigate-in-page', navigateInPageListener)
     wcAny.off('did-frame-navigate', frameNavigateListener)
     wcAny.off('did-frame-finish-load', frameLoadListener)
+    wcAny.off('dom-ready', domReadyListener)
     wcAny.off('page-title-updated', titleListener)
     wcAny.off('destroyed', destroyedListener)
   })
@@ -480,6 +641,11 @@ function stopNativeRecorderSession(sessionId: string): NativeRecorderEvent[] {
   if (!session) return []
   const events = drainNativeRecorderSession(sessionId)
   for (const detach of session.detachByWebContentsId.values()) {
+    try {
+      detach()
+    } catch {}
+  }
+  for (const detach of session.netDetachBySession.values()) {
     try {
       detach()
     } catch {}
@@ -759,7 +925,7 @@ export function registerAppIpc(): void {
     'integration:native-recorder-start',
     async (
       _event,
-      payload: { sessionId: string; webContentsIds: number[] }
+      payload: { sessionId: string; webContentsIds: number[]; installCode?: string }
     ): Promise<{ ok: true; attached: number; tracked: number } | { ok: false; reason: string }> => {
       try {
         const { webContents } = await import('electron')
@@ -770,9 +936,14 @@ export function registerAppIpc(): void {
             sessionId,
             startedAt: Date.now(),
             events: [],
-            detachByWebContentsId: new Map()
+            detachByWebContentsId: new Map(),
+            netDetachBySession: new Map()
           }
           nativeRecorderSessions.set(sessionId, session)
+        }
+        // 每次（含轮询）刷新一次重注入用的脚本，保证后续帧重载用的是最新版本。
+        if (typeof payload.installCode === 'string' && payload.installCode) {
+          session.installCode = payload.installCode
         }
 
         let attached = 0
@@ -781,6 +952,7 @@ export function registerAppIpc(): void {
           const wc = webContents.fromId(id)
           if (!wc || wc.isDestroyed()) continue
           if (attachNativeRecorderToWebContents(session, wc)) attached += 1
+          attachNetworkRecorderToSession(session, wc)
         }
         return { ok: true, attached, tracked: session.detachByWebContentsId.size }
       } catch (error) {
