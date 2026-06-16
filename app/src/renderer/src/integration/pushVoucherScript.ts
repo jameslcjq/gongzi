@@ -141,29 +141,100 @@ export function buildPushVoucherScript(
     }
   }
 
-  // 业务决策（2026-06-12）：凭证导入“默认账套”（打开中科单位核算后的当前账套），不自动切换账套。
-  // 当前账套用录制证实的会话接口读取，仅用于展示与留痕；读不到也不阻塞导入。
-  async function resolveDefaultAccount(fetchFn) {
+  // 业务决策（2026-06-16，应用户要求变更，推翻 2026-06-12 的“不切换”约定）：
+  // 凭证导入前【自动切换】到与本机单位一致的账套；找不到本单位账套、或切换后回读校验不一致
+  // → 中止导入（避免把凭证导到错误账套）。
+  // 接口均由录制坐实：userAcctSets(账套列表) / userSession/user(当前账套+userId) / changeAcctSet(切换)。
+  async function readUserSession(fetchFn) {
     try {
-      var result = await fetchJsonWithTimeout(
+      var r = await fetchJsonWithTimeout(
         fetchFn,
-        '/gld-account-server/public/getSession?menuid=' + MENUID,
-        { method: 'POST', credentials: 'include' },
+        '/new-framework-engin2/userSession/user?time=' + Date.now(),
+        { method: 'GET', credentials: 'include' },
         10000
       )
-      var data = result.ok && result.json && String(result.json.status_code) === '0000' ? result.json.data : null
-      if (!data) return null
-      var account = {
-        id: data.bookSetId !== undefined && data.bookSetId !== null ? String(data.bookSetId) : '',
-        code: String(data.bookSetCode || ''),
-        agency_code: String(data.agency_code || ''),
-        name: String(data.bookSetName || ''),
-        agency_name: String(data.agency_name || '')
+      var d = r.ok && r.json && String(r.json.status_code) === '0000' ? r.json.data : null
+      if (!d) return null
+      return {
+        userId: d.userId !== undefined && d.userId !== null ? String(d.userId) : '',
+        acctSetId: d.acctSetId !== undefined && d.acctSetId !== null ? String(d.acctSetId) : '',
+        acctSetName: String(d.acctSetName || '')
       }
-      return account.id || account.code || account.name ? account : null
     } catch (e) {
       return null
     }
+  }
+
+  async function readAcctSetList(fetchFn) {
+    try {
+      var r = await fetchJsonWithTimeout(
+        fetchFn,
+        '/new-framework-engin2/userAcctSets?time=' + Date.now(),
+        { method: 'GET', credentials: 'include' },
+        10000
+      )
+      return r.ok && r.json && String(r.json.status_code) === '0000' && Array.isArray(r.json.data)
+        ? r.json.data
+        : null
+    } catch (e) {
+      return null
+    }
+  }
+
+  // 切换到本机单位对应的账套。返回 { ok:true, account, switched } 或 { ok:false, reason }。
+  async function ensureTargetAcctSet(fetchFn) {
+    if (!TARGET_UNIT.unitImportCode && !TARGET_UNIT.unitFullName) {
+      return { ok: false, reason: '未配置本机单位（单位设置为空），无法确定目标账套，已中止导入。' }
+    }
+    var sets = await readAcctSetList(fetchFn)
+    if (!sets || !sets.length) {
+      return { ok: false, reason: '读取账套列表失败（userAcctSets 无数据），已中止导入。' }
+    }
+    var target = null
+    for (var i = 0; i < sets.length; i++) {
+      if (accountMatchesTarget(sets[i])) { target = sets[i]; break }
+    }
+    if (!target) {
+      var avail = sets.map(function (s) { return accountLabel(s) }).filter(Boolean).join('、')
+      return {
+        ok: false,
+        reason: '账套列表里没有与本单位（' + targetUnitLabel() + '）匹配的账套；可选：' + avail + '。已中止导入。'
+      }
+    }
+    var targetId = String(target.id)
+    var sess = await readUserSession(fetchFn)
+    if (!sess || !sess.userId) {
+      return { ok: false, reason: '读取当前会话失败（userSession/user），无法切换账套，已中止导入。' }
+    }
+    if (sess.acctSetId && sess.acctSetId === targetId) {
+      return { ok: true, account: target, switched: false }
+    }
+    status('🔄 切换账套：' + (sess.acctSetName || sess.acctSetId || '当前') + ' → ' + accountLabel(target) + ' ...')
+    var chg = await fetchJsonWithTimeout(
+      fetchFn,
+      '/new-framework-engin2/changeAcctSet?userId=' + encodeURIComponent(sess.userId) +
+        '&acctSetId=' + encodeURIComponent(targetId) + '&time=' + Date.now(),
+      { method: 'GET', credentials: 'include' },
+      10000
+    )
+    if (!(chg.ok && chg.json && String(chg.json.status_code) === '0000')) {
+      var why = (chg.json && (chg.json.reason || chg.json.message)) || ('HTTP ' + chg.http)
+      return { ok: false, reason: '切换账套请求失败（changeAcctSet：' + why + '），已中止导入。' }
+    }
+    // 回读校验：轮询会话，等服务端账套真正生效后再放行
+    var confirmed = false
+    for (var k = 0; k < 10; k++) {
+      await sleep(600)
+      var v = await readUserSession(fetchFn)
+      if (v && v.acctSetId === targetId) { confirmed = true; break }
+    }
+    if (!confirmed) {
+      return {
+        ok: false,
+        reason: '切换账套后回读校验不一致（会话仍非「' + accountLabel(target) + '」），已中止导入。'
+      }
+    }
+    return { ok: true, account: target, switched: true }
   }
 
   function textExistsIn(win, text) {
@@ -684,20 +755,23 @@ export function buildPushVoucherScript(
 
     var root = window.top || window
     var rootFetch = (root && root.fetch) ? root.fetch.bind(root) : fetch
-    // 导入目标 = 默认账套（不切换）。读出账套信息用于展示/留痕；与本程序单位不一致时黄色提醒但继续。
-    var defaultAccount = await resolveDefaultAccount(rootFetch)
-    if (defaultAccount) {
-      status('凭证将导入默认账套：' + accountLabel(defaultAccount))
-      if ((TARGET_UNIT.unitImportCode || TARGET_UNIT.unitFullName) && !accountMatchesTarget(defaultAccount)) {
-        status(
-          '⚠ 默认账套（' + accountLabel(defaultAccount) + '）与本程序单位（' + targetUnitLabel() + '）不一致，按业务约定仍导入默认账套。',
-          'warn'
-        )
-        await sleep(1500)
+    // 导入前自动切换到本单位账套；切不成（找不到/切换失败/回读不一致）则中止，不导入。
+    var switchRes = await ensureTargetAcctSet(rootFetch)
+    if (!switchRes.ok) {
+      status('❌ ' + switchRes.reason, 'err')
+      clearStatusLater(15000)
+      return {
+        ok: false,
+        reason: switchRes.reason,
+        trace: TRACE,
+        traceText: TRACE.join('\\n')
       }
-    } else {
-      status('⚠ 未能读取当前默认账套信息（getSession），继续按默认账套导入。', 'warn')
     }
+    var defaultAccount = switchRes.account
+    status(
+      '凭证将导入账套：' + accountLabel(defaultAccount) +
+        (switchRes.switched ? '（已自动切换到本单位）' : '（当前已是本单位账套）')
+    )
 
     if (!isOnVoucherPage(root)) {
       var nav = await openVoucherPage(root)
