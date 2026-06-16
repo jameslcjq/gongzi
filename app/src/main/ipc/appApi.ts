@@ -508,6 +508,28 @@ function resolveFrame(frameProcessId: number, frameRoutingId: number): WebFrameM
   }
 }
 
+// 录制期间自动挂接"新出现"的 portal webview：切换账套等整页跳转有时会换掉 webContents，
+// 单靠启动时挂接 + 1.5s 轮询会留盲窗。这里在 app 级别监听 web-contents-created，
+// 一旦有新的 webview 类型 webContents 出现且有活跃录制会话，立即挂原生+网络+重注入。
+let webContentsCreatedHookInstalled = false
+function ensureWebContentsCreatedHook(): void {
+  if (webContentsCreatedHookInstalled) return
+  webContentsCreatedHookInstalled = true
+  app.on('web-contents-created', (_event, wc) => {
+    if (nativeRecorderSessions.size === 0) return
+    let type = ''
+    try {
+      type = wc.getType()
+    } catch {}
+    if (type !== 'webview') return
+    for (const session of nativeRecorderSessions.values()) {
+      attachNativeRecorderToWebContents(session, wc)
+      attachNetworkRecorderToSession(session, wc)
+      reinjectInstallToWebContents(session, wc)
+    }
+  })
+}
+
 function sanitizeNativeInput(input: Record<string, unknown>): Record<string, unknown> {
   const key = typeof input.key === 'string' ? input.key : undefined
   return {
@@ -547,9 +569,13 @@ function attachNativeRecorderToWebContents(
   }
   const navigateListener = (_event: unknown, url: string): void => {
     pushNativeRecorderEvent(session, wc, 'native-navigation', { navigationUrl: url })
+    // 顶层整页跳转（如切换账套触发的 changeAcctSet → businessHome 重载）会清掉注入的钩子，
+    // 立刻把脚本铺回当前所有 frame，比只等 dom-ready 更早一拍。
+    reinjectInstallToWebContents(session, wc)
   }
   const navigateInPageListener = (_event: unknown, url: string, isMainFrame: boolean): void => {
     pushNativeRecorderEvent(session, wc, 'native-navigation-in-page', { navigationUrl: url, isMainFrame })
+    reinjectInstallToWebContents(session, wc)
   }
   const frameNavigateListener = (
     _event: unknown,
@@ -945,6 +971,8 @@ export function registerAppIpc(): void {
         if (typeof payload.installCode === 'string' && payload.installCode) {
           session.installCode = payload.installCode
         }
+        // 录制中自动挂接新出现的 webview（覆盖整页跳转换 webContents 的情况）。
+        ensureWebContentsCreatedHook()
 
         let attached = 0
         const ids = Array.from(new Set((payload.webContentsIds || []).filter(Number.isFinite)))

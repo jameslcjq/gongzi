@@ -244,11 +244,14 @@ export function mountPortalRecorderDevTools(options: {
       `${sessionId || '一体化录制'}.json`
     )
     if (save.ok) {
-      const warnText = completeness.ok
-        ? ''
-        : `\n\n⚠ 采集可能不完整：\n· ${completeness.warnings.join('\n· ')}`
+      const warnText = completeness.warnings.length
+        ? `\n\n⚠ 采集可能不完整（建议重录）：\n· ${completeness.warnings.join('\n· ')}`
+        : ''
+      const noteText = completeness.notes.length
+        ? `\n\nℹ 说明：\n· ${completeness.notes.join('\n· ')}`
+        : ''
       window.alert(
-        `录制已保存：${save.path}（${summary.totalEvents} 条事件，${screenshotCount} 张截图）${warnText}`
+        `录制已保存：${save.path}（${summary.totalEvents} 条事件，${screenshotCount} 张截图）${warnText}${noteText}`
       )
     } else if (!save.canceled) {
       window.alert('保存失败：' + (save.reason || '未知错误'))
@@ -494,20 +497,26 @@ type RecordingCompleteness = {
   domClicks: number
   missedClicks: number
   netRequests: number
+  networkCovered: boolean
   warnings: string[]
+  notes: string[]
 }
 
 // P2：停录自检。两条信号判断"切换账套这类结尾操作有没有录全"：
 //  1) 原生物理点击数远多于页面捕获到的点击数 → 有点击没落到任何 DOM 目标上；
 //  2) 页面层在原生操作还在继续时就提前静默 → 帧重载后没接上（本次问题的典型特征）。
+// 改进2：主进程网络层是可靠源。若 DOM 静默窗口被网络层完整覆盖（net 请求一直记到结尾），
+// 则把"建议重录"的硬告警降级为说明性 note——这种录制其实可回放，只是缺页面元素上下文。
 function computeRecordingCompleteness(events: RecordingEvent[]): RecordingCompleteness {
   const warnings: string[] = []
+  const notes: string[] = []
   let nativeClicks = 0
   let domDown = 0
   let domClicks = 0
   let netRequests = 0
   let lastNativeMouseT = -1
   let lastDomInteractionT = -1
+  let lastNetT = -1
   const DOM_INTERACTION = new Set([
     'click',
     'pointerdown',
@@ -532,22 +541,41 @@ function computeRecordingCompleteness(events: RecordingEvent[]): RecordingComple
       }
       continue
     }
+    if (ev.kind === 'net-request' || ev.kind === 'net-response') {
+      if (ev.kind === 'net-request') netRequests += 1
+      if (t > lastNetT) lastNetT = t
+      continue
+    }
     if (ev.kind === 'pointerdown') domDown += 1
     if (ev.kind === 'click') domClicks += 1
-    if (ev.kind === 'net-request') netRequests += 1
     if (DOM_INTERACTION.has(ev.kind) && t > lastDomInteractionT) lastDomInteractionT = t
   }
   const domDownEffective = Math.max(domDown, domClicks)
   const missedClicks = Math.max(0, nativeClicks - domDownEffective)
+  // 网络层是否覆盖到结尾：net 请求一直记到与最后一次物理操作相近（4s 内）。
+  const networkCovered =
+    netRequests > 0 && lastNetT >= 0 && (lastNativeMouseT < 0 || lastNativeMouseT - lastNetT <= 4000)
+
   if (missedClicks >= 2) {
-    warnings.push(
-      `约 ${missedClicks} 次点击没有捕获到页面元素（原始点击 ${nativeClicks}，页面点击 ${domDownEffective}），可能含切换账套等关键操作，建议重录`
-    )
+    if (networkCovered) {
+      notes.push(
+        `约 ${missedClicks} 次点击没落到页面元素上（原始 ${nativeClicks} / 页面 ${domDownEffective}），但对应业务请求已被网络层捕获（${netRequests} 条）`
+      )
+    } else {
+      warnings.push(
+        `约 ${missedClicks} 次点击没有捕获到页面元素（原始点击 ${nativeClicks}，页面点击 ${domDownEffective}），可能含切换账套等关键操作，建议重录`
+      )
+    }
   }
   if (lastNativeMouseT >= 0 && lastDomInteractionT >= 0 && lastNativeMouseT - lastDomInteractionT > 4000) {
-    warnings.push(
-      `页面采集在最后一次操作前约 ${Math.round((lastNativeMouseT - lastDomInteractionT) / 1000)} 秒就停止了，结尾操作可能没录到`
-    )
+    const sec = Math.round((lastNativeMouseT - lastDomInteractionT) / 1000)
+    if (networkCovered) {
+      notes.push(
+        `页面层(DOM 选择器)在结尾约 ${sec} 秒处停止，但网络层完整覆盖到结尾，可回放，仅结尾缺少页面元素上下文`
+      )
+    } else {
+      warnings.push(`页面采集在最后一次操作前约 ${sec} 秒就停止了，结尾操作可能没录到，建议重录`)
+    }
   }
   return {
     ok: warnings.length === 0,
@@ -555,7 +583,9 @@ function computeRecordingCompleteness(events: RecordingEvent[]): RecordingComple
     domClicks: domDownEffective,
     missedClicks,
     netRequests,
-    warnings
+    networkCovered,
+    warnings,
+    notes
   }
 }
 
