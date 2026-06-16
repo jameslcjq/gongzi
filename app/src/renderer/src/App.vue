@@ -13,6 +13,7 @@ import {
   User
 } from '@element-plus/icons-vue'
 import { setSwitchToIntegration } from './integration/insurancePushQueue'
+import { getExchangePackageUnitMismatch } from './integration/exchangePackageImport'
 import FieldStructureDialog from './components/FieldStructureDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import IntegratedPortalPage from './components/IntegratedPortalPage.vue'
@@ -460,6 +461,11 @@ async function handleExchangePackageNotifications(next: ExchangeStatus) {
 
   try {
     const preview = await window.salaryApi.previewExchangePackage(first.filePath)
+    const unitMismatch = await getExchangePackageUnitMismatch(preview)
+    if (unitMismatch) {
+      return
+    }
+
     const previewMessage = formatExchangePackagePreview(preview)
     await ElMessageBox.confirm(
       `发现${sourceText}里有待导入的工资业务包：${first.fileName}${countText}。\n${previewMessage}\n\n确认导入后，会把包内文件解压到本机工资数据目录，并生成一条待一体化执行的工资报账记录。`,
