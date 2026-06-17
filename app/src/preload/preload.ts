@@ -95,6 +95,7 @@ import type {
   MailCheckProgress,
   MailCheckResult,
   LocalFileBase64,
+  BackpaySplitFile,
   BudgetImportResult,
   ActiveRetirementRevertPreview,
   ActiveRetirementRevertResult,
@@ -201,6 +202,8 @@ const salaryApi = {
     ipcRenderer.invoke('salary-quota-match:local-summary'),
   readLocalFileBase64: (filePath: string): Promise<LocalFileBase64> =>
     ipcRenderer.invoke('local-file:read-base64', filePath),
+  splitBackpayWorkbookBySalaryType: (filePath: string): Promise<BackpaySplitFile[]> =>
+    ipcRenderer.invoke('monthly-payroll:split-backpay-by-salary-type', filePath),
 
   listWorkflows: (): Promise<WorkflowDefinition[]> => ipcRenderer.invoke('app:list-workflows'),
   runWorkflow: (workflowKey: string, payload?: WorkflowRunPayload): Promise<WorkflowRunResult> =>
@@ -320,7 +323,18 @@ const salaryApi = {
   saveSalaryExportXls: (
     filename: string,
     base64: string
-  ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
+  ): Promise<
+    | {
+        ok: true
+        path: string
+        importStatus: 'imported' | 'failed' | 'timeout'
+        importedRows: number
+        message: string
+        worksheetName?: string
+        batchId?: number
+      }
+    | { ok: false; reason: string; path?: string }
+  > =>
     ipcRenderer.invoke('salary-export:save-xls', { filename, base64 }),
   getUnitSettings: (): Promise<UnitSettings> => ipcRenderer.invoke('unit-settings:get'),
   getUnitSettingsLockState: (): Promise<UnitSettingsLockState> =>

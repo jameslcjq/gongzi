@@ -22,6 +22,17 @@ import type {
   MonthlyPayrollPushGuardResult
 } from '@shared/types'
 
+type LocalExcelFile = {
+  base64: string
+  fileName: string
+  size: number
+}
+
+type BackpayPushFile = LocalExcelFile & {
+  salaryType: string
+  rowCount: number
+}
+
 export function historyPushLabel(row: MonthlyPayrollRun): string {
   return `${row.year}-${String(row.month).padStart(2, '0')} ${row.unitFullName}`
 }
@@ -168,18 +179,24 @@ export async function appendSalaryPushSteps(
   }
 
   if (row.payrollBackpayPath) {
-    const file = await window.salaryApi.readLocalFileBase64(row.payrollBackpayPath)
-    steps.push({
-      kind: 'salary-system-import',
-      mode: 'backpay',
-      fileBase64: file.base64,
-      fileName: file.fileName,
-      fileSize: file.size,
-      label,
-      runId: row.id,
-      pushTarget: 'salary'
-    })
-    stepHints.push(`补发工资 ${(file.size / 1024).toFixed(1)} KB`)
+    const backpayFiles = await window.salaryApi.splitBackpayWorkbookBySalaryType(row.payrollBackpayPath)
+    for (const item of backpayFiles) {
+      steps.push({
+        kind: 'salary-system-import',
+        mode: 'backpay',
+        fileBase64: item.base64,
+        fileName: item.fileName,
+        fileSize: item.size,
+        label: backpayFiles.length > 1 ? `${label}（${item.salaryType}）` : label,
+        runId: row.id,
+        pushTarget: 'salary'
+      })
+      stepHints.push(
+        backpayFiles.length > 1
+          ? `补发工资-${item.salaryType} ${item.rowCount} 行 ${(item.size / 1024).toFixed(1)} KB`
+          : `补发工资 ${(item.size / 1024).toFixed(1)} KB`
+      )
+    }
   }
 }
 

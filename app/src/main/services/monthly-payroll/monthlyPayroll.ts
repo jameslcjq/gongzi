@@ -19,6 +19,7 @@ import {
   loadIntegratedActiveBackpayRows,
   loadIntegratedActiveHousingFund,
   loadIntegratedActivePersonalInsuranceTotals,
+  loadIntegratedRetiredBackpayRows,
   loadIntegratedSimpleAggregates,
   loadRetiredHousingDetails,
   loadRetiredSummary,
@@ -429,17 +430,18 @@ export async function preprocessMonthlyPayroll(
       return result
     }
 
+    const recomputeIntegratedActiveFromSalary = (): Promise<IntegratedActiveRecomputeResult> =>
+      applyTaxAndRecomputeIntegratedActive(
+        taxByIdCard,
+        { clearTaxWhenMissing: !tax, recomputeBackpayInTaxCol: true },
+        buildActiveBackpayDeductionMap(salary)
+      )
+
     let integratedActiveRecompute: IntegratedActiveRecomputeResult
     if (writeBackPlan.changes.length > 0 && input.confirmWriteBack) {
       const appliedPlan = writeBackPlan
       await applyIntegratedWriteBackPlan(writeBackPlan)
-      integratedActiveRecompute = activeWriteBackPlan.changes.length > 0
-        ? await applyTaxAndRecomputeIntegratedActive(
-            taxByIdCard,
-            { clearTaxWhenMissing: !tax, recomputeBackpayInTaxCol: true },
-            buildActiveBackpayDeductionMap(salary)
-          )
-        : await summarizeIntegratedActive(taxByIdCard)
+      integratedActiveRecompute = await recomputeIntegratedActiveFromSalary()
       activeFieldWriteBackPlan = await buildIntegratedActiveWriteBackPlan(
         salary.activePeople,
         identityFallbackOptions
@@ -459,7 +461,7 @@ export async function preprocessMonthlyPayroll(
       writeBackPlan = mergeIntegratedWriteBackPlans(activeWriteBackPlan, survivorWriteBackPlan)
       writeBackPreview = mergeAppliedWriteBackPreview(appliedPlan, writeBackPlan)
     } else {
-      integratedActiveRecompute = await summarizeIntegratedActive(taxByIdCard)
+      integratedActiveRecompute = await recomputeIntegratedActiveFromSalary()
     }
 
     const [activeCompare, survivorCompare, integratedPersonalInsurance] = await Promise.all([
@@ -484,7 +486,7 @@ export async function preprocessMonthlyPayroll(
         ? `社保：读取 ${socialSecurity.rowCount} 行，按征收品目汇总 ${Object.keys(socialSecurity.byItem).length} 类`
         : '社保：未检测到社保文件，本次只生成工资阶段结果；补齐社保后重新点击工资报账即可生成最终结果，未补齐前不能月结',
       tax
-        ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，${writeBackPreview.applied ? `已回写到在职工资「${taxField}」` : `已按在职工资「${taxField}」核对`} ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
+        ? `个税：读取 ${tax.rows.length} 人，总额 ${formatMoney(tax.totalTax)}，已写入在职工资「${taxField}」 ${integratedActiveRecompute.taxApplied} 人${integratedActiveRecompute.taxMissing ? `，库中缺失 ${integratedActiveRecompute.taxMissing} 人` : ''}`
         : '个税：未检测到个税文件，本次跳过个税扣款和补发工资；如本单位无个税或个税另行代收，可继续不提供个税文件',
       ...(writeBackPreview.applied
         ? [`工资表金额差异已自动回写 ${writeBackPreview.syncableCount} 项，复核后${activeCompare.changed === 0 ? '在职工资已一致' : `仍有 ${activeCompare.changed} 人存在差异`}`]
@@ -492,7 +494,7 @@ export async function preprocessMonthlyPayroll(
       ...(writeBackPreview.identityReviewCount > 0 && input.confirmIdentityFallback
         ? [`身份核对：已人工确认 ${writeBackPreview.identityConfirmableCount} 条姓名唯一匹配，已记住 ${savedIdentityAliasCount} 条身份匹配关系，本次未自动修改身份证号`]
         : []),
-      `${writeBackPreview.applied ? '在职工资已按公式重算' : '在职工资当前汇总'} ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
+      `在职工资已按公式重算 ${integratedActiveRecompute.rowCount} 人：应发合计 ${formatMoney(integratedActiveRecompute.payableTotal)}，实发合计 ${formatMoney(integratedActiveRecompute.actualPayTotal)}`,
       actualPayMatched
         ? `实发核对：工资表 ${formatMoney(salaryActualPay)} 与 在职工资 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 一致`
         : `实发核对：工资表 ${formatMoney(salaryActualPay)} 与 在职工资 ${formatMoney(integratedActiveRecompute.actualPayTotal)} 差 ${formatMoney(actualPayDiff)}`,
@@ -627,7 +629,8 @@ export async function generateMonthlyPayrollReportView(
     integratedActiveAggregates,
     integratedRetiredAggregates,
     integratedOtherAggregates,
-    integratedBackpayRows
+    integratedBackpayRows,
+    retiredBackpayRows
   ] = await Promise.all([
     loadRetiredSummary(),
     loadRetiredHousingDetails(),
@@ -636,7 +639,8 @@ export async function generateMonthlyPayrollReportView(
     loadIntegratedActiveAggregates(),
     loadIntegratedSimpleAggregates('退休工资'),
     loadIntegratedSimpleAggregates('其他工资'),
-    loadIntegratedActiveBackpayRows()
+    loadIntegratedActiveBackpayRows(),
+    loadIntegratedRetiredBackpayRows()
   ])
   const integratedAggregates = {
     active: integratedActiveAggregates,
@@ -647,7 +651,12 @@ export async function generateMonthlyPayrollReportView(
     ? buildSalarySummaryFromIntegratedAggregates(integratedActiveAggregates, integratedOtherAggregates)
     : salary
   const reportRetired = useIntegratedDataSource
-    ? { count: integratedRetiredAggregates.count, housing: integratedRetiredAggregates.应发工资小计 }
+    ? {
+        count: integratedRetiredAggregates.count,
+        housing: integratedRetiredAggregates.住房补贴,
+        payable: integratedRetiredAggregates.应发工资小计,
+        actualPay: integratedRetiredAggregates.实发合计
+      }
     : retired
   const activeIdCardResolver = await buildIntegratedActiveIdCardResolver()
   const sheets = input.processScope === 'social'
@@ -669,6 +678,7 @@ export async function generateMonthlyPayrollReportView(
         retiredHousingPeople,
         useIntegratedDataSource ? integratedAggregates : undefined,
         useIntegratedDataSource ? integratedBackpayRows : undefined,
+        retiredBackpayRows,
         activeIdCardResolver
     )
   const voucherPageCounts = await buildVoucherPageCounts(input, sheets)
@@ -835,7 +845,7 @@ export async function generateMonthlyPayrollReportView(
     activeActualPay: businessSummary.activeActualPay,
     survivorActualPay: businessSummary.survivorActualPay,
     retiredHousingActualPay: businessSummary.retiredHousingActualPay,
-    retiredHousing: reportRetired.housing,
+    retiredHousing: reportRetired.payable,
     sourceSalaryPath,
     sourceSocialPath: input.socialSecurityWorkbookPath ?? null,
     sourceTaxPath: input.taxWorkbookPath ?? null,
@@ -892,7 +902,7 @@ function buildReportSheets(
   salary: SalarySummary,
   socialSecurity: SocialSecuritySummary | undefined,
   tax: TaxSummary | undefined,
-  retired: RetiredSummary = { count: 0, housing: 0 },
+  retired: RetiredSummary = { count: 0, housing: 0, payable: 0, actualPay: 0 },
   unit: UnitSettings,
   integratedActiveHousingFund = 0,
   retiredHousingPeople: RetiredHousingPerson[] = [],
@@ -902,6 +912,7 @@ function buildReportSheets(
     other: IntegratedSimpleAggregates
   },
   integratedBackpayRows?: Array<Array<string | number>>,
+  retiredBackpayRows: Array<Array<string | number>> = [],
   activeIdCardResolver?: IntegratedIdCardResolver
 ): MonthlyPayrollReportSheet[] {
   const active = { ...salary.active }
@@ -915,7 +926,8 @@ function buildReportSheets(
   active['个税'] = tax ? taxTotal : 0
   const salaryTotal = num(active['应发工资合计'])
   const survivorTotal = num(survivor['合计'])
-  const retiredHousing = retired.housing
+  const retiredHousing = roundMoney(retired.payable || retired.housing)
+  const retiredActualPay = roundMoney(retired.actualPay || retiredHousing)
   const activeInsurance = num(active['五险一金'])
   const activeTax = num(active['个税'])
   const activeInsuranceWithoutTax = roundMoney(
@@ -927,7 +939,7 @@ function buildReportSheets(
   )
   const basicActual = roundMoney(num(active['应发基础工资']) - activeInsuranceWithoutTax)
   const salaryReimburseTotal = roundMoney(salaryTotal + survivorTotal + retiredHousing)
-  const actualPay = roundMoney(num(active['实发工资合计']) + survivorTotal + retiredHousing)
+  const actualPay = roundMoney(num(active['实发工资合计']) + survivorTotal + retiredActualPay)
   const withholdingTotal = activeInsurance
   const useIntegrated = Boolean(integratedAggregates)
   const integratedActive = integratedAggregates?.active
@@ -1216,7 +1228,10 @@ function buildReportSheets(
         '支出一'
       ],
       columnWidths: [20, 6, 10, 9, 10, 10, 10, 10, 10, 10, 11, 12, 12, 9, 9, 10, 11, 10, 10, 9, 9, 9, 13, 9],
-      rows: integratedBackpayRows ?? buildBackpayRows(salary, tax, activeIdCardResolver)
+      rows: [
+        ...(integratedBackpayRows ?? buildBackpayRows(salary, tax, activeIdCardResolver)),
+        ...retiredBackpayRows
+      ]
     }
   ]
 
@@ -1467,7 +1482,7 @@ function buildSocialOnlyReportSheets(
   unit: UnitSettings,
   integratedActiveHousingFund = 0,
   salary?: SalarySummary,
-  retired: RetiredSummary = { count: 0, housing: 0 }
+  retired: RetiredSummary = { count: 0, housing: 0, payable: 0, actualPay: 0 }
 ): MonthlyPayrollReportSheet[] {
   if (!socialSecurity) throw new Error('生成社保报账需要放入社保未申报汇总文件')
 
@@ -1486,7 +1501,8 @@ function buildSocialOnlyReportSheets(
   const socialTotal = roundMoney(Object.values(socialSecurity.byItem).reduce((sum, amount) => sum + amount, 0))
   const insuranceVoucherTotal = roundMoney(socialTotal + activeTax + num(active['住房公积金']) * 2)
   const survivorTotal = salary ? num(salary.survivor['合计']) : 0
-  const retiredHousing = salary ? retired.housing : 0
+  const retiredHousing = salary ? roundMoney(retired.payable || retired.housing) : 0
+  const retiredActualPay = salary ? roundMoney(retired.actualPay || retiredHousing) : 0
   const activeInsurance = salary ? num(active['五险一金']) : 0
   const activeInsuranceWithoutTax = salary
     ? roundMoney(
@@ -1502,7 +1518,7 @@ function buildSocialOnlyReportSheets(
     ? roundMoney(num(active['应发工资合计']) + survivorTotal + retiredHousing)
     : 0
   const actualPay = salary
-    ? roundMoney(num(active['实发工资合计']) + survivorTotal + retiredHousing)
+    ? roundMoney(num(active['实发工资合计']) + survivorTotal + retiredActualPay)
     : 0
 
   const insurancePersonalPension = sumSocialByCanonicalName(socialSecurity, '养老保险个人')

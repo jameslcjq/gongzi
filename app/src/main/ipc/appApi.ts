@@ -39,7 +39,8 @@ import {
   chooseImportWatcherFolder,
   getImportWatcherStatus,
   openImportWatcherFolder,
-  startExcelImportWatcher
+  startExcelImportWatcher,
+  waitForImportWatcherFileResult
 } from '../services/excelImportWatcher'
 import { getExchangeStatus } from '../services/exchange/exchangeStatus'
 import {
@@ -84,6 +85,7 @@ import {
   getSalaryWorkbookPrintPageSummary,
   printSalaryWorkbookViaExcel
 } from '../services/monthly-payroll/printSalaryViaExcel'
+import { splitBackpayWorkbookBySalaryType } from '../services/monthly-payroll/backpayPushWorkbook'
 import {
   loadIntegratedActiveAggregates,
   loadIntegratedSimpleAggregates,
@@ -255,6 +257,7 @@ import type {
   PersonalTaxImportGenerateInput,
   PersonalTaxImportGenerateResult,
   PersonnelExpensePlanPrefillResult,
+  BackpaySplitFile,
   LocalFileBase64,
   SalaryQuotaMatchLocalSummary,
   SocialInsuranceBaseExportInput,
@@ -879,6 +882,13 @@ export function registerAppIpc(): void {
   )
 
   ipcMain.handle(
+    'monthly-payroll:split-backpay-by-salary-type',
+    (_event, filePath: string): BackpaySplitFile[] => {
+      return splitBackpayWorkbookBySalaryType(filePath)
+    }
+  )
+
+  ipcMain.handle(
     'app:run-workflow',
     async (_event, workflowKey: string, payload?: WorkflowRunPayload): Promise<WorkflowRunResult> => {
       const database = await getDatabase()
@@ -1246,12 +1256,23 @@ export function registerAppIpc(): void {
     async (
       _event,
       payload: { filename: string; base64: string }
-    ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> => {
+    ): Promise<{
+      ok: true
+      path: string
+      importStatus: 'imported' | 'failed' | 'timeout'
+      importedRows: number
+      message: string
+      worksheetName?: string
+      batchId?: number
+    } | { ok: false; reason: string; path?: string }> => {
       try {
         const { writeFileSync, mkdirSync, existsSync } = await import('node:fs')
         const { join } = await import('node:path')
         // 复用 watcher 当前监控的文件夹；watcher 一旦 add 就自动入库
-        const status = await getImportWatcherStatus()
+        let status = await getImportWatcherStatus()
+        if (!status.running) {
+          status = await startExcelImportWatcher()
+        }
         const folder = status.folderPath
         if (!folder) return { ok: false, reason: '导入文件夹未配置（请先在"导入监视"里设置）' }
         if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
@@ -1271,7 +1292,16 @@ export function registerAppIpc(): void {
 
         const buf = Buffer.from(payload.base64, 'base64')
         writeFileSync(fullPath, buf)
-        return { ok: true, path: fullPath }
+        const result = await waitForImportWatcherFileResult(fullPath)
+        return {
+          ok: true,
+          path: fullPath,
+          importStatus: result.status,
+          importedRows: result.status === 'timeout' ? 0 : result.importedRows,
+          message: result.message,
+          worksheetName: result.status === 'timeout' ? undefined : result.worksheetName,
+          batchId: result.status === 'timeout' ? undefined : result.batchId
+        }
       } catch (error) {
         return {
           ok: false,

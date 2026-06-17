@@ -605,14 +605,16 @@ async function insertRowsAsBatch(
     [sourceName, worksheet.worksheetId, worksheet.name]
   )
 
-  await run(database, 'BEGIN TRANSACTION')
   let insertedRows = 0
   let updatedRows = 0
   const unchangedRows = diff.unchangedRows
+  let transactionStarted = false
   let townshipAdjustment:
     | Awaited<ReturnType<typeof normalizeTownshipAllowanceImportedRows>>
     | undefined
   try {
+    await run(database, 'BEGIN TRANSACTION')
+    transactionStarted = true
     // 批量 INSERT：每批最多 200 行
     const BATCH_SIZE = 200
     const now = new Date().toISOString()
@@ -688,8 +690,11 @@ async function insertRowsAsBatch(
       townshipAdjustment = await normalizeTownshipAllowanceImportedRows(batchId)
     }
     await run(database, 'COMMIT')
+    transactionStarted = false
   } catch (error) {
-    await run(database, 'ROLLBACK')
+    if (transactionStarted) {
+      await run(database, 'ROLLBACK').catch(() => undefined)
+    }
     await run(
       database,
       `UPDATE import_batches SET status = 'failed', message = ? WHERE id = ?`,

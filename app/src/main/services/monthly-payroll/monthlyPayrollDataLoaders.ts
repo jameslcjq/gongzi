@@ -54,13 +54,27 @@ const integratedActivePayableFields = [
   '其他三'
 ]
 
+const emptyRetiredSummary = (): RetiredSummary => ({
+  count: 0,
+  housing: 0,
+  payable: 0,
+  actualPay: 0
+})
+
 export async function loadRetiredSummary(): Promise<RetiredSummary> {
   try {
     const worksheet = getWorksheetByName('退休工资')
     const columns = getWorksheetLocalColumns(worksheet)
-    const idColumn = columns.find((column) => column.field.name === '证件号码')?.columnName
-    const housingColumn = columns.find((column) => column.field.name === '住房补贴')?.columnName
-    if (!idColumn || !housingColumn) return { count: 0, housing: 0 }
+    const colByName = (name: string): string | undefined =>
+      columns.find((column) => column.field.name === name)?.columnName
+    const idColumn = colByName('证件号码')
+    const housingColumn = colByName('住房补贴')
+    const backpayColumn = colByName('补发工资')
+    const otherOneColumn = colByName('其他一')
+    const deductionColumn = colByName('代扣工资')
+    const payableColumn = colByName('应发工资小计')
+    const actualColumn = colByName('实发合计')
+    if (!idColumn || (!housingColumn && !payableColumn)) return emptyRetiredSummary()
     const database = await getDatabase()
     const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
     const latestById = new Map<string, Record<string, unknown>>()
@@ -71,12 +85,25 @@ export async function loadRetiredSummary(): Promise<RetiredSummary> {
       if (!previous || num(row.id) > num(previous.id)) latestById.set(idCard, row)
     }
     const latest = Array.from(latestById.values())
+    const sumColumn = (columnName: string | undefined): number =>
+      columnName ? latest.reduce((sum, row) => sum + num(row[columnName]), 0) : 0
+    const housing = roundMoney(sumColumn(housingColumn))
+    const backpay = roundMoney(sumColumn(backpayColumn))
+    const otherOne = roundMoney(sumColumn(otherOneColumn))
+    const payable = payableColumn
+      ? roundMoney(sumColumn(payableColumn))
+      : roundMoney(housing + backpay + otherOne)
+    const actualPay = actualColumn
+      ? roundMoney(sumColumn(actualColumn))
+      : roundMoney(payable - sumColumn(deductionColumn))
     return {
       count: latest.length,
-      housing: roundMoney(latest.reduce((sum, row) => sum + num(row[housingColumn]), 0))
+      housing,
+      payable,
+      actualPay
     }
   } catch {
-    return { count: 0, housing: 0 }
+    return emptyRetiredSummary()
   }
 }
 
@@ -93,6 +120,8 @@ export async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[
     const backpayColumn = colByName('补发工资')
     const otherOneColumn = colByName('其他一')
     const deductionColumn = colByName('代扣工资')
+    const payableColumn = colByName('应发工资小计')
+    const actualColumn = colByName('实发合计')
     if (!idColumn || !housingColumn) return []
     const database = await getDatabase()
     const rows = await all<Record<string, unknown>>(database, `SELECT * FROM ${tableNameOf(worksheet)}`)
@@ -107,9 +136,11 @@ export async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[
       const housing = roundMoney(num(row[housingColumn]))
       const backpay = roundMoney(backpayColumn ? num(row[backpayColumn]) : 0)
       const payable = roundMoney(
-        num(row[housingColumn]) +
-          (backpayColumn ? num(row[backpayColumn]) : 0) +
-          (otherOneColumn ? num(row[otherOneColumn]) : 0)
+        payableColumn
+          ? num(row[payableColumn])
+          : num(row[housingColumn]) +
+            (backpayColumn ? num(row[backpayColumn]) : 0) +
+            (otherOneColumn ? num(row[otherOneColumn]) : 0)
       )
       const deduction = deductionColumn ? num(row[deductionColumn]) : 0
       return {
@@ -119,7 +150,7 @@ export async function loadRetiredHousingDetails(): Promise<RetiredHousingPerson[
         housing,
         backpay,
         payable,
-        actualPay: roundMoney(payable - deduction)
+        actualPay: actualColumn ? roundMoney(num(row[actualColumn])) : roundMoney(payable - deduction)
       }
     })
   } catch {
@@ -266,6 +297,50 @@ export async function loadIntegratedActiveBackpayRows(): Promise<Array<Array<str
   } catch {
     return []
   }
+}
+
+export async function loadIntegratedRetiredBackpayRows(): Promise<Array<Array<string | number>>> {
+  try {
+    const rows = await loadIntegratedRows('退休工资')
+    const year = new Date().getFullYear()
+    const month = new Date().getMonth() + 1
+    return rows
+      .filter((row) => num(row.values['补发工资']) !== 0)
+      .map((row) => {
+        const out = createBackpayAdjustmentRow(
+          row.idCard,
+          row.name,
+          year,
+          month,
+          retiredSalaryType(row.values)
+        )
+        addSignedBackpayAdjustment(
+          out,
+          num(row.values['补发工资']),
+          'retiredBackpay',
+          'retiredDeduction'
+        )
+        return out
+      })
+      .filter(hasBackpayAdjustments)
+  } catch {
+    return []
+  }
+}
+
+function retiredSalaryType(values: Record<string, string | number>): string {
+  const name = text(values['工资类别名称'])
+  if (/行政离休/.test(name)) return '行政离休'
+  if (/行政退休/.test(name)) return '行政退休'
+  if (/事业离休/.test(name)) return '事业离休'
+  if (/事业退休/.test(name)) return '事业退休'
+
+  const code = text(values['工资类别编码']).replace(/\D/g, '')
+  if (code === '003') return '行政离休'
+  if (code === '004') return '行政退休'
+  if (code === '005') return '事业离休'
+  if (code === '006') return '事业退休'
+  return '事业退休'
 }
 
 export async function loadIntegratedSimpleAggregates(

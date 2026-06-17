@@ -616,6 +616,11 @@ export type LocalFileBase64 = {
   size: number
 }
 
+export type BackpaySplitFile = LocalFileBase64 & {
+  salaryType: string
+  rowCount: number
+}
+
 /** v4 之后只需配置类别，批次在运行时通过 getBatchAgency 自动发现 */
 export type SalaryExportSaltype = {
   saltype_id: string

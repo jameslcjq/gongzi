@@ -262,11 +262,50 @@ export function run(
   sql: string,
   params: unknown[] = []
 ): Promise<void> {
+  if (/^\s*BEGIN\b/i.test(sql)) {
+    return runBeginTransactionWithRetry(database, sql, params)
+  }
+  return runStatement(database, sql, params)
+}
+
+function runStatement(
+  database: sqlite3.Database,
+  sql: string,
+  params: unknown[] = []
+): Promise<void> {
   return new Promise((resolve, reject) => {
     database.run(sql, params, (error) => {
       if (error) reject(error)
       else resolve()
     })
+  })
+}
+
+async function runBeginTransactionWithRetry(
+  database: sqlite3.Database,
+  sql: string,
+  params: unknown[] = []
+): Promise<void> {
+  const deadline = Date.now() + 30_000
+  let delayMs = 80
+  for (;;) {
+    try {
+      await runStatement(database, sql, params)
+      return
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/cannot start a transaction within a transaction/i.test(message) || Date.now() >= deadline) {
+        throw error
+      }
+      await sleep(delayMs)
+      delayMs = Math.min(delayMs * 2, 800)
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
   })
 }
 

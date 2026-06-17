@@ -1909,8 +1909,16 @@ async function exportSalary(): Promise<void> {
     try {
       const saveRes = await window.salaryApi.saveSalaryExportXls(file.filename, file.base64)
       const label = fmtCombo(file)
-      if (saveRes.ok) savedPaths.push(`${label}：${saveRes.path}`)
-      else savedErrors.push(`${label}：${saveRes.reason}`)
+      if (saveRes.ok && saveRes.importStatus === 'imported') {
+        savedPaths.push(
+          `${label}：${saveRes.path}（${saveRes.worksheetName || '工资数据'} ${saveRes.importedRows} 行）`
+        )
+      } else if (saveRes.ok) {
+        const stateText = saveRes.importStatus === 'failed' ? '入库失败' : '入库未确认'
+        savedErrors.push(`${label}：${stateText}：${saveRes.message || saveRes.path}`)
+      } else {
+        savedErrors.push(`${label}：${saveRes.reason}`)
+      }
     } catch (error) {
       savedErrors.push(
         `${fmtCombo(file)}：${error instanceof Error ? error.message : String(error)}`
@@ -1921,7 +1929,7 @@ async function exportSalary(): Promise<void> {
   const summaryLines: string[] = []
   const realFailed = result.failed.length + savedErrors.length
   summaryLines.push(
-    `✅ 落盘 ${savedPaths.length} 个` +
+    `✅ 入库 ${savedPaths.length} 个` +
       (result.skipped.length ? `（已自动跳过 ${result.skipped.length} 个无数据组合）` : '') +
       (realFailed ? ` / ❗ 失败 ${realFailed}` : '')
   )

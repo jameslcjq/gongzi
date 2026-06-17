@@ -5,7 +5,9 @@ export const backpayAdjustmentChannels = {
   performanceIncrease: { index: 6, label: '薪级工资' },
   basicDeduction: { index: 7, label: '岗位津贴' },
   performanceDeduction: { index: 8, label: '生活补贴' },
-  taxDeduction: { index: 9, label: '绩效工资' }
+  taxDeduction: { index: 9, label: '绩效工资' },
+  retiredBackpay: { index: 17, label: '补发工资' },
+  retiredDeduction: { index: 18, label: '补扣工资' }
 } as const
 
 export type BackpayAdjustmentChannel = keyof typeof backpayAdjustmentChannels
@@ -14,13 +16,14 @@ export function createBackpayAdjustmentRow(
   idCard: string,
   name: string,
   year: number,
-  month: number
+  month: number,
+  salaryType = '事业'
 ): Array<string | number> {
   const row: Array<string | number> = Array.from({ length: 24 }, () => '')
   row[0] = idCard
   row[1] = month
   row[2] = name
-  row[3] = '事业'
+  row[3] = salaryType
   row[4] = year
   return row
 }

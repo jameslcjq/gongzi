@@ -53,6 +53,8 @@ export type PersonalInsuranceTotals = {
 export type RetiredSummary = {
   count: number
   housing: number
+  payable: number
+  actualPay: number
 }
 
 export type RetiredHousingPerson = {

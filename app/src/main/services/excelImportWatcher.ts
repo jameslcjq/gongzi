@@ -20,6 +20,30 @@ const importableExtensions = new Set(['.xlsx', '.xls', '.csv'])
 const memoryLogs: ExcelImportLog[] = []
 type MonthlyPayrollFileKind = 'salary' | 'social' | 'tax'
 const directImportMonthlyPayrollWorksheetNames = new Set(['在职工资', '退休工资', '其他工资'])
+const importQueueCooldownMs = 2500
+
+export type ImportWatcherFileResult =
+  | {
+      status: 'imported'
+      fileName: string
+      worksheetName?: string
+      importedRows: number
+      message: string
+      batchId?: number
+    }
+  | {
+      status: 'failed'
+      fileName: string
+      worksheetName?: string
+      importedRows: number
+      message: string
+      batchId?: number
+    }
+  | {
+      status: 'timeout'
+      fileName: string
+      message: string
+    }
 
 let importQueue: Promise<unknown> = Promise.resolve()
 const queuedImportFiles = new Set<string>()
@@ -160,7 +184,6 @@ async function importExcelFile(filePath: string): Promise<void> {
     return
   }
 
-  let commitFailureLogged = false
   try {
     const result = inferWorksheet(filePath)
     if (!result.worksheet) {
@@ -168,13 +191,7 @@ async function importExcelFile(filePath: string): Promise<void> {
     }
     const worksheet = result.worksheet
 
-    let summary: Awaited<ReturnType<typeof commitExcelImport>>
-    try {
-      summary = await commitExcelImport(filePath, worksheet.worksheetId)
-    } catch (error) {
-      commitFailureLogged = true
-      throw error
-    }
+    const summary = await commitExcelImport(filePath, worksheet.worksheetId)
     moveProcessedFile(filePath, 'imported')
     pushMemoryLog({
       fileName: basename(filePath),
@@ -200,9 +217,7 @@ async function importExcelFile(filePath: string): Promise<void> {
       message,
       createdAt: new Date().toISOString()
     })
-    if (!commitFailureLogged) {
-      await persistFailedLog(basename(filePath), message)
-    }
+    await persistFailedLog(basename(filePath), message)
   }
 }
 
@@ -222,9 +237,94 @@ function enqueueImportFile(filePath: string): void {
         await importExcelFile(filePath)
       }
     } finally {
+      await sleep(importQueueCooldownMs)
       queuedImportFiles.delete(key)
     }
   })
+}
+
+export async function waitForImportWatcherFileResult(
+  filePath: string,
+  timeoutMs = 120_000
+): Promise<ImportWatcherFileResult> {
+  const fileName = basename(filePath)
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const result = await findImportWatcherFileResult(fileName)
+    if (result) return result
+    await sleep(500)
+  }
+  return {
+    status: 'timeout',
+    fileName,
+    message: `已保存到导入目录，但 ${Math.round(timeoutMs / 1000)} 秒内未确认入库结果`
+  }
+}
+
+async function findImportWatcherFileResult(
+  fileName: string
+): Promise<ImportWatcherFileResult | null> {
+  const database = await getDatabase()
+  const log = await all<{
+    file_name: string
+    worksheet_name: string | null
+    ok: number
+    imported_rows: number
+    message: string | null
+    batch_id: number | null
+  }>(
+    database,
+    `
+      SELECT file_name, worksheet_name, ok, imported_rows, message, batch_id
+      FROM import_logs
+      WHERE file_name = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [fileName]
+  )
+  if (log[0]) {
+    return {
+      status: log[0].ok === 1 ? 'imported' : 'failed',
+      fileName: log[0].file_name,
+      worksheetName: log[0].worksheet_name ?? undefined,
+      importedRows: log[0].imported_rows,
+      message: log[0].message ?? '',
+      batchId: log[0].batch_id ?? undefined
+    }
+  }
+
+  const batch = await all<{
+    source_name: string
+    worksheet_name: string | null
+    status: string
+    row_count: number
+    message: string | null
+    id: number
+  }>(
+    database,
+    `
+      SELECT source_name, worksheet_name, status, row_count, message, id
+      FROM import_batches
+      WHERE source_name = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [fileName]
+  )
+  const item = batch[0]
+  if (!item || item.status === 'pending') return null
+  if (item.status === 'imported' || item.status === 'failed') {
+    return {
+      status: item.status,
+      fileName: item.source_name,
+      worksheetName: item.worksheet_name ?? undefined,
+      importedRows: item.row_count,
+      message: item.message ?? '',
+      batchId: item.id
+    }
+  }
+  return null
 }
 
 async function waitForStableImportFile(filePath: string): Promise<boolean> {

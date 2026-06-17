@@ -47,7 +47,7 @@ export function buildSalaryWorkbookBusinessSummary(
     survivorCount: salary ? num(salary.survivor['人数']) || salary.survivorPeople.length : 0,
     survivorActualPay: salary ? num(salary.survivor['合计']) : 0,
     retiredHousingCount: retired.count,
-    retiredHousingActualPay: retired.housing
+    retiredHousingActualPay: retired.actualPay
   }
 }
 

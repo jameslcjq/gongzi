@@ -207,9 +207,16 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
       status('尝试上传字段：' + fieldName + '\\n接口：' + url)
       var result = await postImport(url, fieldName, file)
       if (isOkResponse(result)) return result
+      if (isBusinessFailureResponse(result)) throw new Error(responseReason(result))
       failures.push(fieldName + ' => ' + responseReason(result))
     }
     throw new Error('所有上传字段均失败：\\n' + failures.join('\\n'))
+  }
+
+  function isBusinessFailureResponse(json) {
+    if (!json || json.__httpOk === false) return false
+    if (json.__fieldName && json.__fieldName !== 'ImportFile') return false
+    return json.status_code != null || json.reason != null || json.message != null || json.data != null
   }
 
   function responseReason(json) {
