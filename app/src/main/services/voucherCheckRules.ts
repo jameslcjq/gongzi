@@ -50,8 +50,8 @@ export async function exportVoucherCheckRuleLibrary(): Promise<VoucherCheckRuleF
   const library = await readVoucherCheckRuleLibrary()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const result = await dialog.showSaveDialog({
-    title: '导出凭证检查规则库',
-    defaultPath: `凭证检查规则库-${stamp}.json`,
+    title: '导出账务检查规则库',
+    defaultPath: `账务检查规则库-${stamp}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
   if (result.canceled || !result.filePath) {
@@ -63,7 +63,7 @@ export async function exportVoucherCheckRuleLibrary(): Promise<VoucherCheckRuleF
 
 export async function importVoucherCheckRuleLibrary(): Promise<VoucherCheckRuleFileResult> {
   const result = await dialog.showOpenDialog({
-    title: '导入凭证检查规则库',
+    title: '导入账务检查规则库',
     properties: ['openFile'],
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })

@@ -6,6 +6,14 @@ export type VoucherCheckRequiredSubject = {
   direction?: 'debit' | 'credit' | 'any'
 }
 
+export type VoucherBalanceAmountField = 'debit' | 'credit' | 'sumDebit' | 'sumCredit'
+
+export type VoucherBalanceEquationTarget = {
+  code: string
+  name?: string
+  field: VoucherBalanceAmountField
+}
+
 export type VoucherKeywordEcoRule = {
   id: string
   type: 'keyword-eco'
@@ -43,13 +51,27 @@ export type VoucherFixedAssetCapitalRule = {
   suggestion?: string
 }
 
+export type VoucherBalanceEquationRule = {
+  id: string
+  type: 'balance-equation'
+  name: string
+  enabled: boolean
+  level: VoucherCheckLevel
+  sourceCode: string
+  sourceName?: string
+  sourceFields: VoucherBalanceAmountField[]
+  targetSubjects: VoucherBalanceEquationTarget[]
+  suggestion?: string
+}
+
 export type VoucherCheckRule =
   | VoucherKeywordEcoRule
   | VoucherKeywordSubjectSetRule
   | VoucherFixedAssetCapitalRule
+  | VoucherBalanceEquationRule
 
 export type VoucherCheckRuleLibrary = {
-  schemaVersion: 1
+  schemaVersion: 2
   rules: VoucherCheckRule[]
   updatedAt?: string
 }
@@ -65,7 +87,7 @@ const CAPITAL_EXP_ECO_CODES = [
 
 export function createDefaultVoucherCheckRuleLibrary(): VoucherCheckRuleLibrary {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     rules: [
       {
         id: 'R-BANZHUREN-30107',
@@ -116,6 +138,35 @@ export function createDefaultVoucherCheckRuleLibrary(): VoucherCheckRuleLibrary 
         budgetExpensePrefixes: ['720'],
         allowedEcoCodes: CAPITAL_EXP_ECO_CODES,
         suggestion: '应修改为310类资本性支出。'
+      },
+      {
+        id: 'R-BALANCE-FISCAL-EXPENSE',
+        type: 'balance-equation',
+        name: '余额表财政拨款支出勾稽',
+        enabled: true,
+        level: 'error',
+        sourceCode: '400101',
+        sourceName: '一般公共预算财政拨款',
+        sourceFields: ['debit', 'credit'],
+        targetSubjects: [
+          { code: '7201010101', name: '财政拨款支出', field: 'debit' },
+          { code: '7201010201', name: '财政拨款支出', field: 'debit' }
+        ],
+        suggestion: '400101 一般公共预算财政拨款本期借方、贷方发生应等于 7201010101 与 7201010201 财政拨款支出本期借方发生合计。'
+      },
+      {
+        id: 'R-BALANCE-OTHER-INCOME',
+        type: 'balance-equation',
+        name: '余额表其他收入支出勾稽',
+        enabled: true,
+        level: 'error',
+        sourceCode: '4609',
+        sourceName: '其他收入',
+        sourceFields: ['debit', 'credit'],
+        targetSubjects: [
+          { code: '7201010103', name: '其他资金支出', field: 'debit' }
+        ],
+        suggestion: '4609 其他收入本期借方、贷方发生应等于 7201010103 其他资金支出本期借方发生。'
       }
     ],
     updatedAt: new Date().toISOString()
@@ -126,13 +177,22 @@ export function normalizeVoucherCheckRuleLibrary(input: unknown): VoucherCheckRu
   const fallback = createDefaultVoucherCheckRuleLibrary()
   if (!input || typeof input !== 'object') return fallback
   const source = input as Partial<VoucherCheckRuleLibrary>
+  const sourceSchemaVersion = Number((source as { schemaVersion?: unknown }).schemaVersion || 1)
   const rawRules = Array.isArray(source.rules) ? source.rules : []
   const rules = rawRules
     .map((rule, index) => normalizeVoucherCheckRule(rule, index))
     .filter((rule): rule is VoucherCheckRule => !!rule)
+  const mergedRules = rules.length ? [...rules] : [...fallback.rules]
+  if (rules.length && sourceSchemaVersion < 2) {
+    fallback.rules.forEach((defaultRule) => {
+      if (!mergedRules.some((rule) => rule.id === defaultRule.id)) {
+        mergedRules.push(defaultRule)
+      }
+    })
+  }
   return {
-    schemaVersion: 1,
-    rules: rules.length ? rules : fallback.rules,
+    schemaVersion: 2,
+    rules: mergedRules,
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : new Date().toISOString()
   }
 }
@@ -188,6 +248,21 @@ function normalizeVoucherCheckRule(input: unknown, index: number): VoucherCheckR
     }
   }
 
+  if (rule.type === 'balance-equation') {
+    return {
+      id,
+      type: 'balance-equation',
+      name,
+      enabled,
+      level,
+      sourceCode: cleanCode(rule.sourceCode),
+      sourceName: cleanText(rule.sourceName),
+      sourceFields: cleanBalanceFields(rule.sourceFields),
+      targetSubjects: cleanBalanceTargets(rule.targetSubjects),
+      suggestion: cleanText(rule.suggestion)
+    }
+  }
+
   return null
 }
 
@@ -216,4 +291,31 @@ function cleanRequiredSubjects(value: unknown): VoucherCheckRequiredSubject[] {
       return { code, name: cleanText(source.name), direction }
     })
   return subjects.filter((item): item is VoucherCheckRequiredSubject => !!item)
+}
+
+function cleanBalanceField(value: unknown): VoucherBalanceAmountField {
+  return value === 'credit' || value === 'sumDebit' || value === 'sumCredit' ? value : 'debit'
+}
+
+function cleanBalanceFields(value: unknown): VoucherBalanceAmountField[] {
+  const raw = Array.isArray(value) ? value : String(value ?? '').split(/[,\n，、;；]/)
+  const fields = raw.map(cleanBalanceField)
+  return Array.from(new Set(fields))
+}
+
+function cleanBalanceTargets(value: unknown): VoucherBalanceEquationTarget[] {
+  if (!Array.isArray(value)) return []
+  const targets: Array<VoucherBalanceEquationTarget | null> = value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const source = item as Partial<VoucherBalanceEquationTarget>
+      const code = cleanCode(source.code)
+      if (!code) return null
+      return {
+        code,
+        name: cleanText(source.name),
+        field: cleanBalanceField(source.field)
+      }
+    })
+  return targets.filter((item): item is VoucherBalanceEquationTarget => !!item)
 }

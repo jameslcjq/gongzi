@@ -20,7 +20,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
   return String.raw`
 ;(() => {
-  const SCRIPT_VERSION = '20260617-period-accounting-check-v5'
+  const SCRIPT_VERSION = '20260617-period-accounting-check-v6'
   const OPTIONS = ${JSON.stringify(payload)}
 
   try {
@@ -766,6 +766,110 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
     })
   }
 
+  function balanceRowByCode(rows, code) {
+    var target = normalizeCode(code)
+    return (rows || []).find(function (row) {
+      return row && row.code === target
+    }) || null
+  }
+
+  function normalizeBalanceAmountField(field) {
+    if (field === 'credit' || field === 'sumDebit' || field === 'sumCredit') return field
+    return 'debit'
+  }
+
+  function balanceAmountFieldText(field) {
+    if (field === 'credit') return '本期贷方发生'
+    if (field === 'sumDebit') return '借方累计发生'
+    if (field === 'sumCredit') return '贷方累计发生'
+    return '本期借方发生'
+  }
+
+  function balanceAmountByField(row, field) {
+    if (!row) return 0
+    var normalized = normalizeBalanceAmountField(field)
+    if (normalized === 'credit') return row.credit || 0
+    if (normalized === 'sumDebit') return row.sumDebit || 0
+    if (normalized === 'sumCredit') return row.sumCredit || 0
+    return row.debit || 0
+  }
+
+  function balanceSubjectLabel(code, name, row) {
+    if (row) return (row.displayCode + ' ' + row.name).trim()
+    return (normalizeCode(code) + (name ? ' ' + normalizeText(name) : '')).trim()
+  }
+
+  function balanceEquationRules() {
+    return configuredRules().filter(function (rule) {
+      return rule.type === 'balance-equation'
+    })
+  }
+
+  function checkBalanceEquationRules(period, rows, issues) {
+    balanceEquationRules().forEach(function (rule) {
+      var sourceCode = normalizeCode(rule.sourceCode)
+      var sourceFields = Array.isArray(rule.sourceFields) ? rule.sourceFields.map(normalizeBalanceAmountField) : ['debit']
+      var targetSubjects = Array.isArray(rule.targetSubjects) ? rule.targetSubjects : []
+      var ruleName = normalizeText(rule.name) || '余额表科目勾稽'
+      if (!sourceCode || !sourceFields.length || !targetSubjects.length) return
+
+      var sourceRow = balanceRowByCode(rows, sourceCode)
+      var targetParts = targetSubjects.map(function (item) {
+        var code = normalizeCode(item && item.code)
+        var row = balanceRowByCode(rows, code)
+        var field = normalizeBalanceAmountField(item && item.field)
+        return {
+          code: code,
+          name: normalizeText(item && item.name),
+          row: row,
+          field: field,
+          amount: balanceAmountByField(row, field)
+        }
+      }).filter(function (item) {
+        return !!item.code
+      })
+      if (!targetParts.length) return
+
+      var targetTotal = targetParts.reduce(function (sum, item) {
+        return sum + item.amount
+      }, 0)
+      var sourceAmounts = sourceFields.map(function (field) {
+        return {
+          field: field,
+          amount: balanceAmountByField(sourceRow, field)
+        }
+      })
+      var hasActivity = Math.abs(targetTotal) > 0.01 ||
+        sourceAmounts.some(function (item) { return Math.abs(item.amount) > 0.01 }) ||
+        targetParts.some(function (item) { return Math.abs(item.amount) > 0.01 })
+      if (!hasActivity) return
+
+      var mismatched = sourceAmounts.filter(function (item) {
+        return Math.abs(item.amount - targetTotal) > 0.01
+      })
+      if (!mismatched.length) return
+
+      var sourceLabel = balanceSubjectLabel(sourceCode, rule.sourceName, sourceRow)
+      var sourceText = sourceAmounts.map(function (item) {
+        return balanceAmountFieldText(item.field) + ' ' + formatMoney(item.amount)
+      }).join('、')
+      var targetText = targetParts.map(function (item) {
+        var label = balanceSubjectLabel(item.code, item.name, item.row)
+        return label + ' ' + balanceAmountFieldText(item.field) + ' ' +
+          (item.row ? formatMoney(item.amount) : '未找到')
+      }).join(' + ')
+      addBalanceIssue(
+        issues,
+        period,
+        ruleLevel(rule),
+        ruleName,
+        sourceLabel + ' ' + sourceText + '；目标合计 ' + formatMoney(targetTotal) + '（' + targetText + '）。',
+        normalizeText(rule.suggestion) || '请核对余额表相关科目的本期发生额勾稽关系。',
+        sourceRow
+      )
+    })
+  }
+
   function checkBalanceRows(period, rows, monthResults) {
     const issues = []
     const monthDetails = voucherDetailsForPeriod(monthResults, period, false)
@@ -818,6 +922,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
         }
       }
     })
+    checkBalanceEquationRules(period, rows, issues)
     return issues
   }
 

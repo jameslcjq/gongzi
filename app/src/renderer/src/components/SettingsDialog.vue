@@ -19,6 +19,8 @@ import type {
 import {
   createDefaultVoucherCheckRuleLibrary,
   normalizeVoucherCheckRuleLibrary,
+  type VoucherBalanceAmountField,
+  type VoucherBalanceEquationTarget,
   type VoucherCheckRequiredSubject,
   type VoucherCheckRule,
   type VoucherCheckRuleLibrary
@@ -483,7 +485,7 @@ async function loadVoucherRules() {
     const library = await window.salaryApi.getVoucherCheckRuleLibrary()
     voucherRules.value = cloneRule(library.rules)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '加载凭证检查规则失败')
+    ElMessage.error(error instanceof Error ? error.message : '加载账务检查规则失败')
     voucherRules.value = cloneRule(createDefaultVoucherCheckRuleLibrary().rules)
   } finally {
     voucherRulesLoading.value = false
@@ -492,7 +494,7 @@ async function loadVoucherRules() {
 
 function buildVoucherRuleLibrary(): VoucherCheckRuleLibrary {
   return normalizeVoucherCheckRuleLibrary({
-    schemaVersion: 1,
+    schemaVersion: 2,
     rules: voucherRules.value,
     updatedAt: new Date().toISOString()
   })
@@ -503,9 +505,9 @@ async function saveVoucherRules() {
   try {
     const saved = await window.salaryApi.setVoucherCheckRuleLibrary(buildVoucherRuleLibrary())
     voucherRules.value = cloneRule(saved.rules)
-    ElMessage.success('凭证检查规则已保存')
+    ElMessage.success('账务检查规则已保存')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存凭证检查规则失败')
+    ElMessage.error(error instanceof Error ? error.message : '保存账务检查规则失败')
   } finally {
     voucherRulesSaving.value = false
   }
@@ -522,7 +524,7 @@ async function exportVoucherRules() {
     }
     ElMessage.success(`规则库已导出：${result.filePath}`)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '导出凭证检查规则失败')
+    ElMessage.error(error instanceof Error ? error.message : '导出账务检查规则失败')
   } finally {
     voucherRulesFileBusy.value = false
   }
@@ -539,7 +541,7 @@ async function importVoucherRules() {
     voucherRules.value = cloneRule(result.library.rules)
     ElMessage.success(`规则库已导入：${result.filePath}`)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '导入凭证检查规则失败')
+    ElMessage.error(error instanceof Error ? error.message : '导入账务检查规则失败')
   } finally {
     voucherRulesFileBusy.value = false
   }
@@ -559,7 +561,7 @@ async function resetVoucherRules() {
   try {
     const reset = await window.salaryApi.resetVoucherCheckRuleLibrary()
     voucherRules.value = cloneRule(reset.rules)
-    ElMessage.success('已恢复默认凭证检查规则')
+    ElMessage.success('已恢复默认账务检查规则')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '恢复默认规则失败')
   } finally {
@@ -597,7 +599,7 @@ function addVoucherRule(type: VoucherCheckRule['type']) {
       expectedBudgetRevenueSubjectCode: '',
       suggestion: ''
     })
-  } else {
+  } else if (type === 'fixed-asset-capital') {
     voucherRules.value.push({
       id: newRuleId('R-FIXED'),
       type,
@@ -608,6 +610,19 @@ function addVoucherRule(type: VoucherCheckRule['type']) {
       budgetExpensePrefixes: ['720'],
       allowedEcoCodes: ['31001', '31002', '31003', '31005', '31006', '31007', '31008', '31009', '31010', '31011', '31012', '31013', '31019', '31021', '31022', '31099'],
       suggestion: '应修改为310类资本性支出。'
+    })
+  } else {
+    voucherRules.value.push({
+      id: newRuleId('R-BALANCE'),
+      type,
+      name: '余额表科目勾稽',
+      enabled: true,
+      level: 'error',
+      sourceCode: '',
+      sourceName: '',
+      sourceFields: ['debit', 'credit'],
+      targetSubjects: [],
+      suggestion: ''
     })
   }
 }
@@ -635,6 +650,7 @@ function moveVoucherRule(index: number, offset: number) {
 function ruleTypeText(type: VoucherCheckRule['type']): string {
   if (type === 'keyword-eco') return '关键词经济分类'
   if (type === 'keyword-subject-set') return '关键词科目组合'
+  if (type === 'balance-equation') return '余额表勾稽'
   return '固定资产310类'
 }
 
@@ -682,6 +698,59 @@ function directionText(direction?: VoucherCheckRequiredSubject['direction']): st
   if (direction === 'debit') return '借'
   if (direction === 'credit') return '贷'
   return '任意'
+}
+
+function balanceFieldText(field?: VoucherBalanceAmountField): string {
+  if (field === 'credit') return '本期贷方'
+  if (field === 'sumDebit') return '累计借方'
+  if (field === 'sumCredit') return '累计贷方'
+  return '本期借方'
+}
+
+function parseBalanceField(value: string): VoucherBalanceAmountField {
+  const text = String(value || '').replace(/\s+/g, '')
+  if (/累计贷方|贷方累计|sumCredit/i.test(text)) return 'sumCredit'
+  if (/累计借方|借方累计|sumDebit/i.test(text)) return 'sumDebit'
+  if (/贷方|credit/i.test(text)) return 'credit'
+  return 'debit'
+}
+
+function getBalanceSourceFields(rule: VoucherCheckRule): string {
+  return rule.type === 'balance-equation'
+    ? (rule.sourceFields || []).map(balanceFieldText).join('，')
+    : ''
+}
+
+function setBalanceSourceFields(rule: VoucherCheckRule, value: string) {
+  if (rule.type !== 'balance-equation') return
+  const fields = splitRuleTokens(value).map(parseBalanceField)
+  rule.sourceFields = Array.from(new Set(fields.length ? fields : ['debit']))
+}
+
+function balanceTargetLines(rule: VoucherCheckRule): string {
+  if (rule.type !== 'balance-equation') return ''
+  return rule.targetSubjects
+    .map((item) => [item.code, item.name || '', balanceFieldText(item.field)].filter(Boolean).join(' '))
+    .join('\n')
+}
+
+function setBalanceTargetLines(rule: VoucherCheckRule, value: string) {
+  if (rule.type !== 'balance-equation') return
+  const targets: Array<VoucherBalanceEquationTarget | null> = String(value || '').split(/\n+/).map((line) => {
+    const text = line.trim()
+    if (!text) return null
+    const codeMatch = text.match(/[0-9A-Za-z]+/)
+    const code = codeMatch ? codeMatch[0].toUpperCase() : ''
+    if (!code) return null
+    const field = parseBalanceField(text)
+    const name = text
+      .replace(codeMatch ? codeMatch[0] : '', '')
+      .replace(/本期借方发生|本期贷方发生|借方累计发生|贷方累计发生|累计借方|累计贷方|本期借方|本期贷方|借方|贷方|debit|credit|sumDebit|sumCredit/ig, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return { code, name, field }
+  })
+  rule.targetSubjects = targets.filter((item): item is VoucherBalanceEquationTarget => !!item)
 }
 
 function subjectLines(rule: VoucherCheckRule): string {
@@ -910,16 +979,17 @@ function formatSize(bytes: number): string {
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="凭证检查规则" name="voucher-rules">
+      <el-tab-pane label="账务检查规则" name="voucher-rules">
         <div class="settings-section voucher-rule-toolbar">
           <div>
-            <h4>凭证检查规则库</h4>
+            <h4>账务检查规则库</h4>
             <p>规则保存在本机，可导入导出 JSON 文件。保存后重新进入或刷新一体化凭证页面，账务检查会按新规则执行。</p>
           </div>
           <div class="voucher-rule-actions">
             <el-button size="small" @click="addVoucherRule('keyword-eco')">新增经济分类规则</el-button>
             <el-button size="small" @click="addVoucherRule('keyword-subject-set')">新增科目组合规则</el-button>
             <el-button size="small" @click="addVoucherRule('fixed-asset-capital')">新增固定资产规则</el-button>
+            <el-button size="small" @click="addVoucherRule('balance-equation')">新增余额表勾稽规则</el-button>
             <el-button size="small" :loading="voucherRulesFileBusy" @click="importVoucherRules">导入</el-button>
             <el-button size="small" :loading="voucherRulesFileBusy" @click="exportVoucherRules">导出</el-button>
             <el-button size="small" type="warning" plain :loading="voucherRulesSaving" @click="resetVoucherRules">恢复默认</el-button>
@@ -1013,7 +1083,46 @@ function formatSize(bytes: number): string {
                 </el-col>
               </template>
 
-              <template v-else>
+              <template v-else-if="rule.type === 'balance-equation'">
+                <el-col :span="8">
+                  <el-form-item label="源科目编码" label-width="110px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.sourceCode" size="small" placeholder="如：400101" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="源科目名称" label-width="110px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.sourceName" size="small" placeholder="如：一般公共预算财政拨款" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="源校验字段" label-width="110px" class="voucher-rule-form-item">
+                    <el-input
+                      :model-value="getBalanceSourceFields(rule)"
+                      size="small"
+                      placeholder="如：本期借方，本期贷方"
+                      @update:model-value="setBalanceSourceFields(rule, String($event))"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="目标科目" label-width="110px" class="voucher-rule-form-item">
+                    <el-input
+                      :model-value="balanceTargetLines(rule)"
+                      type="textarea"
+                      :rows="3"
+                      placeholder="每行一个：编码 名称 字段，如：7201010101 财政拨款支出 本期借方"
+                      @update:model-value="setBalanceTargetLines(rule, String($event))"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="建议文字" label-width="110px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.suggestion" size="small" placeholder="如：请核对余额表科目发生额是否一致。" />
+                  </el-form-item>
+                </el-col>
+              </template>
+
+              <template v-else-if="rule.type === 'fixed-asset-capital'">
                 <el-col :span="12">
                   <el-form-item label="固定资产科目前缀" label-width="130px" class="voucher-rule-form-item">
                     <el-input
