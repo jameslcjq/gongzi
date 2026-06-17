@@ -102,6 +102,10 @@ import type {
   ActiveRetirementTransferPreview,
   ActiveRetirementTransferResult
 } from '../shared/types'
+import type {
+  VoucherCheckRuleFileResult,
+  VoucherCheckRuleLibrary
+} from '../shared/voucherCheckRules'
 
 const appInstance = buildPayrollInstanceSummary({
   id: resolvePayrollInstanceId({
@@ -343,6 +347,16 @@ const salaryApi = {
     ipcRenderer.invoke('unit-settings:resolve-school', budgetUnitCode),
   setUnitSettings: (settings: UnitSettings): Promise<UnitSettings> =>
     ipcRenderer.invoke('unit-settings:set', settings),
+  getVoucherCheckRuleLibrary: (): Promise<VoucherCheckRuleLibrary> =>
+    ipcRenderer.invoke('voucher-check-rules:get'),
+  setVoucherCheckRuleLibrary: (library: VoucherCheckRuleLibrary): Promise<VoucherCheckRuleLibrary> =>
+    ipcRenderer.invoke('voucher-check-rules:set', library),
+  resetVoucherCheckRuleLibrary: (): Promise<VoucherCheckRuleLibrary> =>
+    ipcRenderer.invoke('voucher-check-rules:reset'),
+  exportVoucherCheckRuleLibrary: (): Promise<VoucherCheckRuleFileResult> =>
+    ipcRenderer.invoke('voucher-check-rules:export'),
+  importVoucherCheckRuleLibrary: (): Promise<VoucherCheckRuleFileResult> =>
+    ipcRenderer.invoke('voucher-check-rules:import'),
   getMonthlyPayrollSettings: (): Promise<MonthlyPayrollSettings> =>
     ipcRenderer.invoke('monthly-payroll:settings:get'),
   setMonthlyPayrollSettings: (settings: MonthlyPayrollSettings): Promise<MonthlyPayrollSettings> =>

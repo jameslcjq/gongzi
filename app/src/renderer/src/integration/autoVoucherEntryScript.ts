@@ -21,7 +21,7 @@ export function buildAutoVoucherEntryScript(
   var AUTO_START_TARGET_ONLY = ${autoStartTargetOnly ? 'true' : 'false'}
   var SHOW_PAGE_BUTTON = ${showPageButton ? 'true' : 'false'}
   var REQUIRE_ROWS = ${requireRows ? 'true' : 'false'}
-  var VERSION = '20260607-auto-voucher-entry-frame-target'
+  var VERSION = '20260617-auto-voucher-entry-direct-pay-only'
   var BTN_ID = 'auto-voucher-entry-btn'
   var STATUS_ID = 'auto-voucher-entry-status'
   var STORE_KEY = 'autoVoucherEntryState'
@@ -473,6 +473,7 @@ export function buildAutoVoucherEntryScript(
 
   function getListPageFromDoc(doc) {
     if (!doc) return null
+    if (!isDirectPayExternalListDoc(doc)) return null
     if (isSalaryPaymentPage(doc)) return null
     if (!doc.querySelector('.datagrid-view1')) return null
     var generateBtn = findExactButton(doc, '生成')

@@ -16,6 +16,13 @@ import type {
   UnitSettings,
   UnitSettingsLockState
 } from '@shared/types'
+import {
+  createDefaultVoucherCheckRuleLibrary,
+  normalizeVoucherCheckRuleLibrary,
+  type VoucherCheckRequiredSubject,
+  type VoucherCheckRule,
+  type VoucherCheckRuleLibrary
+} from '@shared/voucherCheckRules'
 
 const showInternalTools = internalToolsEnabled
 const AutomationDiagnosticsPage = defineAsyncComponent(() => import('./AutomationDiagnosticsPage.vue'))
@@ -46,6 +53,10 @@ const recycleRevertingId = ref<number | null>(null)
 const retireBatchKind = 'worksheet.retire-active-employee'
 const activeTab = ref('unit')
 const appVersion = ref('dev')
+const voucherRules = ref<VoucherCheckRule[]>([])
+const voucherRulesLoading = ref(false)
+const voucherRulesSaving = ref(false)
+const voucherRulesFileBusy = ref(false)
 
 const unitForm = reactive<UnitSettings>({
   unitFullName: '',
@@ -93,6 +104,7 @@ watch(
       void refreshBackupLists()
       void refreshRecycleBin()
       void loadUnitSettings()
+      void loadVoucherRules()
       void loadAppVersion()
     }
   }
@@ -461,6 +473,248 @@ function openLookupWorksheet(name: string) {
   emit('openWorksheet', name)
 }
 
+function cloneRule<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+async function loadVoucherRules() {
+  voucherRulesLoading.value = true
+  try {
+    const library = await window.salaryApi.getVoucherCheckRuleLibrary()
+    voucherRules.value = cloneRule(library.rules)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载凭证检查规则失败')
+    voucherRules.value = cloneRule(createDefaultVoucherCheckRuleLibrary().rules)
+  } finally {
+    voucherRulesLoading.value = false
+  }
+}
+
+function buildVoucherRuleLibrary(): VoucherCheckRuleLibrary {
+  return normalizeVoucherCheckRuleLibrary({
+    schemaVersion: 1,
+    rules: voucherRules.value,
+    updatedAt: new Date().toISOString()
+  })
+}
+
+async function saveVoucherRules() {
+  voucherRulesSaving.value = true
+  try {
+    const saved = await window.salaryApi.setVoucherCheckRuleLibrary(buildVoucherRuleLibrary())
+    voucherRules.value = cloneRule(saved.rules)
+    ElMessage.success('凭证检查规则已保存')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存凭证检查规则失败')
+  } finally {
+    voucherRulesSaving.value = false
+  }
+}
+
+async function exportVoucherRules() {
+  voucherRulesFileBusy.value = true
+  try {
+    await window.salaryApi.setVoucherCheckRuleLibrary(buildVoucherRuleLibrary())
+    const result = await window.salaryApi.exportVoucherCheckRuleLibrary()
+    if (!result.ok) {
+      if (!result.canceled) ElMessage.error(result.reason)
+      return
+    }
+    ElMessage.success(`规则库已导出：${result.filePath}`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导出凭证检查规则失败')
+  } finally {
+    voucherRulesFileBusy.value = false
+  }
+}
+
+async function importVoucherRules() {
+  voucherRulesFileBusy.value = true
+  try {
+    const result = await window.salaryApi.importVoucherCheckRuleLibrary()
+    if (!result.ok) {
+      if (!result.canceled) ElMessage.error(result.reason)
+      return
+    }
+    voucherRules.value = cloneRule(result.library.rules)
+    ElMessage.success(`规则库已导入：${result.filePath}`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导入凭证检查规则失败')
+  } finally {
+    voucherRulesFileBusy.value = false
+  }
+}
+
+async function resetVoucherRules() {
+  try {
+    await ElMessageBox.confirm('将恢复系统内置默认规则，并覆盖当前本地规则库。确定继续吗？', '恢复默认规则', {
+      type: 'warning',
+      confirmButtonText: '恢复默认',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+  voucherRulesSaving.value = true
+  try {
+    const reset = await window.salaryApi.resetVoucherCheckRuleLibrary()
+    voucherRules.value = cloneRule(reset.rules)
+    ElMessage.success('已恢复默认凭证检查规则')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '恢复默认规则失败')
+  } finally {
+    voucherRulesSaving.value = false
+  }
+}
+
+function newRuleId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+}
+
+function addVoucherRule(type: VoucherCheckRule['type']) {
+  if (type === 'keyword-eco') {
+    voucherRules.value.push({
+      id: newRuleId('R-ECO'),
+      type,
+      name: '关键词经济分类',
+      enabled: true,
+      level: 'warn',
+      keywords: [],
+      expectedEcoCode: '',
+      expectedEcoName: '',
+      suggestion: ''
+    })
+  } else if (type === 'keyword-subject-set') {
+    voucherRules.value.push({
+      id: newRuleId('R-SUBJECT'),
+      type,
+      name: '关键词科目组合',
+      enabled: true,
+      level: 'warn',
+      keywords: [],
+      requiredSubjects: [],
+      expectedBudgetExpenseSubjectCode: '',
+      expectedBudgetRevenueSubjectCode: '',
+      suggestion: ''
+    })
+  } else {
+    voucherRules.value.push({
+      id: newRuleId('R-FIXED'),
+      type,
+      name: '固定资产资本性支出',
+      enabled: true,
+      level: 'warn',
+      fixedAssetPrefixes: ['160101', '160102', '160103', '160104', '160105', '160106'],
+      budgetExpensePrefixes: ['720'],
+      allowedEcoCodes: ['31001', '31002', '31003', '31005', '31006', '31007', '31008', '31009', '31010', '31011', '31012', '31013', '31019', '31021', '31022', '31099'],
+      suggestion: '应修改为310类资本性支出。'
+    })
+  }
+}
+
+function duplicateVoucherRule(index: number) {
+  const source = voucherRules.value[index]
+  if (!source) return
+  const copy = cloneRule(source)
+  copy.id = newRuleId('R-COPY')
+  copy.name = `${copy.name} 副本`
+  voucherRules.value.splice(index + 1, 0, copy)
+}
+
+function removeVoucherRule(index: number) {
+  voucherRules.value.splice(index, 1)
+}
+
+function moveVoucherRule(index: number, offset: number) {
+  const target = index + offset
+  if (target < 0 || target >= voucherRules.value.length) return
+  const [item] = voucherRules.value.splice(index, 1)
+  voucherRules.value.splice(target, 0, item)
+}
+
+function ruleTypeText(type: VoucherCheckRule['type']): string {
+  if (type === 'keyword-eco') return '关键词经济分类'
+  if (type === 'keyword-subject-set') return '关键词科目组合'
+  return '固定资产310类'
+}
+
+function splitRuleTokens(value: string): string[] {
+  return Array.from(new Set(String(value || '').split(/[,\n，、;；]/).map((item) => item.trim()).filter(Boolean)))
+}
+
+function joinRuleTokens(value?: string[]): string {
+  return (value || []).join('，')
+}
+
+function getRuleKeywords(rule: VoucherCheckRule): string {
+  return 'keywords' in rule ? joinRuleTokens(rule.keywords) : ''
+}
+
+function setRuleKeywords(rule: VoucherCheckRule, value: string) {
+  if ('keywords' in rule) rule.keywords = splitRuleTokens(value)
+}
+
+function getFixedPrefixes(rule: VoucherCheckRule): string {
+  return rule.type === 'fixed-asset-capital' ? joinRuleTokens(rule.fixedAssetPrefixes) : ''
+}
+
+function setFixedPrefixes(rule: VoucherCheckRule, value: string) {
+  if (rule.type === 'fixed-asset-capital') rule.fixedAssetPrefixes = splitRuleTokens(value)
+}
+
+function getBudgetPrefixes(rule: VoucherCheckRule): string {
+  return rule.type === 'fixed-asset-capital' ? joinRuleTokens(rule.budgetExpensePrefixes) : ''
+}
+
+function setBudgetPrefixes(rule: VoucherCheckRule, value: string) {
+  if (rule.type === 'fixed-asset-capital') rule.budgetExpensePrefixes = splitRuleTokens(value)
+}
+
+function getAllowedEcoCodes(rule: VoucherCheckRule): string {
+  return rule.type === 'fixed-asset-capital' ? joinRuleTokens(rule.allowedEcoCodes) : ''
+}
+
+function setAllowedEcoCodes(rule: VoucherCheckRule, value: string) {
+  if (rule.type === 'fixed-asset-capital') rule.allowedEcoCodes = splitRuleTokens(value)
+}
+
+function directionText(direction?: VoucherCheckRequiredSubject['direction']): string {
+  if (direction === 'debit') return '借'
+  if (direction === 'credit') return '贷'
+  return '任意'
+}
+
+function subjectLines(rule: VoucherCheckRule): string {
+  if (rule.type !== 'keyword-subject-set') return ''
+  return rule.requiredSubjects
+    .map((item) => [item.code, item.name || '', directionText(item.direction)].filter(Boolean).join(' '))
+    .join('\n')
+}
+
+function setSubjectLines(rule: VoucherCheckRule, value: string) {
+  if (rule.type !== 'keyword-subject-set') return
+  const subjects: Array<VoucherCheckRequiredSubject | null> = String(value || '').split(/\n+/).map((line) => {
+    const text = line.trim()
+    if (!text) return null
+    const direction: VoucherCheckRequiredSubject['direction'] =
+      /(^|\s)(贷|credit)(\s|$)/i.test(text)
+        ? 'credit'
+        : /(^|\s)(借|debit)(\s|$)/i.test(text)
+          ? 'debit'
+          : 'any'
+    const codeMatch = text.match(/[0-9A-Za-z]+/)
+    const code = codeMatch ? codeMatch[0].toUpperCase() : ''
+    if (!code) return null
+    const name = text
+      .replace(codeMatch ? codeMatch[0] : '', '')
+      .replace(/(^|\s)(借|贷|debit|credit|任意|any)(\s|$)/ig, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return { code, name, direction }
+  })
+  rule.requiredSubjects = subjects.filter((item): item is VoucherCheckRequiredSubject => !!item)
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -653,6 +907,151 @@ function formatSize(bytes: number): string {
       <el-tab-pane label="一致性审计" name="audit">
         <div class="settings-audit-pane">
           <ConsistencyAuditPage />
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="凭证检查规则" name="voucher-rules">
+        <div class="settings-section voucher-rule-toolbar">
+          <div>
+            <h4>凭证检查规则库</h4>
+            <p>规则保存在本机，可导入导出 JSON 文件。保存后重新进入或刷新一体化凭证页面，账务检查会按新规则执行。</p>
+          </div>
+          <div class="voucher-rule-actions">
+            <el-button size="small" @click="addVoucherRule('keyword-eco')">新增经济分类规则</el-button>
+            <el-button size="small" @click="addVoucherRule('keyword-subject-set')">新增科目组合规则</el-button>
+            <el-button size="small" @click="addVoucherRule('fixed-asset-capital')">新增固定资产规则</el-button>
+            <el-button size="small" :loading="voucherRulesFileBusy" @click="importVoucherRules">导入</el-button>
+            <el-button size="small" :loading="voucherRulesFileBusy" @click="exportVoucherRules">导出</el-button>
+            <el-button size="small" type="warning" plain :loading="voucherRulesSaving" @click="resetVoucherRules">恢复默认</el-button>
+            <el-button size="small" type="primary" :loading="voucherRulesSaving" @click="saveVoucherRules">保存规则库</el-button>
+          </div>
+        </div>
+
+        <div v-loading="voucherRulesLoading" class="voucher-rule-list">
+          <div v-if="!voucherRules.length" class="voucher-rule-empty">
+            暂无规则，请新增或恢复默认规则。
+          </div>
+          <div
+            v-for="(rule, index) in voucherRules"
+            :key="rule.id"
+            class="voucher-rule-item"
+          >
+            <div class="voucher-rule-head">
+              <div class="voucher-rule-title">
+                <el-switch v-model="rule.enabled" size="small" />
+                <el-tag size="small" effect="plain">{{ ruleTypeText(rule.type) }}</el-tag>
+                <el-input v-model="rule.name" size="small" placeholder="规则名称" />
+                <el-select v-model="rule.level" size="small" style="width: 96px">
+                  <el-option label="提醒" value="warn" />
+                  <el-option label="严重" value="error" />
+                </el-select>
+              </div>
+              <div class="voucher-rule-row-actions">
+                <el-button size="small" text :disabled="index === 0" @click="moveVoucherRule(index, -1)">上移</el-button>
+                <el-button size="small" text :disabled="index === voucherRules.length - 1" @click="moveVoucherRule(index, 1)">下移</el-button>
+                <el-button size="small" text @click="duplicateVoucherRule(index)">复制</el-button>
+                <el-button size="small" text type="danger" @click="removeVoucherRule(index)">删除</el-button>
+              </div>
+            </div>
+
+            <el-row :gutter="12">
+              <el-col v-if="'keywords' in rule" :span="24">
+                <el-form-item label="摘要关键词" label-width="110px" class="voucher-rule-form-item">
+                  <el-input
+                    :model-value="getRuleKeywords(rule)"
+                    size="small"
+                    placeholder="多个关键词用逗号或换行分隔"
+                    @update:model-value="setRuleKeywords(rule, String($event))"
+                  />
+                </el-form-item>
+              </el-col>
+
+              <template v-if="rule.type === 'keyword-eco'">
+                <el-col :span="8">
+                  <el-form-item label="应为经济分类" label-width="110px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.expectedEcoCode" size="small" placeholder="如：30107" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="分类名称" label-width="90px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.expectedEcoName" size="small" placeholder="如：绩效工资" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="建议文字" label-width="80px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.suggestion" size="small" placeholder="如：应修改为30107 绩效工资。" />
+                  </el-form-item>
+                </el-col>
+              </template>
+
+              <template v-else-if="rule.type === 'keyword-subject-set'">
+                <el-col :span="24">
+                  <el-form-item label="应包含科目" label-width="110px" class="voucher-rule-form-item">
+                    <el-input
+                      :model-value="subjectLines(rule)"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="每行一个：编码 名称 借/贷，如：7201010103 事业支出-基本支出-人员经费-其他资金支出 借"
+                      @update:model-value="setSubjectLines(rule, String($event))"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="预算支出科目" label-width="110px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.expectedBudgetExpenseSubjectCode" size="small" placeholder="如：7201010103" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="预算收入科目" label-width="110px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.expectedBudgetRevenueSubjectCode" size="small" placeholder="如：66090502" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="建议文字" label-width="80px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.suggestion" size="small" placeholder="如：应按图片中的四条分录科目调整。" />
+                  </el-form-item>
+                </el-col>
+              </template>
+
+              <template v-else>
+                <el-col :span="12">
+                  <el-form-item label="固定资产科目前缀" label-width="130px" class="voucher-rule-form-item">
+                    <el-input
+                      :model-value="getFixedPrefixes(rule)"
+                      size="small"
+                      placeholder="如：160101，160102"
+                      @update:model-value="setFixedPrefixes(rule, String($event))"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="预算支出科目前缀" label-width="130px" class="voucher-rule-form-item">
+                    <el-input
+                      :model-value="getBudgetPrefixes(rule)"
+                      size="small"
+                      placeholder="如：720"
+                      @update:model-value="setBudgetPrefixes(rule, String($event))"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="16">
+                  <el-form-item label="允许经济分类" label-width="130px" class="voucher-rule-form-item">
+                    <el-input
+                      :model-value="getAllowedEcoCodes(rule)"
+                      size="small"
+                      placeholder="如：31001，31002，31003"
+                      @update:model-value="setAllowedEcoCodes(rule, String($event))"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="建议文字" label-width="80px" class="voucher-rule-form-item">
+                    <el-input v-model="rule.suggestion" size="small" placeholder="应修改为310类资本性支出。" />
+                  </el-form-item>
+                </el-col>
+              </template>
+            </el-row>
+          </div>
         </div>
       </el-tab-pane>
 
@@ -901,6 +1300,66 @@ function formatSize(bytes: number): string {
 
 .settings-audit-pane :deep(.audit-header h2) {
   font-size: 18px;
+}
+
+.voucher-rule-toolbar {
+  margin-bottom: 12px;
+}
+
+.voucher-rule-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.voucher-rule-list {
+  display: grid;
+  gap: 10px;
+  max-height: 500px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.voucher-rule-empty {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.voucher-rule-item {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.voucher-rule-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.voucher-rule-title {
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 1fr) 96px;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.voucher-rule-row-actions {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.voucher-rule-form-item {
+  margin-bottom: 8px;
 }
 
 .about-panel {

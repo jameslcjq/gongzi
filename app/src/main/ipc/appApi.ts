@@ -109,6 +109,13 @@ import {
   generatePerformancePayrollFromLocal
 } from '../services/performancePayroll'
 import { getUnitSettingsLockState, readUnitSettings, writeUnitSettings } from '../services/unitSettings'
+import {
+  exportVoucherCheckRuleLibrary,
+  importVoucherCheckRuleLibrary,
+  readVoucherCheckRuleLibrary,
+  resetVoucherCheckRuleLibrary,
+  writeVoucherCheckRuleLibrary
+} from '../services/voucherCheckRules'
 import { resolveSchoolUnitSettings } from '../services/schoolLookup'
 import { appendPushLog, ensurePushLogDir } from '../services/pushLog'
 import { appendMainLog } from '../services/mainLog'
@@ -175,6 +182,11 @@ import {
   wipeAllWorksheetData,
   type PersonnelChildRecords
 } from '../services/worksheetRecords'
+import type {
+  VoucherCheckRuleFileResult,
+  VoucherCheckRuleLibrary
+} from '../../shared/voucherCheckRules'
+
 import type {
   AppSummary,
   BackupSummary,
@@ -1545,6 +1557,32 @@ export function registerAppIpc(): void {
   ipcMain.handle(
     'unit-settings:set',
     (_event, settings: UnitSettings): Promise<UnitSettings> => writeUnitSettings(settings)
+  )
+
+  ipcMain.handle(
+    'voucher-check-rules:get',
+    (): Promise<VoucherCheckRuleLibrary> => readVoucherCheckRuleLibrary()
+  )
+
+  ipcMain.handle(
+    'voucher-check-rules:set',
+    (_event, library: VoucherCheckRuleLibrary): Promise<VoucherCheckRuleLibrary> =>
+      writeVoucherCheckRuleLibrary(library)
+  )
+
+  ipcMain.handle(
+    'voucher-check-rules:reset',
+    (): Promise<VoucherCheckRuleLibrary> => resetVoucherCheckRuleLibrary()
+  )
+
+  ipcMain.handle(
+    'voucher-check-rules:export',
+    (): Promise<VoucherCheckRuleFileResult> => exportVoucherCheckRuleLibrary()
+  )
+
+  ipcMain.handle(
+    'voucher-check-rules:import',
+    (): Promise<VoucherCheckRuleFileResult> => importVoucherCheckRuleLibrary()
   )
 
   ipcMain.handle(

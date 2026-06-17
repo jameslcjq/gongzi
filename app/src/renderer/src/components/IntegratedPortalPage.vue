@@ -9,6 +9,8 @@ import {
   Refresh
 } from '@element-plus/icons-vue'
 import { buildVoucherMergeScript } from '../integration/voucherMergeScript'
+import { buildVoucherCheckScript } from '../integration/voucherCheckScript'
+import { createDefaultVoucherCheckRuleLibrary } from '@shared/voucherCheckRules'
 import {
   buildSalaryExportScript,
   buildSalaryExportFeedbackScript
@@ -1782,11 +1784,24 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
     }
   }
   let planUnit = { name: '', code: '' }
+  let voucherCheckUnit = { unitFullName: '', unitImportCode: '', functionCode: '', retiredFunctionCode: '' }
+  let voucherCheckRules = createDefaultVoucherCheckRuleLibrary()
   try {
     const unit = await window.salaryApi.getUnitSettings()
     planUnit = { name: (unit.unitFullName || '').trim(), code: (unit.unitImportCode || '').trim() }
+    voucherCheckUnit = {
+      unitFullName: (unit.unitFullName || '').trim(),
+      unitImportCode: (unit.unitImportCode || '').trim(),
+      functionCode: (unit.functionCode || '').trim(),
+      retiredFunctionCode: (unit.retiredFunctionCode || '').trim()
+    }
   } catch (error) {
-    console.warn('读取单位设置失败，人员经费录入暂不按单位过滤', error)
+    console.warn('读取单位设置失败，人员经费录入暂不按单位过滤，凭证检查暂不校验系统功能分类', error)
+  }
+  try {
+    voucherCheckRules = await window.salaryApi.getVoucherCheckRuleLibrary()
+  } catch (error) {
+    console.warn('读取凭证检查规则库失败，使用内置默认规则', error)
   }
   const salaryQuotaMatchScript = buildSalaryQuotaMatchScript({ autoStart: false, localSummary })
   const salarySendReviewScript = buildSalarySendReviewScript({
@@ -1803,6 +1818,7 @@ async function installPortalAutomationScripts(tabId: string): Promise<void> {
 
   const scripts = [
     { name: '凭证按钮', code: buildVoucherMergeScript({ autoStart: false }) },
+    { name: '凭证检查', code: buildVoucherCheckScript({ unit: voucherCheckUnit, ruleLibrary: voucherCheckRules }) },
     { name: '自动录入', code: buildAutoVoucherEntryScript({ autoStart: false }) },
     { name: '额度匹配', code: salaryQuotaMatchScript },
     { name: '自动送审', code: salarySendReviewScript },
