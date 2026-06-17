@@ -71,7 +71,7 @@ export type VoucherCheckRule =
   | VoucherBalanceEquationRule
 
 export type VoucherCheckRuleLibrary = {
-  schemaVersion: 2
+  schemaVersion: 3
   rules: VoucherCheckRule[]
   updatedAt?: string
 }
@@ -87,7 +87,7 @@ const CAPITAL_EXP_ECO_CODES = [
 
 export function createDefaultVoucherCheckRuleLibrary(): VoucherCheckRuleLibrary {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     rules: [
       {
         id: 'R-BANZHUREN-30107',
@@ -147,12 +147,27 @@ export function createDefaultVoucherCheckRuleLibrary(): VoucherCheckRuleLibrary 
         level: 'error',
         sourceCode: '400101',
         sourceName: '一般公共预算财政拨款',
-        sourceFields: ['debit', 'credit'],
+        sourceFields: ['credit'],
         targetSubjects: [
           { code: '7201010101', name: '财政拨款支出', field: 'debit' },
           { code: '7201010201', name: '财政拨款支出', field: 'debit' }
         ],
-        suggestion: '400101 一般公共预算财政拨款本期借方、贷方发生应等于 7201010101 与 7201010201 财政拨款支出本期借方发生合计。'
+        suggestion: '400101 一般公共预算财政拨款本期贷方发生应等于 7201010101 与 7201010201 财政拨款支出本期借方发生合计。'
+      },
+      {
+        id: 'R-BALANCE-BUDGET-FISCAL',
+        type: 'balance-equation',
+        name: '余额表财政拨款预算收入勾稽',
+        enabled: true,
+        level: 'error',
+        sourceCode: '6001',
+        sourceName: '财政拨款预算收入',
+        sourceFields: ['credit'],
+        targetSubjects: [
+          { code: '7201010101', name: '财政拨款支出', field: 'debit' },
+          { code: '7201010201', name: '财政拨款支出', field: 'debit' }
+        ],
+        suggestion: '6001 财政拨款预算收入本期贷方发生应等于 7201010101 与 7201010201 财政拨款支出本期借方发生合计。'
       },
       {
         id: 'R-BALANCE-OTHER-INCOME',
@@ -162,11 +177,11 @@ export function createDefaultVoucherCheckRuleLibrary(): VoucherCheckRuleLibrary 
         level: 'error',
         sourceCode: '4609',
         sourceName: '其他收入',
-        sourceFields: ['debit', 'credit'],
+        sourceFields: ['credit'],
         targetSubjects: [
           { code: '7201010103', name: '其他资金支出', field: 'debit' }
         ],
-        suggestion: '4609 其他收入本期借方、贷方发生应等于 7201010103 其他资金支出本期借方发生。'
+        suggestion: '4609 其他收入本期贷方发生应等于 7201010103 其他资金支出本期借方发生。'
       }
     ],
     updatedAt: new Date().toISOString()
@@ -190,8 +205,27 @@ export function normalizeVoucherCheckRuleLibrary(input: unknown): VoucherCheckRu
       }
     })
   }
+  if (rules.length && sourceSchemaVersion < 3) {
+    const defaultRulesById = new Map(fallback.rules.map((rule) => [rule.id, rule]))
+    ;['R-BALANCE-FISCAL-EXPENSE', 'R-BALANCE-BUDGET-FISCAL', 'R-BALANCE-OTHER-INCOME'].forEach((id) => {
+      const defaultRule = defaultRulesById.get(id)
+      if (!defaultRule) return
+      const existingIndex = mergedRules.findIndex((rule) => rule.id === id)
+      if (existingIndex >= 0) {
+        const existingRule = mergedRules[existingIndex]
+        mergedRules[existingIndex] = {
+          ...defaultRule,
+          name: existingRule.name || defaultRule.name,
+          enabled: existingRule.enabled,
+          level: existingRule.level
+        }
+      } else {
+        mergedRules.push(defaultRule)
+      }
+    })
+  }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     rules: mergedRules,
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : new Date().toISOString()
   }

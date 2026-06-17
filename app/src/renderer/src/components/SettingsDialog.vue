@@ -494,7 +494,7 @@ async function loadVoucherRules() {
 
 function buildVoucherRuleLibrary(): VoucherCheckRuleLibrary {
   return normalizeVoucherCheckRuleLibrary({
-    schemaVersion: 2,
+    schemaVersion: 3,
     rules: voucherRules.value,
     updatedAt: new Date().toISOString()
   })
@@ -620,7 +620,7 @@ function addVoucherRule(type: VoucherCheckRule['type']) {
       level: 'error',
       sourceCode: '',
       sourceName: '',
-      sourceFields: ['debit', 'credit'],
+      sourceFields: ['credit'],
       targetSubjects: [],
       suggestion: ''
     })

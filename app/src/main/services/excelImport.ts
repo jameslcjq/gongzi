@@ -615,10 +615,17 @@ async function insertRowsAsBatch(
   try {
     await run(database, 'BEGIN TRANSACTION')
     transactionStarted = true
-    // 批量 INSERT：每批最多 200 行
-    const BATCH_SIZE = 200
     const now = new Date().toISOString()
     const rowsToInsert = importPlan.filter((item) => item.action === 'insert').map((item) => item.row)
+    // 多行 INSERT 的占位符 = 行数 ×(列数+2)，不能超过 SQLite 变量上限（默认 32766）。
+    // 宽表（列很多）时按列数压低批大小，留足余量；普通表仍是每批 200 行。
+    const SQLITE_VARIABLE_SAFE_LIMIT = 30000
+    const insertColumnSuperset = new Set<string>()
+    for (const row of rowsToInsert) {
+      for (const key of Object.keys(row)) insertColumnSuperset.add(key)
+    }
+    const columnsPerRow = insertColumnSuperset.size + 2 // + md_created_at / md_updated_at
+    const BATCH_SIZE = Math.max(1, Math.min(200, Math.floor(SQLITE_VARIABLE_SAFE_LIMIT / columnsPerRow)))
     for (let batchStart = 0; batchStart < rowsToInsert.length; batchStart += BATCH_SIZE) {
       const batch = rowsToInsert.slice(batchStart, batchStart + BATCH_SIZE)
 

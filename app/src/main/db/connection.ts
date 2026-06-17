@@ -257,13 +257,66 @@ export function get<T>(
   })
 }
 
-export function run(
+// ── 写事务全局串行 ──────────────────────────────────────────────────────
+// 所有写事务都经 run('BEGIN…') 进入、run('COMMIT'|'ROLLBACK'|'END') 离开。这里把它们
+// 排队，从源头避免“手动操作（审计回写/调动）”与“watcher 自动导入”在同一 SQLite 连接上
+// 交错开事务——以前靠 runBeginTransactionWithRetry 重试兜底，现在正常路径不再需要重试。
+// 重试仍保留作最后防线；看门狗确保万一某事务忘了收尾也只退化成旧行为而非永久死锁。
+const WRITE_TX_WATCHDOG_MS = 5 * 60_000
+let writeTxChain: Promise<void> = Promise.resolve()
+let activeWriteTxFinish: (() => void) | null = null
+
+async function acquireWriteTx(): Promise<void> {
+  let release!: () => void
+  const next = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const prior = writeTxChain
+  writeTxChain = prior.then(() => next)
+  await prior
+
+  let settled = false
+  let watchdog: ReturnType<typeof setTimeout>
+  const finish = (): void => {
+    if (settled) return
+    settled = true
+    clearTimeout(watchdog)
+    if (activeWriteTxFinish === finish) activeWriteTxFinish = null
+    release()
+  }
+  watchdog = setTimeout(() => {
+    console.warn('[db] 写事务持锁超过 5 分钟，强制释放写锁以防死锁')
+    finish()
+  }, WRITE_TX_WATCHDOG_MS)
+  activeWriteTxFinish = finish
+}
+
+function releaseWriteTx(): void {
+  activeWriteTxFinish?.()
+}
+
+export async function run(
   database: sqlite3.Database,
   sql: string,
   params: unknown[] = []
 ): Promise<void> {
   if (/^\s*BEGIN\b/i.test(sql)) {
-    return runBeginTransactionWithRetry(database, sql, params)
+    await acquireWriteTx()
+    try {
+      await runBeginTransactionWithRetry(database, sql, params)
+    } catch (error) {
+      releaseWriteTx()
+      throw error
+    }
+    return
+  }
+  if (/^\s*(COMMIT|END|ROLLBACK)\b/i.test(sql)) {
+    try {
+      await runStatement(database, sql, params)
+    } finally {
+      releaseWriteTx()
+    }
+    return
   }
   return runStatement(database, sql, params)
 }
@@ -1105,40 +1158,49 @@ export async function refreshWorksheetPersonnelStatus(
             ${budgetStatusReasonExpr}
      FROM ${quoteIdentifier(worksheet.name)}`
   )
-  for (const row of rows) {
-    const status = resolvePersonnelStatus(row.id_value, activeIds, retiredIds, otherIds)
-    const budgetStatus = resolveBudgetWorksheetStatus(
-      worksheet.name,
-      row.id_value,
-      activeIds,
-      retiredIds,
-      otherIds
-    )
-    if (budgetStatus && hasBudgetStatus && row.current_budget_status_reason === '手工设置') {
-      continue
+  // 整表刷新的逐行 UPDATE 放进一个事务：大表上从 N 次自动提交（N 次 fsync）降到 1 次，
+  // 且崩溃/断电时不会留下半刷新的状态列。
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    for (const row of rows) {
+      const status = resolvePersonnelStatus(row.id_value, activeIds, retiredIds, otherIds)
+      const budgetStatus = resolveBudgetWorksheetStatus(
+        worksheet.name,
+        row.id_value,
+        activeIds,
+        retiredIds,
+        otherIds
+      )
+      if (budgetStatus && hasBudgetStatus && row.current_budget_status_reason === '手工设置') {
+        continue
+      }
+      if (budgetStatus && hasBudgetStatus && (row.current_budget_status ?? '') === budgetStatus) {
+        continue
+      }
+      if (!budgetStatus && (row.current_status ?? '') === status) {
+        continue
+      }
+      const assignments: string[] = []
+      const params: unknown[] = []
+      if (!budgetStatus) {
+        assignments.push(`${quoteIdentifier(statusColumn)} = ?`)
+        params.push(status)
+      }
+      if (budgetStatus && hasBudgetStatus) {
+        assignments.push(`"md_status" = ?`, `"md_status_changed_at" = ?`, `"md_status_reason" = ?`)
+        params.push(budgetStatus, new Date().toISOString(), '按三张工资表刷新人员状态')
+      }
+      if (assignments.length === 0) continue
+      params.push(new Date().toISOString(), row.id)
+      await run(
+        database,
+        `UPDATE ${quoteIdentifier(worksheet.name)} SET ${assignments.join(', ')}, "md_updated_at" = ? WHERE "id" = ?`,
+        params
+      )
     }
-    if (budgetStatus && hasBudgetStatus && (row.current_budget_status ?? '') === budgetStatus) {
-      continue
-    }
-    if (!budgetStatus && (row.current_status ?? '') === status) {
-      continue
-    }
-    const assignments: string[] = []
-    const params: unknown[] = []
-    if (!budgetStatus) {
-      assignments.push(`${quoteIdentifier(statusColumn)} = ?`)
-      params.push(status)
-    }
-    if (budgetStatus && hasBudgetStatus) {
-      assignments.push(`"md_status" = ?`, `"md_status_changed_at" = ?`, `"md_status_reason" = ?`)
-      params.push(budgetStatus, new Date().toISOString(), '按三张工资表刷新人员状态')
-    }
-    if (assignments.length === 0) continue
-    params.push(new Date().toISOString(), row.id)
-    await run(
-      database,
-      `UPDATE ${quoteIdentifier(worksheet.name)} SET ${assignments.join(', ')}, "md_updated_at" = ? WHERE "id" = ?`,
-      params
-    )
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK').catch(() => undefined)
+    throw error
   }
 }

@@ -20,7 +20,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
   return String.raw`
 ;(() => {
-  const SCRIPT_VERSION = '20260617-period-accounting-check-v6'
+  const SCRIPT_VERSION = '20260618-period-accounting-check-v7'
   const OPTIONS = ${JSON.stringify(payload)}
 
   try {

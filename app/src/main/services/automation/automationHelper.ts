@@ -124,11 +124,12 @@ export async function switchIntegrationLoginKey(input: {
   const args = ['select-key', '--timeout', '20']
   if (keyText) args.push('--key', keyText)
   if (index !== undefined) args.push('--index', String(index))
-  if (pin) args.push('--pin', pin)
   if (confirm) args.push('--confirm', 'true')
+  // PIN 经环境变量传入，不进命令行参数（命令行在 Windows 上可被其它进程列出）。
+  const extraEnv = pin ? { LAOJIU_HELPER_PIN: pin } : undefined
 
   try {
-    const raw = await runHelper(helperPath, args)
+    const raw = await runHelper(helperPath, args, extraEnv)
     return normalizeKeySwitchResult(raw)
   } catch (error) {
     return {
@@ -141,13 +142,18 @@ export async function switchIntegrationLoginKey(input: {
   }
 }
 
-async function runHelper(helperPath: string, args: string[]): Promise<unknown> {
+async function runHelper(
+  helperPath: string,
+  args: string[],
+  extraEnv?: Record<string, string>
+): Promise<unknown> {
   try {
     const { stdout } = await execFileAsync(helperPath, args, {
       windowsHide: true,
       timeout: COLLECT_TIMEOUT_MS,
       maxBuffer: 50 * 1024 * 1024,
-      encoding: 'utf8'
+      encoding: 'utf8',
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env
     })
     return parseHelperJson(stdout)
   } catch (error) {

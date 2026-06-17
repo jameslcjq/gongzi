@@ -290,8 +290,13 @@ export function toChineseRmb(value: number): string {
   const digits = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖']
   const units = ['', '拾', '佰', '仟']
   const bigUnits = ['', '万', '亿', '兆']
-  const integer = Math.floor(Math.abs(value))
-  const cents = Math.round((Math.abs(value) - integer) * 100)
+  let integer = Math.floor(Math.abs(value))
+  let cents = Math.round((Math.abs(value) - integer) * 100)
+  // 浮点小数 ≥ .995 时 cents 会进位到 100，若不归整会得到 jiao=10 → digits[10] 越界。
+  if (cents >= 100) {
+    integer += Math.floor(cents / 100)
+    cents %= 100
+  }
   const integerText = integerToChinese(integer, digits, units, bigUnits)
   const jiao = Math.floor(cents / 10)
   const fen = cents % 10

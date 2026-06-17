@@ -157,7 +157,11 @@ internal static class Program
     {
         var requestedKey = NormalizeText(options.Get("key", ""));
         var requestedIndex = options.GetInt("index", -1);
-        var pin = options.Get("pin", "");
+        // PIN 优先从环境变量读取，避免出现在进程命令行里（Task Manager / wmic 可见）。
+        // 仍保留 --pin 作为手工调用时的兼容回退。
+        var pin = Environment.GetEnvironmentVariable("LAOJIU_HELPER_PIN");
+        if (string.IsNullOrWhiteSpace(pin)) pin = options.Get("pin", "");
+        pin ??= "";
         var confirm = options.GetBool("confirm", false);
         if (string.IsNullOrWhiteSpace(requestedKey) && requestedIndex < 0)
             return Error("missing-target", "缺少 --key 或 --index 参数");

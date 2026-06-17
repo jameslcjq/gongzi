@@ -940,6 +940,16 @@ export function registerAppIpc(): void {
   )
 
   ipcMain.handle('integration:open-external', async (_event, url: string): Promise<void> => {
+    // 只放行 http/https，挡掉 file:、自定义协议处理器等可被滥用的协议。
+    let protocol = ''
+    try {
+      protocol = new URL(String(url)).protocol.toLowerCase()
+    } catch {
+      throw new Error(`无法打开外部链接：URL 非法（${String(url).slice(0, 200)}）`)
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new Error(`已拒绝打开非 http/https 链接：${protocol}`)
+    }
     await shell.openExternal(url)
   })
 

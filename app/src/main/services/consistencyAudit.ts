@@ -556,44 +556,53 @@ export async function applyConsistencyAuditUpdates(
   let updatedRows = 0
   let skippedRows = 0
 
-  for (const issue of issues) {
-    if (issue.severity !== 'warning' || !issue.master) {
-      skippedRows += 1
-      continue
-    }
+  // 批量回写必须放在一个事务里：中途某行报错（如撞唯一约束）能整体回滚，
+  // 不会留下"前半应用、后半未应用"的半成品；WAL 下也省去逐行 fsync。
+  await run(database, 'BEGIN TRANSACTION')
+  try {
+    for (const issue of issues) {
+      if (issue.severity !== 'warning' || !issue.master) {
+        skippedRows += 1
+        continue
+      }
 
-    const targetValue = direction === 'source-to-master' ? issue.source : issue.master
-    const targetRecord =
-      direction === 'source-to-master'
-        ? issue.master
-        : issue.source
-    if (!targetRecord.recordId) {
-      skippedRows += 1
-      continue
-    }
+      const targetValue = direction === 'source-to-master' ? issue.source : issue.master
+      const targetRecord =
+        direction === 'source-to-master'
+          ? issue.master
+          : issue.source
+      if (!targetRecord.recordId) {
+        skippedRows += 1
+        continue
+      }
 
-    const worksheet = worksheets.find((item) => item.name === targetRecord.worksheetName)
-    if (!worksheet) {
-      skippedRows += 1
-      continue
-    }
+      const worksheet = worksheets.find((item) => item.name === targetRecord.worksheetName)
+      if (!worksheet) {
+        skippedRows += 1
+        continue
+      }
 
-    const column = getWorksheetLocalColumns(worksheet).find(
-      (item) => item.field.name === targetRecord.fieldName
-    )
-    if (!column) {
-      skippedRows += 1
-      continue
-    }
+      const column = getWorksheetLocalColumns(worksheet).find(
+        (item) => item.field.name === targetRecord.fieldName
+      )
+      if (!column) {
+        skippedRows += 1
+        continue
+      }
 
-    await run(
-      database,
-      `UPDATE ${quoteIdentifier(worksheet.name)}
-       SET ${quoteIdentifier(column.columnName)} = ?, "md_updated_at" = ?
-       WHERE "id" = ?`,
-      [targetValue.value, new Date().toISOString(), targetRecord.recordId]
-    )
-    updatedRows += 1
+      await run(
+        database,
+        `UPDATE ${quoteIdentifier(worksheet.name)}
+         SET ${quoteIdentifier(column.columnName)} = ?, "md_updated_at" = ?
+         WHERE "id" = ?`,
+        [targetValue.value, new Date().toISOString(), targetRecord.recordId]
+      )
+      updatedRows += 1
+    }
+    await run(database, 'COMMIT')
+  } catch (error) {
+    await run(database, 'ROLLBACK').catch(() => undefined)
+    throw error
   }
 
   if (updatedRows > 0) {
