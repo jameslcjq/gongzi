@@ -20,7 +20,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
   return String.raw`
 ;(() => {
-  const SCRIPT_VERSION = '20260618-period-accounting-check-v7'
+  const SCRIPT_VERSION = '20260618-period-accounting-check-v8'
   const OPTIONS = ${JSON.stringify(payload)}
 
   try {
@@ -1120,7 +1120,6 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
     const parts = [voucher.summary || '']
     ;(voucher.details || []).forEach(function (detail) {
       parts.push(detail.summary || '')
-      parts.push(detail.assistantSummary || '')
       parts.push(detail.subjectName || '')
     })
     return compactText(parts.join(' '))
@@ -1349,18 +1348,6 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
       )
     }
 
-    details.forEach(function (detail) {
-      if (!detail.summary || !detail.assistantSummary) return
-      if (compactText(detail.summary) === compactText(detail.assistantSummary)) return
-      addIssue(
-        issues,
-        'warn',
-        '辅助摘要',
-        detailLabel(detail) + '摘要为“' + detail.summary + '”，辅助摘要为“' + detail.assistantSummary + '”。',
-        '请核对辅助摘要是否需要改成与摘要一致。'
-      )
-    })
-
     applyConfiguredVoucherRules(issues, voucher)
 
     const expectedFunctionCode = normalizeCode(OPTIONS.functionCode)
@@ -1420,25 +1407,44 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
     ].join(';')
   }
 
+  function ensureCheckToolbar() {
+    let toolbar = document.getElementById('salary-voucher-check-toolbar')
+    if (!toolbar) {
+      toolbar = document.createElement('div')
+      toolbar.id = 'salary-voucher-check-toolbar'
+      document.body.appendChild(toolbar)
+    }
+    toolbar.style.cssText = [
+      'position:fixed',
+      'left:18px',
+      'top:18px',
+      'z-index:2147483647',
+      'display:flex',
+      'align-items:center',
+      'gap:8px',
+      'font-family:Microsoft YaHei,Arial,sans-serif'
+    ].join(';')
+    return toolbar
+  }
+
   function updatePanelToggle() {
     const toggle = document.getElementById('salary-voucher-check-toggle')
     if (!toggle) return
     const panel = document.getElementById('salary-voucher-check-panel')
-    toggle.style.display = panel && state.panelHidden ? 'block' : 'none'
+    toggle.style.display = panel && state.panelHidden ? 'inline-flex' : 'none'
   }
 
   function ensurePanelToggle() {
     let toggle = document.getElementById('salary-voucher-check-toggle')
+    const toolbar = ensureCheckToolbar()
     if (!toggle) {
       toggle = document.createElement('button')
       toggle.id = 'salary-voucher-check-toggle'
       toggle.type = 'button'
       toggle.innerText = '显示检查结果'
       toggle.style.cssText = [
-        'position:fixed',
-        'right:18px',
-        'top:18px',
-        'z-index:2147483647',
+        'display:none',
+        'align-items:center',
         'border:1px solid #dc2626',
         'border-radius:4px',
         'background:#fff',
@@ -1455,8 +1461,8 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
         event.stopPropagation()
         setPanelVisible(true)
       }
-      document.body.appendChild(toggle)
     }
+    if (toggle.parentElement !== toolbar) toolbar.appendChild(toggle)
     updatePanelToggle()
     return toggle
   }
@@ -1834,19 +1840,19 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
   function injectButton() {
     if (!document.body || !isVoucherInputPage(document)) return
-    if (document.getElementById('salary-voucher-check-btn')) return
+    const toolbar = ensureCheckToolbar()
 
-    const btn = document.createElement('button')
-    btn.id = 'salary-voucher-check-btn'
-    btn.type = 'button'
-    btn.innerText = '账务检查'
-    btn.title = '逐月检查已结束月份凭证和余额表'
+    let btn = document.getElementById('salary-voucher-check-btn')
+    if (!btn) {
+      btn = document.createElement('button')
+      btn.id = 'salary-voucher-check-btn'
+      btn.type = 'button'
+      btn.innerText = '账务检查'
+      btn.title = '逐月检查已结束月份凭证和余额表'
+    }
     btn.style.cssText = [
-      'position:fixed',
-      'left:50%',
-      'top:18px',
-      'transform:translateX(-50%)',
-      'z-index:2147483647',
+      'display:inline-flex',
+      'align-items:center',
       'border:1px solid #dc2626',
       'border-radius:4px',
       'background:#fff',
@@ -1863,7 +1869,8 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
       event.stopPropagation()
       startCheck()
     }
-    document.body.appendChild(btn)
+    if (btn.parentElement !== toolbar) toolbar.insertBefore(btn, toolbar.firstChild)
+    ensurePanelToggle()
   }
 
   patchNetwork()
