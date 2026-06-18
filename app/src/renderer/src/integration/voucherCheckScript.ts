@@ -20,7 +20,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
   return String.raw`
 ;(() => {
-  const SCRIPT_VERSION = '20260618-period-accounting-check-v8'
+  const SCRIPT_VERSION = '20260618-period-accounting-check-v10'
   const OPTIONS = ${JSON.stringify(payload)}
 
   try {
@@ -1407,19 +1407,60 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
     ].join(';')
   }
 
+  function isElementVisible(element) {
+    try {
+      if (!element || !element.getBoundingClientRect) return false
+      const style = getComputedStyle(element)
+      if (style.display === 'none' || style.visibility === 'hidden') return false
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    } catch (error) {
+      return true
+    }
+  }
+
+  function findVoucherPagerToolbar() {
+    const toolbar = document.querySelector('#toolbarLeft.toolbar-left.viewBtn')
+    if (!toolbar || toolbar.id === 'salary-voucher-check-toolbar') return null
+    if (toolbar.closest && toolbar.closest('#salary-voucher-check-toolbar')) return null
+    const first = toolbar.querySelector('.pageBtn.firstBtn[title="第一张"]')
+    const previous = toolbar.querySelector('.pageBtn.preBtn[title="上一张"]')
+    const next = toolbar.querySelector('.pageBtn.nextBtn[title="下一张"]')
+    const last = toolbar.querySelector('.pageBtn.lastBtn[title="最后一张"]')
+    if (!first || !previous || !next || !last) return null
+    if (!isElementVisible(toolbar) || !isElementVisible(last)) return null
+    return { toolbar, anchor: last }
+  }
+
   function ensureCheckToolbar() {
     let toolbar = document.getElementById('salary-voucher-check-toolbar')
+    if (toolbar && toolbar.tagName !== 'SPAN') {
+      toolbar.remove()
+      toolbar = null
+    }
     if (!toolbar) {
-      toolbar = document.createElement('div')
+      toolbar = document.createElement('span')
       toolbar.id = 'salary-voucher-check-toolbar'
       document.body.appendChild(toolbar)
     }
+    const pager = findVoucherPagerToolbar()
+    if (pager && pager.anchor && pager.anchor.parentElement) {
+      toolbar.style.cssText = [
+        'display:inline-flex',
+        'align-items:center',
+        'gap:8px',
+        'margin-left:8px',
+        'white-space:nowrap',
+        'vertical-align:middle',
+        'font-family:Microsoft YaHei,Arial,sans-serif'
+      ].join(';')
+      if (toolbar.parentElement !== pager.anchor.parentElement || toolbar.previousElementSibling !== pager.anchor) {
+        pager.anchor.insertAdjacentElement('afterend', toolbar)
+      }
+      return toolbar
+    }
     toolbar.style.cssText = [
-      'position:fixed',
-      'left:18px',
-      'top:18px',
-      'z-index:2147483647',
-      'display:flex',
+      'display:none',
       'align-items:center',
       'gap:8px',
       'font-family:Microsoft YaHei,Arial,sans-serif'
