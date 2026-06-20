@@ -12,7 +12,9 @@ const VOUCHER_MENUID = '227b6262406c4afb836d98abe98d4f85'
 const VOUCHER_IMPORT_PARAM = {
   modelType: '29',
   displayMode: '0',
-  currentModelId: 'c6025c601352431c977b538e99c56c5f',
+  // currentModelId 每次运行时从一体化“凭证导入”页轮询扫描自动取真实值，不再写死。
+  // 旧写法曾写死 c6025c60…，服务端模板被重建后该 ID 失效（2026-06-19 触发“获取导入模板失败！”）。
+  currentModelId: '',
   incrementFlag: '1'
 }
 
@@ -554,11 +556,72 @@ export function buildPushVoucherScript(
     return 3
   }
 
-  async function buildImportParamAttempts(importWin) {
-    var modelCandidates = []
-    var modelSeen = {}
-    scanWindowForModelIds(importWin, 'Import.html', modelCandidates, modelSeen, [])
-    modelCandidates.sort(function (a, b) { return modelCandidateScore(a) - modelCandidateScore(b) })
+  function hasStrongModelCandidate(list) {
+    for (var i = 0; i < list.length; i++) {
+      // score 0 = DOM <option>/<input> 的 value；1 = currentModelId/modelId 命名来源。
+      // 这些才是导入页真正选中的模板；弱来源（页面文本/随机GUID）不足以提前结束轮询。
+      if (modelCandidateScore(list[i]) <= 1) return true
+    }
+    return false
+  }
+
+  function importModelNamePref(name) {
+    // 凭证导入模板优先取名字含“工资/凭证”的（本系统该模板就叫“工资”）；
+    // 防止同 modelType=29 下存在多个模板时选错。
+    var n = String(name || '')
+    return n.indexOf('工资') >= 0 || n.indexOf('凭证') >= 0 ? 0 : 1
+  }
+
+  // 首选来源：直接调一体化“获取导入模板列表”接口拿活模板ID（确定性，不依赖导入页是否被人选过模板）。
+  // 抓包坐实（2026-06-20）：POST /gld-account-server/importModel/getImportModelList?menuid=<MENUID>
+  //   body: menuid=<MENUID>&modelType=29 → data[].id 即 currentModelId（modelType=29 的“工资”模板）。
+  async function fetchImportModelList(fetchFn) {
+    try {
+      var res = await fetchFn('/gld-account-server/importModel/getImportModelList?menuid=' + MENUID, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        body: 'menuid=' + encodeURIComponent(MENUID) + '&modelType=' + encodeURIComponent(IMPORT_PARAM.modelType)
+      })
+      var text = await res.text()
+      var json = text ? JSON.parse(text) : null
+      if (!json || String(json.status_code) !== '0000' || !Array.isArray(json.data)) return []
+      var out = []
+      for (var i = 0; i < json.data.length; i++) {
+        var m = json.data[i]
+        if (!m || !isLikelyModelId(m.id)) continue
+        if (String(m.model_type) !== String(IMPORT_PARAM.modelType)) continue
+        out.push({ id: String(m.id), name: String(m.name || ''), source: 'getImportModelList(' + (m.name || '') + ')' })
+      }
+      out.sort(function (a, b) { return importModelNamePref(a.name) - importModelNamePref(b.name) })
+      return out
+    } catch (e) {
+      return []
+    }
+  }
+
+  async function buildImportParamAttempts(importWin, fetchFn) {
+    // 1) 首选：调接口直接拿活模板ID（最稳，打包应用里也能用）。不再写死，服务端重建模板也能自动跟上。
+    var modelCandidates = await fetchImportModelList(fetchFn)
+
+    // 2) 接口拿不到时，再退回轮询扫描导入页 DOM（仅当导入窗口已被人手动选过模板时才有值）。
+    if (!modelCandidates.length) {
+      var deadline = Date.now() + 20000
+      var announced = false
+      for (;;) {
+        modelCandidates = []
+        var modelSeen = {}
+        scanWindowForModelIds(importWin, 'Import.html', modelCandidates, modelSeen, [])
+        if (hasStrongModelCandidate(modelCandidates)) break
+        if (Date.now() >= deadline) break
+        if (!announced) {
+          announced = true
+          status('⏳ 接口未返回模板，改从导入页读取（异步加载中）...')
+        }
+        await sleep(800)
+      }
+      modelCandidates.sort(function (a, b) { return modelCandidateScore(a) - modelCandidateScore(b) })
+    }
 
     var attempts = []
     var attemptSeen = {}
@@ -568,11 +631,7 @@ export function buildPushVoucherScript(
       addImportAttempt(attempts, attemptSeen, detected, modelCandidates[i].source)
     }
     if (!attempts.length) {
-      // 扫不到模板ID时回退脚本内置模板（2026-06-11 录制证实：手动成功导入用的就是这个 currentModelId）
-      addImportAttempt(attempts, attemptSeen, cloneImportParam(), '内置模板回退')
-    }
-    if (!attempts.length) {
-      throw new Error('未能确定凭证导入模板ID，已停止上传。请手动打开“导入”窗口确认模板后再试。')
+      throw new Error('未能自动识别凭证导入模板ID（getImportModelList 接口与导入页都没读到）。请确认一体化“凭证录入→导入”里存在可用的凭证导入模板后重试。')
     }
     return attempts
   }
@@ -818,7 +877,7 @@ export function buildPushVoucherScript(
       // 旧浏览器 File 构造可能不支持，直接用 blob
       file = blob
     }
-    var attempts = await buildImportParamAttempts(importWin)
+    var attempts = await buildImportParamAttempts(importWin, fetchFn)
     status('凭证导入模板候选：' + attempts.map(function (item) {
       return (item.param.currentModelId || '无模板ID') + '（' + item.source + '）'
     }).join('；'))
