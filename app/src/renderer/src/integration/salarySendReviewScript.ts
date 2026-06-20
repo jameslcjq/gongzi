@@ -333,6 +333,71 @@ export function buildSalarySendReviewScript(options: SalarySendReviewScriptOptio
     return null
   }
 
+  function extractNodeAgencyId(node) {
+    if (!node) return ''
+    var attr = node.attributes || {}
+    var id = node.agency_id || node.agencyId || attr.agency_id || attr.agencyId || node.id || attr.id || ''
+    id = String(id || '')
+    // 单位 agency_id 是 GUID（如 0ba903a0-e6e8-4d29-ab2d-998bf9117568），用它校验，
+    // 避免误把 easyui 树内部序号当成 agency_id。
+    return /^[0-9a-f-]{20,}$/i.test(id) ? id : ''
+  }
+
+  function extractNodeCode(node) {
+    if (!node) return ''
+    var attr = node.attributes || {}
+    var raw = node.CODE || node.code || node.agency_code || node.agencyCode ||
+      attr.CODE || attr.code || attr.agency_code ||
+      node.CODENAME || node.text || node.name || ''
+    return normalizeCode(raw)
+  }
+
+  // 直接调一体化单位列表接口拿【系统设置单位】的真实 agency_id（确定性，不依赖单位树是否渲染好）。
+  // 抓包坐实（2026-06-20）：GET /sal-query-pro-server/salaryQueryController/getAllAgencyHN?ele_code=Agency&judge=1&menuid=...
+  //   → data[]，每项 CODE=单位编码、id=GUID agency_id、NAME/CODENAME=名称；status_code 可能 0000/1001（加载成功）。
+  async function fetchAgencyList() {
+    try {
+      var resp = await requestJson('GET', withMenu('/sal-query-pro-server/salaryQueryController/getAllAgencyHN?ele_code=Agency&judge=1'))
+      var data = resp && resp.data
+      if (!Array.isArray(data)) return []
+      var out = []
+      for (var i = 0; i < data.length; i++) {
+        var item = data[i] || {}
+        var id = String(item.id || item.ID || '')
+        if (!/^[0-9a-f-]{20,}$/i.test(id)) continue
+        out.push({
+          id: id,
+          code: normalizeCode(item.CODE || item.code || item.CODENAME),
+          name: compactText(item.NAME || item.name || item.CODENAME || '')
+        })
+      }
+      return out
+    } catch (error) {
+      return []
+    }
+  }
+
+  // 多单位账号必须【编码精确匹配】，绝不模糊——避免 019100 误命中 019052 等相近单位。
+  function pickConfiguredAgency(list, requiredCode, requiredName) {
+    var reqCode = normalizeCode(requiredCode)
+    if (reqCode) {
+      var byCode = list.filter(function (a) { return a.code && a.code === reqCode })
+      if (byCode.length === 1) return { agency: byCode[0], how: '编码精确匹配 ' + reqCode }
+      if (byCode.length > 1) {
+        return { error: '系统设置单位编码 ' + reqCode + ' 在一体化匹配到多个单位，无法确定，已停止自动送审。' }
+      }
+    }
+    var reqName = normalizeText(requiredName)
+    if (reqName) {
+      var byName = list.filter(function (a) { return normalizeText(a.name) === reqName })
+      if (byName.length === 1) return { agency: byName[0], how: '名称精确匹配' }
+      if (byName.length > 1) {
+        return { error: '系统设置单位名称在一体化匹配到多个单位，请用编码区分，已停止自动送审。' }
+      }
+    }
+    return {}
+  }
+
   async function resolveAgency(doc) {
     var session = await loadUserSession()
     var requiredCode = configuredUnitCode()
@@ -340,21 +405,52 @@ export function buildSalarySendReviewScript(options: SalarySendReviewScriptOptio
     var sessionCode = normalizeCode(session.orgCode || session.userCode)
     var userCode = String(session.userCode || '')
     if (requiredCode) {
-      var expectedKey = requiredCode + '-0101'
-      if (userCode && userCode !== expectedKey) {
-        throw new Error('当前一体化登录 Key 是 ' + userCode + '，系统设置单位要求 ' + expectedKey + '。为避免送错单位，已停止自动送审。')
+      // 支持“财政局/代管账号管多单位”：登录号可能 ≠ 系统设置单位号（如登录 019052 代管 019100）。
+      // 1) 首选：调单位列表接口，按编码精确匹配系统设置单位，用它的 GUID agency_id。
+      //    确定性、不依赖单位树渲染，多单位账号也稳；下游 loadBatches/审核全按 agency_id 走。
+      var picked = pickConfiguredAgency(await fetchAgencyList(), requiredCode, requiredName)
+      if (picked.error) throw new Error(picked.error)
+      if (picked.agency) {
+        try { selectConfiguredAgencyInTree(doc) } catch (error) {}
+        trace('单位列表' + (picked.how || '匹配') + '：agency_id=' + picked.agency.id + '（' + picked.agency.name + '）')
+        return {
+          id: picked.agency.id,
+          code: requiredCode || picked.agency.code,
+          name: requiredName || picked.agency.name || String(session.orgName || '')
+        }
       }
-      if (session.orgCode && normalizeCode(session.orgCode) !== requiredCode) {
-        throw new Error('当前一体化登录单位是 ' + session.orgCode + '，系统设置单位是 ' + requiredCode + '。为避免送错单位，已停止自动送审。')
+      // 2) 接口拿不到时退回单位树（DOM）——仍要求节点编码与系统设置单位【精确一致】。
+      var matchedNode = selectConfiguredAgencyInTree(doc)
+      var matchedId = extractNodeAgencyId(matchedNode)
+      var matchedCode = extractNodeCode(matchedNode)
+      if (matchedNode && matchedId && matchedCode === requiredCode) {
+        trace('单位树编码精确选中 ' + matchedCode + '，agency_id=' + matchedId)
+        return {
+          id: matchedId,
+          code: requiredCode,
+          name: requiredName || compactText(matchedNode.text || matchedNode.name) || String(session.orgName || '')
+        }
       }
-      var matched = selectConfiguredAgencyInTree(doc)
-      if (matched) trace('已按系统设置匹配一体化单位：' + compactText(matched.text || matched.name || requiredCode))
-      if (!session.orgId) throw new Error('未读取到当前单位 agency_id，已停止自动送审。')
-      return {
-        id: String(session.orgId),
-        code: requiredCode,
-        name: requiredName || String(session.orgName || '')
+      // 3) 退回“登录号本身就是该单位”（一机一单位老路径）。
+      var loginIsConfiguredUnit =
+        normalizeCode(session.orgCode) === requiredCode ||
+        normalizeCode(session.userCode) === requiredCode ||
+        userCode === requiredCode + '-0101'
+      if (loginIsConfiguredUnit) {
+        if (!session.orgId) throw new Error('未读取到当前单位 agency_id，已停止自动送审。')
+        return {
+          id: String(session.orgId),
+          code: requiredCode,
+          name: requiredName || String(session.orgName || '')
+        }
       }
+      // 4) 单位列表、单位树、登录号都没能定位到系统设置单位 → 拦，绝不送错。
+      throw new Error(
+        '系统设置单位是 ' + requiredCode + (requiredName ? '（' + requiredName + '）' : '') +
+        '，但在当前登录号(' + (userCode || session.orgCode || '未知') +
+        ')可访问的一体化单位里没定位到它。为避免送错单位，已停止自动送审。' +
+        '请确认本机单位设置正确、且该登录号有权访问该单位。'
+      )
     }
     var selectedCode = getSelectedAgencyCode(doc)
     var selected = getSelectedAgencyFromEasyui(doc)
