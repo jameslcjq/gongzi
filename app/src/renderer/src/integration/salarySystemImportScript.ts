@@ -90,20 +90,59 @@ export function buildSalarySystemImportScript(options: SalarySystemImportScriptO
     return await res.json()
   }
 
+  function normalizeAgencyItem(item) {
+    item = item || {}
+    return {
+      agency_id: String(item.id || item.ID || item.agency_id || item.agencyId || ''),
+      agency_code: String(item.CODE || item.code || item.agency_code || item.agencyCode || ''),
+      agency_name: String(item.NAME || item.name || item.CODENAME || item.agency_name || item.agencyName || '')
+    }
+  }
+
+  function normalizeSessionAgency(data) {
+    if (!data || typeof data !== 'object') return null
+    var rawCode = data.agency_code || data.agencyCode || data.orgCode || data.org_code ||
+      data.budgetUnitCode || data.unitCode || data.userCode || data.code || ''
+    var agency = {
+      agency_id: String(data.agency_id || data.agencyId || data.orgId || data.org_id ||
+        data.belongOrgId || data.belong_org_id || ''),
+      agency_code: String(rawCode || '').replace(/-0101$/i, ''),
+      agency_name: String(data.agency_name || data.agencyName || data.orgName || data.org_name ||
+        data.unitName || data.name || '')
+    }
+    return (agency.agency_id || agency.agency_code || agency.agency_name) ? agency : null
+  }
+
+  async function fetchSessionAgency() {
+    var urls = [
+      '/sal-salary-pro-server/grpSalaryController/getCurrenetSession?menuid=' + MENUID,
+      '/framework-engin2/userSession/user',
+      '/new-framework-engin2/userSession/user?time=' + Date.now()
+    ]
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        var json = await fetchJson(urls[i], { credentials: 'include' })
+        var data = json && (json.data || json.user || json)
+        var agency = normalizeSessionAgency(data)
+        if (agency) return agency
+      } catch (error) {}
+    }
+    return null
+  }
+
   async function discoverAgency() {
     var json = await fetchJson(
       '/sal-query-pro-server/salaryQueryController/getAllAgencyHN?ele_code=Agency&judge=1&menuid=' + MENUID,
       { credentials: 'include' }
     )
     var raw = (json && json.data) || []
-    var list = raw.map(function (item) {
-      return {
-        agency_id: String(item.id || item.ID || ''),
-        agency_code: String(item.CODE || item.code || ''),
-        agency_name: String(item.NAME || item.name || item.CODENAME || '')
-      }
-    }).filter(function (item) { return !!item.agency_id })
-    if (!list.length) throw new Error('未读取到工资单位列表，请先进入工资信息维护页面后再试')
+    var list = raw.map(normalizeAgencyItem).filter(function (item) { return !!item.agency_id })
+    if (!list.length) {
+      var sessionAgency = await fetchSessionAgency()
+      if (sessionAgency && sessionAgency.agency_id) return sessionAgency
+      throw new Error('未发现单位选择，且未读取到当前登录单位 agency_id，无法导入工资')
+    }
+    if (list.length === 1) return list[0]
 
     var filterCode = normalizeCode(FILTER_UNIT_CODE)
     if (filterCode) {

@@ -760,10 +760,11 @@ async function runOneStep(
     // 工资走后台接口推送（不跳转页面），明确告知用户，避免被当成"没反应"。
     ElMessage.info(`【${name}】后台接口推送（无需跳转页面）：${step.label}（${step.fileName}）`)
     let filterUnitName = ''
+    let filterUnitCode = ''
     try {
       const unit = await window.salaryApi.getUnitSettings()
       filterUnitName = (unit.unitFullName || '').trim()
-      const filterUnitCode = (unit.unitImportCode || '').trim()
+      filterUnitCode = (unit.unitImportCode || '').trim()
       const r = (await execStepScript(
         wv,
         buildSalarySystemImportScript({
@@ -787,7 +788,7 @@ async function runOneStep(
       }
       return
     } catch (error) {
-      if (filterUnitName) throw error
+      if (filterUnitName || filterUnitCode) throw error
       console.warn('读取单位设置失败，继续由一体化单位列表判断', error)
     }
     const r = (await execStepScript(
@@ -1126,7 +1127,7 @@ async function runAutomationSendReviewStep(
     readAutomationUnit()
   ])
   if (!unit.code) {
-    throw new Error('系统设置中未配置单位编码，已停止自动送审。')
+    logPush(runId, 'warn', '自动送审', '系统设置未配置单位编码，按当前登录单单位继续')
   }
 
   const result = (await execStepScript(

@@ -92,12 +92,12 @@ export function buildPushVoucherScript(
   }
 
   function accountName(account) {
-    return String((account && (account.name || account.text || account.agency_name)) || '')
+    return String((account && (account.name || account.text || account.agency_name || account.acctSetName)) || '')
   }
 
   function accountLabel(account) {
     if (!account) return ''
-    return [account.code || account.agency_code || '', accountName(account)].filter(Boolean).join(' ')
+    return [account.code || account.agency_code || account.acctSetCode || '', accountName(account)].filter(Boolean).join(' ')
   }
 
   function accountCodeMatchesTarget(account, expectedCode) {
@@ -185,16 +185,36 @@ export function buildPushVoucherScript(
 
   // 切换到本机单位对应的账套。返回 { ok:true, account, switched } 或 { ok:false, reason }。
   async function ensureTargetAcctSet(fetchFn) {
-    if (!TARGET_UNIT.unitImportCode && !TARGET_UNIT.unitFullName) {
-      return { ok: false, reason: '未配置本机单位（单位设置为空），无法确定目标账套，已中止导入。' }
-    }
+    var sess = await readUserSession(fetchFn)
     var sets = await readAcctSetList(fetchFn)
     if (!sets || !sets.length) {
-      return { ok: false, reason: '读取账套列表失败（userAcctSets 无数据），已中止导入。' }
+      if (sess && (sess.acctSetId || sess.acctSetName)) {
+        return {
+          ok: true,
+          account: { id: sess.acctSetId, name: sess.acctSetName },
+          switched: false,
+          singleUnitFallback: true
+        }
+      }
+      return { ok: false, reason: '读取账套列表失败（userAcctSets 无数据），且未读取到当前账套，已中止导入。' }
     }
     var target = null
-    for (var i = 0; i < sets.length; i++) {
-      if (accountMatchesTarget(sets[i])) { target = sets[i]; break }
+    if (TARGET_UNIT.unitImportCode || TARGET_UNIT.unitFullName) {
+      for (var i = 0; i < sets.length; i++) {
+        if (accountMatchesTarget(sets[i])) { target = sets[i]; break }
+      }
+    }
+    if (!target && sets.length === 1) {
+      target = sets[0]
+      status('账套列表只有一个，按单单位账号直接使用：' + accountLabel(target))
+    }
+    if (!target && sess && sess.acctSetId) {
+      for (var j = 0; j < sets.length; j++) {
+        if (String(sets[j].id || sets[j].acctSetId || '') === sess.acctSetId) {
+          target = sets[j]
+          break
+        }
+      }
     }
     if (!target) {
       var avail = sets.map(function (s) { return accountLabel(s) }).filter(Boolean).join('、')
@@ -203,12 +223,14 @@ export function buildPushVoucherScript(
         reason: '账套列表里没有与本单位（' + targetUnitLabel() + '）匹配的账套；可选：' + avail + '。已中止导入。'
       }
     }
-    var targetId = String(target.id)
-    var sess = await readUserSession(fetchFn)
+    var targetId = String(target.id || target.acctSetId || '')
     if (!sess || !sess.userId) {
+      if (sets.length === 1) {
+        return { ok: true, account: target, switched: false, singleUnitFallback: true }
+      }
       return { ok: false, reason: '读取当前会话失败（userSession/user），无法切换账套，已中止导入。' }
     }
-    if (sess.acctSetId && sess.acctSetId === targetId) {
+    if (!targetId || (sess.acctSetId && sess.acctSetId === targetId)) {
       return { ok: true, account: target, switched: false }
     }
     status('🔄 切换账套：' + (sess.acctSetName || sess.acctSetId || '当前') + ' → ' + accountLabel(target) + ' ...')

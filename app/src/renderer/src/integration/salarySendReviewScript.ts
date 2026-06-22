@@ -379,6 +379,7 @@ export function buildSalarySendReviewScript(options: SalarySendReviewScriptOptio
 
   // 多单位账号必须【编码精确匹配】，绝不模糊——避免 019100 误命中 019052 等相近单位。
   function pickConfiguredAgency(list, requiredCode, requiredName) {
+    if (list.length === 1) return { agency: list[0], how: '单位列表只有一个单位，直接使用' }
     var reqCode = normalizeCode(requiredCode)
     if (reqCode) {
       var byCode = list.filter(function (a) { return a.code && a.code === reqCode })
@@ -408,7 +409,8 @@ export function buildSalarySendReviewScript(options: SalarySendReviewScriptOptio
       // 支持“财政局/代管账号管多单位”：登录号可能 ≠ 系统设置单位号（如登录 019052 代管 019100）。
       // 1) 首选：调单位列表接口，按编码精确匹配系统设置单位，用它的 GUID agency_id。
       //    确定性、不依赖单位树渲染，多单位账号也稳；下游 loadBatches/审核全按 agency_id 走。
-      var picked = pickConfiguredAgency(await fetchAgencyList(), requiredCode, requiredName)
+      var agencyList = await fetchAgencyList()
+      var picked = pickConfiguredAgency(agencyList, requiredCode, requiredName)
       if (picked.error) throw new Error(picked.error)
       if (picked.agency) {
         try { selectConfiguredAgencyInTree(doc) } catch (error) {}
@@ -429,6 +431,14 @@ export function buildSalarySendReviewScript(options: SalarySendReviewScriptOptio
           id: matchedId,
           code: requiredCode,
           name: requiredName || compactText(matchedNode.text || matchedNode.name) || String(session.orgName || '')
+        }
+      }
+      if (!agencyList.length && !matchedNode && session.orgId) {
+        trace('未发现单位选择/单位列表，按当前登录单单位送审：agency_id=' + session.orgId)
+        return {
+          id: String(session.orgId),
+          code: normalizeCode(session.orgCode || session.userCode) || requiredCode,
+          name: String(session.orgName || '') || requiredName
         }
       }
       // 3) 退回“登录号本身就是该单位”（一机一单位老路径）。

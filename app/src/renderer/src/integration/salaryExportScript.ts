@@ -120,6 +120,47 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     } catch (e) {}
   }
 
+  function normalizeAgencyItem(a) {
+    a = a || {}
+    return {
+      agency_id: String(a.id || a.ID || a.agency_id || a.agencyId || ''),
+      agency_code: String(a.CODE || a.code || a.agency_code || a.agencyCode || ''),
+      agency_name: String(a.NAME || a.name || a.CODENAME || a.agency_name || a.agencyName || '')
+    }
+  }
+
+  function normalizeSessionAgency(data) {
+    if (!data || typeof data !== 'object') return null
+    const rawCode = data.agency_code || data.agencyCode || data.orgCode || data.org_code ||
+      data.budgetUnitCode || data.unitCode || data.userCode || data.code || ''
+    const agency = {
+      agency_id: String(data.agency_id || data.agencyId || data.orgId || data.org_id ||
+        data.belongOrgId || data.belong_org_id || ''),
+      agency_code: String(rawCode || '').replace(/-0101$/i, ''),
+      agency_name: String(data.agency_name || data.agencyName || data.orgName || data.org_name ||
+        data.unitName || data.name || '')
+    }
+    return agency.agency_id ? agency : null
+  }
+
+  async function fetchSessionAgency() {
+    const urls = [
+      '/sal-salary-pro-server/grpSalaryController/getCurrenetSession?menuid=' + MENUID,
+      '/framework-engin2/userSession/user',
+      '/new-framework-engin2/userSession/user?time=' + Date.now()
+    ]
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        const res = await fetch(urls[i], { credentials: 'include' })
+        if (!res.ok) continue
+        const json = await res.json()
+        const agency = normalizeSessionAgency(json && (json.data || json.user || json))
+        if (agency) return agency
+      } catch (e) {}
+    }
+    return null
+  }
+
   // -------------------------------------------------------------------------
   // 1) 发现"我能管的所有单位"
   // -------------------------------------------------------------------------
@@ -131,13 +172,7 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
     if (!res.ok) return { ok: false, http: res.status, list: [] }
     const j = await res.json()
     const raw = (j && j.data) || []
-    const list = raw.map(function (a) {
-      return {
-        agency_id: String(a.id || a.ID || ''),
-        agency_code: String(a.CODE || a.code || ''),
-        agency_name: String(a.NAME || a.name || a.CODENAME || '')
-      }
-    }).filter(function (a) { return !!a.agency_id })
+    const list = raw.map(normalizeAgencyItem).filter(function (a) { return !!a.agency_id })
     return { ok: true, list: list }
   }
 
@@ -150,6 +185,13 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
       await sleep(400)
       r = await fetchAgencies()
       if (!r.ok) return { ok: false, reason: 'getAllAgencyHN HTTP ' + r.http + '（预热后仍失败）' }
+    }
+    if (!r.list.length) {
+      const agency = await fetchSessionAgency()
+      if (agency) {
+        status('🔧 未发现单位选择，按当前登录单单位导出：' + [agency.agency_code, agency.agency_name].filter(Boolean).join(' '))
+        return { ok: true, agencies: [agency], fromSession: true }
+      }
     }
     return { ok: true, agencies: r.list }
   }
@@ -312,7 +354,9 @@ export function buildSalaryExportScript(options: SalaryExportScriptOptions): str
 
     // 单位过滤：预算单位编码优先，单位全称兜底。多单位账号必须唯一命中，避免误导出其它单位。
     let agencies = agDisc.agencies
-    if (FILTER_UNIT_CODE) {
+    if (agencies.length === 1) {
+      status('🔍 只有一个单位，跳过单位匹配：' + [agencies[0].agency_code, agencies[0].agency_name].filter(Boolean).join(' '))
+    } else if (FILTER_UNIT_CODE) {
       const codeFiltered = agencies.filter(function (a) {
         return normalizeCode(a.agency_code) === normalizeCode(FILTER_UNIT_CODE) ||
           normalizeCode(a.agency_code + a.agency_name).indexOf(normalizeCode(FILTER_UNIT_CODE)) >= 0

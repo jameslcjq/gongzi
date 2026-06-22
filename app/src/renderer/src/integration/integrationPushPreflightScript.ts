@@ -110,10 +110,73 @@ export function buildIntegrationPushPreflightScript(
     return { ok: true, agencies: agencies }
   }
 
+  function normalizeSessionAgency(data) {
+    if (!data || typeof data !== 'object') return null
+    var rawCode = data.agency_code || data.agencyCode || data.orgCode || data.org_code ||
+      data.budgetUnitCode || data.unitCode || data.userCode || data.code || ''
+    var code = String(rawCode || '').replace(/-0101$/i, '')
+    var agency = {
+      agency_id: String(data.agency_id || data.agencyId || data.orgId || data.org_id ||
+        data.belongOrgId || data.belong_org_id || ''),
+      agency_code: code,
+      agency_name: String(data.agency_name || data.agencyName || data.orgName || data.org_name ||
+        data.unitName || data.name || ''),
+      single_unit_fallback: true
+    }
+    return (agency.agency_id || agency.agency_code || agency.agency_name) ? agency : null
+  }
+
+  async function fetchSessionAgency() {
+    var urls = [
+      '/sal-salary-pro-server/grpSalaryController/getCurrenetSession?menuid=' + SALARY_MENUID,
+      '/framework-engin2/userSession/user',
+      '/new-framework-engin2/userSession/user?time=' + Date.now()
+    ]
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        var result = await fetchJson(urls[i], { credentials: 'include' })
+        if (!result.ok) continue
+        var data = result.json && (result.json.data || result.json.user || result.json)
+        var agency = normalizeSessionAgency(data)
+        if (agency) return agency
+      } catch (error) {}
+    }
+    return null
+  }
+
+  async function discoverAgencies() {
+    var agencyResult = await fetchAgencies()
+    if (agencyResult.ok && agencyResult.agencies.length) return agencyResult
+    await preheatSalaryContext()
+    var retried = await fetchAgencies()
+    if (retried.ok && retried.agencies.length) return retried
+    var sessionAgency = await fetchSessionAgency()
+    if (sessionAgency) {
+      return {
+        ok: true,
+        agencies: [sessionAgency],
+        fromSession: true
+      }
+    }
+    return retried.ok ? retried : agencyResult
+  }
+
+  function agencyLabel(agency) {
+    return [agency && agency.agency_code || '', agency && agency.agency_name || ''].filter(Boolean).join(' ') || '当前登录单位'
+  }
+
   function matchAgency(agencies) {
     var expectedCode = normalizeCode(OPTIONS.unitImportCode)
     var expectedName = normalize(OPTIONS.unitFullName)
     var details = []
+    if (agencies.length === 1) {
+      var onlyAgency = agencies[0]
+      details.push(
+        (onlyAgency.single_unit_fallback ? '未发现单位选择/单位列表，按当前登录单单位：' : '单位列表只有一个单位，直接使用：') +
+          agencyLabel(onlyAgency)
+      )
+      return { ok: true, agency: onlyAgency, details: details }
+    }
     if (!expectedCode && !expectedName) {
       return {
         ok: false,
@@ -176,6 +239,10 @@ export function buildIntegrationPushPreflightScript(
     var units = Array.isArray(OPTIONS.insuranceUnits) ? OPTIONS.insuranceUnits : []
     var details = []
     var bad = []
+    if (agency && agency.single_unit_fallback && !normalizeCode(agency.agency_code) && !normalize(agency.agency_name)) {
+      if (units.length) details.push('未发现单位选择，按单单位账号跳过保险导入文件单位匹配')
+      return { ok: true, details: details }
+    }
     for (var i = 0; i < units.length; i++) {
       var unit = units[i] || {}
       var unitCode = normalizeCode(unit.code)
@@ -200,6 +267,9 @@ export function buildIntegrationPushPreflightScript(
 
   async function assertSalaryModule(agency) {
     if (!OPTIONS.needsSalary) return { ok: true, details: [] }
+    if (!agency.agency_id) {
+      return { ok: true, details: ['未发现单位选择，且当前登录单位未返回 agency_id，已跳过工资批次预检'] }
+    }
     var result = await fetchJson('/sal-config-pro-server/salaryBatchController/getBatchAgency?menuid=' + SALARY_MENUID, {
       method: 'POST',
       credentials: 'include',
@@ -252,13 +322,9 @@ export function buildIntegrationPushPreflightScript(
 
   try {
     await preheatSalaryContext()
-    var agencyResult = await fetchAgencies()
+    var agencyResult = await discoverAgencies()
     if (!agencyResult.ok) {
       return fail('无法读取一体化单位列表，请确认已登录一体化系统，且账号有工资单位权限', [agencyResult.reason])
-    }
-    if (!agencyResult.agencies.length) {
-      await preheatSalaryContext()
-      agencyResult = await fetchAgencies()
     }
     if (!agencyResult.ok || !agencyResult.agencies.length) {
       return fail('未读取到一体化可访问单位，请先登录一体化并进入工资模块后再推送', [], agencyResult.agencies || [])
@@ -267,7 +333,11 @@ export function buildIntegrationPushPreflightScript(
     var agencyMatch = matchAgency(agencyResult.agencies)
     if (!agencyMatch.ok) return fail(agencyMatch.message, agencyMatch.details, agencyResult.agencies)
 
-    var details = ['已登录一体化：读取到 ' + agencyResult.agencies.length + ' 个可访问单位']
+    var details = [
+      agencyResult.fromSession
+        ? '已登录一体化：未发现单位选择，按当前登录单单位继续'
+        : '已登录一体化：读取到 ' + agencyResult.agencies.length + ' 个可访问单位'
+    ]
       .concat(agencyMatch.details || [])
 
     var insuranceCheck = assertInsuranceUnitsMatch(agencyMatch.agency)
