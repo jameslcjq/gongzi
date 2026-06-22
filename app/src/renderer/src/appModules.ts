@@ -8,7 +8,7 @@ export type ModuleGroup = {
 }
 
 // 内网执行端版隐藏的模块：纯数据/报表管理类入口 + 工资业务页。
-// 导入交换包、推送、月结、生成回执已全部搬到「一体化对接」工具栏，
+// 导入交换包、推送、月结、生成回执已全部搬到「一体化系统」工具栏，
 // 执行端只保留 'integration' 一个模块，收敛成单页。
 const runnerHiddenModuleKeys = new Set([
   'integrated',
@@ -22,7 +22,7 @@ const runnerHiddenModuleKeys = new Set([
 ])
 
 const baseModules: ModuleGroup[] = [
-  { key: 'integration', label: '一体化对接', tables: [] },
+  { key: 'integration', label: '一体化系统', tables: [] },
   { key: 'integrated', label: '工资数据', tables: ['在职工资', '退休工资', '其他工资'] },
   { key: 'payroll', label: '工资业务', tables: [] },
   { key: 'budget', label: '预算', tables: ['预算在职', '预算退休', '预算其他'] },

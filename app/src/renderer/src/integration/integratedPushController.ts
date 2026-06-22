@@ -2,7 +2,7 @@
 //
 // 原本内嵌在 MonthlyPayrollPage.vue 里，现抽出为独立模块，供两处复用：
 //   - 工资业务页（MonthlyPayrollPage）的历史记录推送按钮（完整版）。
-//   - 一体化对接页（IntegratedPortalPage）工具栏的推送按钮（内网执行端）。
+//   - 一体化系统页（IntegratedPortalPage）工具栏的推送按钮（内网执行端）。
 // 同一份组装逻辑，永不分叉。
 
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -90,10 +90,10 @@ export function enqueueIntegratedPush(
     return
   }
   ElMessage.info(
-    `已准备 ${steps.length} 步${label}（${stepHints.join('、')}），正在跳转到"一体化对接"...`
+    `已准备 ${steps.length} 步${label}（${stepHints.join('、')}），正在跳转到"一体化系统"...`
   )
   appendPushLogLine(
-    `==== 触发${label}：准备 ${steps.length} 步（${stepHints.join('、')}），切换到一体化对接 ====`
+    `==== 触发${label}：准备 ${steps.length} 步（${stepHints.join('、')}），切换到一体化系统 ====`
   )
   requestSwitchToIntegration()
   const queuedSteps = steps.slice()

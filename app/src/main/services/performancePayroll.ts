@@ -301,7 +301,7 @@ async function loadHistoryAgencies(portalSession: Session): Promise<HistoryAgenc
 }
 
 function chooseAgency(agencies: HistoryAgency[], unitName: string): HistoryAgency {
-  if (agencies.length === 0) throw new Error('一体化历史工资没有返回可访问单位，请先在“一体化对接”登录')
+  if (agencies.length === 0) throw new Error('一体化历史工资没有返回可访问单位，请先在“一体化系统”登录')
   const normalizedUnit = text(unitName)
   if (!normalizedUnit) return agencies[0]
   const matched = agencies.find((agency) =>

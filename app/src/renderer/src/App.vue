@@ -1345,7 +1345,7 @@ onMounted(() => {
     if (document.visibilityState === 'hidden') return
     void refreshExchangeStatus()
   }, 10000)
-  // 注册"切换到一体化对接"回调，供 MonthlyPayrollPage 推送队列跳转用
+  // 注册"切换到一体化系统"回调，供 MonthlyPayrollPage 推送队列跳转用
   setSwitchToIntegration(() => {
     activeModuleKey.value = 'integration'
   })

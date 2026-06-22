@@ -2,7 +2,7 @@
 //
 // 原本内嵌在 MonthlyPayrollPage.vue，现抽出供两处复用：
 //   - 工资业务页的"导入内网业务包"按钮（完整版）。
-//   - 一体化对接页工具栏的"导入交换包"按钮（内网执行端）。
+//   - 一体化系统页工具栏的"导入交换包"按钮（内网执行端）。
 // 复用主程序已有的 exchange 导入能力（选文件 → 预览 sha256 校验 → 确认 → 入库）。
 
 import { ElMessage, ElMessageBox } from 'element-plus'

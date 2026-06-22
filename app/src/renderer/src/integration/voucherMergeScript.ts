@@ -161,7 +161,7 @@ ${pdfLibBundle}
 
     try {
       if (!window.PDFLib || !window.PDFLib.PDFDocument) {
-        alert('PDF 合并库加载失败，请重新打开一体化对接页后再试。')
+        alert('PDF 合并库加载失败，请重新打开一体化系统页后再试。')
         return { ok: false, message: 'pdf-lib missing' }
       }
 

@@ -2,7 +2,7 @@
 //
 // 原本内嵌在 MonthlyPayrollPage.vue，现抽出供两处复用：
 //   - 工资业务页历史记录的月结/回执按钮（完整版）。
-//   - 一体化对接页工具栏（内网执行端，隐藏工资业务后由工具栏完成闭环）。
+//   - 一体化系统页工具栏（内网执行端，隐藏工资业务后由工具栏完成闭环）。
 // 均为本地 DB + 文件操作，与一体化 webview 登录状态无关。
 
 import { ElMessage, ElMessageBox } from 'element-plus'
