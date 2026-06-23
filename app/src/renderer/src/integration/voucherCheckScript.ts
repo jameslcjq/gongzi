@@ -20,7 +20,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
   return String.raw`
 ;(() => {
-  const SCRIPT_VERSION = '20260618-period-accounting-check-v10'
+  const SCRIPT_VERSION = '20260623-yearly-accounting-check-v11'
   const OPTIONS = ${JSON.stringify(payload)}
 
   try {
@@ -398,11 +398,9 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
     return uniqueVoucherRows(extractRows(payload), period)
   }
 
-  function completedPeriods() {
-    const currentMonth = new Date().getMonth() + 1
-    const lastClosedMonth = currentMonth - 1
+  function accountingPeriods() {
     const periods = []
-    for (let month = 1; month <= lastClosedMonth; month += 1) periods.push(month)
+    for (let month = 1; month <= 12; month += 1) periods.push(month)
     return periods
   }
 
@@ -927,8 +925,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
   }
 
   async function checkClosedPeriodsAccounting() {
-    const periods = completedPeriods()
-    if (!periods.length) throw new Error('当前月份没有已结束月份可检查。')
+    const periods = accountingPeriods()
 
     const monthResults = []
     for (let p = 0; p < periods.length; p += 1) {
@@ -940,6 +937,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
         rows = cachedVoucherRowsForPeriod(period)
         if (!rows.length) throw error
       }
+      if (!rows.length) continue
 
       const results = []
       for (let i = 0; i < rows.length; i += 1) {
@@ -967,6 +965,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
       }
       monthResults.push({ period, rows, results, balanceRows: [], balanceIssues: [] })
     }
+    if (!monthResults.length) throw new Error('1-12月没有读取到可检查的凭证。')
 
     for (let p = 0; p < monthResults.length; p += 1) {
       const monthResult = monthResults[p]
@@ -986,7 +985,10 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
       }
     }
 
-    return { periods, monthResults }
+    return {
+      periods: monthResults.map(function (monthResult) { return monthResult.period }),
+      monthResults
+    }
   }
 
   function readSelectedVoucherRow() {
@@ -1352,9 +1354,20 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
 
     const expectedFunctionCode = normalizeCode(OPTIONS.functionCode)
     const retiredFunctionCode = normalizeCode(OPTIONS.retiredFunctionCode || '2210202') || '2210202'
+    function isRetiredRentDetail(detail) {
+      const text = compactText([
+        detail.summary,
+        detail.assistantSummary,
+        detail.budgetProjectName
+      ].join(' '))
+      return text.indexOf('退休房补') >= 0 ||
+        text.indexOf('退休提租补贴') >= 0 ||
+        text.indexOf('退休人员提租补贴') >= 0 ||
+        (text.indexOf('退休') >= 0 && (text.indexOf('房补') >= 0 || text.indexOf('提租') >= 0))
+    }
     details.forEach(function (detail) {
       if (!detail.expFuncCode) return
-      var isRetiredRentProject = compactText(detail.budgetProjectName).indexOf('退休提租补贴') >= 0
+      var isRetiredRentProject = isRetiredRentDetail(detail)
       var targetFunctionCode = isRetiredRentProject ? retiredFunctionCode : expectedFunctionCode
       if (!targetFunctionCode) return
       if (detail.expFuncCode === targetFunctionCode) return
@@ -1363,7 +1376,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
           issues,
           'warn',
           '支出功能分类',
-          detailLabel(detail) + '预算项目为“' + detail.budgetProjectName + '”，支出功能分类为 ' +
+          detailLabel(detail) + '识别为退休房补分录，支出功能分类为 ' +
             detail.expFuncCode + (detail.expFuncName ? ' ' + detail.expFuncName : '') + '，应为 ' + targetFunctionCode + '。',
           '退休提租补贴必须使用 2210202，不按系统设置中的普通支出功能分类校验。'
         )
@@ -1797,7 +1810,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
       '<button id="salary-voucher-check-close" style="border:1px solid #cbd5e1;background:#fff;border-radius:4px;font-size:12px;line-height:1;cursor:pointer;color:#475569;padding:4px 8px;">隐藏</button>' +
       '</div>' +
       '<div style="padding:12px 14px;">' +
-      '<div style="font-weight:600;margin-bottom:4px;">已结束月份逐月检查</div>' +
+      '<div style="font-weight:600;margin-bottom:4px;">全年凭证逐月检查</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;color:#64748b;margin-bottom:10px;">' +
       '<span>月份 ' + escapeHtml(periodText || '-') + '</span>' +
       '<span>凭证 ' + escapeHtml(String(voucherCount)) + ' 张</span>' +
@@ -1854,7 +1867,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
   async function startCheck() {
     if (state.running) return
     state.running = true
-    renderLoading('正在读取已结束月份凭证列表...')
+    renderLoading('正在读取全年凭证列表...')
     try {
       const report = await checkClosedPeriodsAccounting()
       renderAccountingResult(report)
@@ -1889,7 +1902,7 @@ export function buildVoucherCheckScript(options: VoucherCheckScriptOptions = {})
       btn.id = 'salary-voucher-check-btn'
       btn.type = 'button'
       btn.innerText = '账务检查'
-      btn.title = '逐月检查已结束月份凭证和余额表'
+      btn.title = '逐月检查全年凭证和余额表'
     }
     btn.style.cssText = [
       'display:inline-flex',
