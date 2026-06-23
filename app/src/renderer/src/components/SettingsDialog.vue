@@ -19,6 +19,7 @@ import type {
 import {
   createDefaultVoucherCheckRuleLibrary,
   normalizeVoucherCheckRuleLibrary,
+  VOUCHER_CHECK_RULE_LIBRARY_VERSION,
   type VoucherBalanceAmountField,
   type VoucherBalanceEquationTarget,
   type VoucherCheckRequiredSubject,
@@ -56,6 +57,7 @@ const retireBatchKind = 'worksheet.retire-active-employee'
 const activeTab = ref('unit')
 const appVersion = ref('dev')
 const voucherRules = ref<VoucherCheckRule[]>([])
+const voucherRuleLibraryVersion = ref(VOUCHER_CHECK_RULE_LIBRARY_VERSION)
 const voucherRulesLoading = ref(false)
 const voucherRulesSaving = ref(false)
 const voucherRulesFileBusy = ref(false)
@@ -484,9 +486,12 @@ async function loadVoucherRules() {
   try {
     const library = await window.salaryApi.getVoucherCheckRuleLibrary()
     voucherRules.value = cloneRule(library.rules)
+    voucherRuleLibraryVersion.value = library.libraryVersion || VOUCHER_CHECK_RULE_LIBRARY_VERSION
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载账务检查规则失败')
-    voucherRules.value = cloneRule(createDefaultVoucherCheckRuleLibrary().rules)
+    const fallback = createDefaultVoucherCheckRuleLibrary()
+    voucherRules.value = cloneRule(fallback.rules)
+    voucherRuleLibraryVersion.value = fallback.libraryVersion
   } finally {
     voucherRulesLoading.value = false
   }
@@ -495,6 +500,7 @@ async function loadVoucherRules() {
 function buildVoucherRuleLibrary(): VoucherCheckRuleLibrary {
   return normalizeVoucherCheckRuleLibrary({
     schemaVersion: 3,
+    libraryVersion: voucherRuleLibraryVersion.value || VOUCHER_CHECK_RULE_LIBRARY_VERSION,
     rules: voucherRules.value,
     updatedAt: new Date().toISOString()
   })
@@ -505,6 +511,7 @@ async function saveVoucherRules() {
   try {
     const saved = await window.salaryApi.setVoucherCheckRuleLibrary(buildVoucherRuleLibrary())
     voucherRules.value = cloneRule(saved.rules)
+    voucherRuleLibraryVersion.value = saved.libraryVersion
     ElMessage.success('账务检查规则已保存')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存账务检查规则失败')
@@ -522,6 +529,7 @@ async function exportVoucherRules() {
       if (!result.canceled) ElMessage.error(result.reason)
       return
     }
+    voucherRuleLibraryVersion.value = result.library.libraryVersion
     ElMessage.success(`规则库已导出：${result.filePath}`)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '导出账务检查规则失败')
@@ -539,6 +547,7 @@ async function importVoucherRules() {
       return
     }
     voucherRules.value = cloneRule(result.library.rules)
+    voucherRuleLibraryVersion.value = result.library.libraryVersion
     ElMessage.success(`规则库已导入：${result.filePath}`)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '导入账务检查规则失败')
@@ -561,6 +570,7 @@ async function resetVoucherRules() {
   try {
     const reset = await window.salaryApi.resetVoucherCheckRuleLibrary()
     voucherRules.value = cloneRule(reset.rules)
+    voucherRuleLibraryVersion.value = reset.libraryVersion
     ElMessage.success('已恢复默认账务检查规则')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '恢复默认规则失败')
@@ -982,7 +992,10 @@ function formatSize(bytes: number): string {
       <el-tab-pane label="账务检查规则" name="voucher-rules">
         <div class="settings-section voucher-rule-toolbar">
           <div>
-            <h4>账务检查规则库</h4>
+            <div class="voucher-rule-heading">
+              <h4>账务检查规则库</h4>
+              <el-tag size="small" effect="plain">v{{ voucherRuleLibraryVersion }}</el-tag>
+            </div>
             <p>规则保存在本机，可导入导出 JSON 文件。保存后重新进入或刷新一体化凭证页面，账务检查会按新规则执行。</p>
           </div>
           <div class="voucher-rule-actions">
@@ -1413,6 +1426,12 @@ function formatSize(bytes: number): string {
 
 .voucher-rule-toolbar {
   margin-bottom: 12px;
+}
+
+.voucher-rule-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .voucher-rule-actions {

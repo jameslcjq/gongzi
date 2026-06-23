@@ -4,6 +4,7 @@ import { getDatabase, get, run } from '../db/connection'
 import {
   createDefaultVoucherCheckRuleLibrary,
   normalizeVoucherCheckRuleLibrary,
+  VOUCHER_CHECK_RULE_LIBRARY_VERSION,
   type VoucherCheckRuleFileResult,
   type VoucherCheckRuleLibrary
 } from '../../shared/voucherCheckRules'
@@ -48,10 +49,11 @@ export async function resetVoucherCheckRuleLibrary(): Promise<VoucherCheckRuleLi
 
 export async function exportVoucherCheckRuleLibrary(): Promise<VoucherCheckRuleFileResult> {
   const library = await readVoucherCheckRuleLibrary()
+  const libraryVersion = cleanFileNamePart(library.libraryVersion || VOUCHER_CHECK_RULE_LIBRARY_VERSION)
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const result = await dialog.showSaveDialog({
     title: '导出账务检查规则库',
-    defaultPath: `账务检查规则库-${stamp}.json`,
+    defaultPath: `账务检查规则库-v${libraryVersion}-${stamp}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
   if (result.canceled || !result.filePath) {
@@ -73,4 +75,8 @@ export async function importVoucherCheckRuleLibrary(): Promise<VoucherCheckRuleF
   const raw = await readFile(result.filePaths[0], 'utf-8')
   const library = await writeVoucherCheckRuleLibrary(normalizeVoucherCheckRuleLibrary(JSON.parse(raw)))
   return { ok: true, filePath: result.filePaths[0], library }
+}
+
+function cleanFileNamePart(value: string): string {
+  return value.replace(/[^0-9A-Za-z._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || VOUCHER_CHECK_RULE_LIBRARY_VERSION
 }

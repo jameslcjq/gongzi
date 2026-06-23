@@ -70,8 +70,11 @@ export type VoucherCheckRule =
   | VoucherFixedAssetCapitalRule
   | VoucherBalanceEquationRule
 
+export const VOUCHER_CHECK_RULE_LIBRARY_VERSION = '1.0.0'
+
 export type VoucherCheckRuleLibrary = {
   schemaVersion: 3
+  libraryVersion: string
   rules: VoucherCheckRule[]
   updatedAt?: string
 }
@@ -88,6 +91,7 @@ const CAPITAL_EXP_ECO_CODES = [
 export function createDefaultVoucherCheckRuleLibrary(): VoucherCheckRuleLibrary {
   return {
     schemaVersion: 3,
+    libraryVersion: VOUCHER_CHECK_RULE_LIBRARY_VERSION,
     rules: [
       {
         id: 'R-BANZHUREN-30107',
@@ -210,22 +214,14 @@ export function normalizeVoucherCheckRuleLibrary(input: unknown): VoucherCheckRu
     ;['R-BALANCE-FISCAL-EXPENSE', 'R-BALANCE-BUDGET-FISCAL', 'R-BALANCE-OTHER-INCOME'].forEach((id) => {
       const defaultRule = defaultRulesById.get(id)
       if (!defaultRule) return
-      const existingIndex = mergedRules.findIndex((rule) => rule.id === id)
-      if (existingIndex >= 0) {
-        const existingRule = mergedRules[existingIndex]
-        mergedRules[existingIndex] = {
-          ...defaultRule,
-          name: existingRule.name || defaultRule.name,
-          enabled: existingRule.enabled,
-          level: existingRule.level
-        }
-      } else {
+      if (!mergedRules.some((rule) => rule.id === id)) {
         mergedRules.push(defaultRule)
       }
     })
   }
   return {
     schemaVersion: 3,
+    libraryVersion: cleanText(source.libraryVersion) || VOUCHER_CHECK_RULE_LIBRARY_VERSION,
     rules: mergedRules,
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : new Date().toISOString()
   }
